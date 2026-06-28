@@ -17,9 +17,11 @@ model User {
   bannerUrl String?
   bio       String?
 
-  watchlist WatchlistItem[]
-  followers Follow[] @relation("followers")
-  following Follow[] @relation("following")
+  watchlist    WatchlistItem[]
+  followers    Follow[] @relation("followers")
+  following    Follow[] @relation("following")
+  notifications Notification[] @relation("userNotifications")
+  triggeredNotifications Notification[] @relation("actorNotifications")
 }
 
 model Follow {
@@ -56,4 +58,18 @@ model CacheItem {
   data      String   // JSON string
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  actorId   String
+  type      String   // e.g., "NEW_FOLLOWER"
+  message   String
+  isRead    Boolean  @default(false)
+  link      String?  // Optional link to navigate to
+  createdAt DateTime @default(now())
+
+  user      User     @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User     @relation("actorNotifications", fields: [actorId], references: [id], onDelete: Cascade)
 }

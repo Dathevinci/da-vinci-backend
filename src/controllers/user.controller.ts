@@ -40,8 +40,8 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
       where: { id: req.params.id as string },
       include: { 
         watchlist: true,
-        followers: true,
-        following: true
+        followers: { include: { follower: true } },
+        following: { include: { following: true } }
       },
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
@@ -81,8 +81,8 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
       where: { username: req.params.username as string },
       include: { 
         watchlist: true,
-        followers: true,
-        following: true 
+        followers: { include: { follower: true } },
+        following: { include: { following: true } } 
       },
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
@@ -97,8 +97,8 @@ export const getAllUsers = async (req: Request, res: Response, next: NextFunctio
     const users = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        followers: true,
-        following: true
+        followers: { include: { follower: true } },
+        following: { include: { following: true } }
       }
     });
     res.json({ success: true, data: users });
@@ -122,6 +122,20 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
         followingId
       }
     });
+    
+    // Get the follower's username to put in the notification message
+    const follower = await prisma.user.findUnique({ where: { id: followerId } });
+    if (follower) {
+      await prisma.notification.create({
+        data: {
+          userId: followingId,
+          actorId: followerId,
+          type: "NEW_FOLLOWER",
+          message: `${follower.username} started following you!`,
+          link: `/user/${follower.username}`
+        }
+      });
+    }
     
     res.json({ success: true, data: follow });
   } catch (error: any) {

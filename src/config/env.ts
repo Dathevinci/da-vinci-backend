@@ -8,7 +8,7 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
   DATABASE_URL: z.string(),
   FRONTEND_URL: z.string().url().default("http://localhost:3000"),
-  CACHE_TTL_SECONDS: z.string().transform((val) => parseInt(val, 10)).default("900"),
+  CACHE_TTL_SECONDS: z.string().transform((val) => parseInt(val, 10)).default(900),
   ANILIST_API_URL: z.string().url().default("https://graphql.anilist.co"),
 });
 

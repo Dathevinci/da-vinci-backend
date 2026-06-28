@@ -19,7 +19,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
 export const getUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const user = await prisma.user.findUnique({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       include: { watchlist: true },
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });

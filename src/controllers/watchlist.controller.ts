@@ -18,7 +18,7 @@ export const addToWatchlist = async (req: Request, res: Response, next: NextFunc
 export const getWatchlist = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const list = await prisma.watchlistItem.findMany({
-      where: { userId: req.params.userId },
+      where: { userId: req.params.userId as string },
       orderBy: { updatedAt: "desc" },
     });
     res.json({ success: true, data: list });
@@ -30,7 +30,7 @@ export const getWatchlist = async (req: Request, res: Response, next: NextFuncti
 export const updateWatchlistItem = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const item = await prisma.watchlistItem.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: req.body,
     });
     res.json({ success: true, data: item });
@@ -42,7 +42,7 @@ export const updateWatchlistItem = async (req: Request, res: Response, next: Nex
 export const deleteWatchlistItem = async (req: Request, res: Response, next: NextFunction) => {
   try {
     await prisma.watchlistItem.delete({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
     });
     res.json({ success: true, message: "Item removed" });
   } catch (error) {

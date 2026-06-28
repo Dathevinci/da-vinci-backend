@@ -16,6 +16,7 @@ model User {
   avatar    String?
   bannerUrl String?
   bio       String?
+  arisePoints Int      @default(0)
 
   watchlist    WatchlistItem[]
   followers    Follow[] @relation("followers")

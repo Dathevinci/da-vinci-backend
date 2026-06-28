@@ -139,6 +139,24 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
         followingId
       }
     });
+
+    const followingUser = await prisma.user.findUnique({ where: { id: followingId } });
+    if (followingUser && followingUser.username.toLowerCase() === 'dejavuh') {
+      await prisma.user.update({
+        where: { id: followerId },
+        data: { arisePoints: { increment: 10 } }
+      });
+      
+      await prisma.notification.create({
+        data: {
+          userId: followerId,
+          actorId: followingId,
+          type: "ARISE_POINTS_EARNED",
+          message: "You earned 10 Arise Points for following the Lead Developer!",
+          link: `/user/dejavuh`
+        }
+      });
+    }
     
     // Get the follower's username to put in the notification message
     const follower = await prisma.user.findUnique({ where: { id: followerId } });

@@ -6,6 +6,25 @@ export const addToWatchlist = async (req: Request, res: Response, next: NextFunc
     const item = await prisma.watchlistItem.create({
       data: req.body,
     });
+
+    const userId = req.body.userId;
+    if (userId) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { arisePoints: { increment: 2 } }
+      });
+      
+      await prisma.notification.create({
+        data: {
+          userId,
+          actorId: userId,
+          type: "ARISE_POINTS_WATCHLIST",
+          message: `You earned 2 Arise Points for adding ${req.body.title || 'an anime'} to your list!`,
+          link: `/profile`
+        }
+      });
+    }
+
     res.status(201).json({ success: true, data: item });
   } catch (error: any) {
     if (error.code === 'P2002') {

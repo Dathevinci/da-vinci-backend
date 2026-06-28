@@ -71,16 +71,51 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
 export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { username, email, avatar, bannerUrl, bio } = req.body;
+    const userId = req.params.id as string;
     
+    let incrementPoints = 0;
+
+    // Check for Avatar update reward
+    if (avatar) {
+      const existingNotif = await prisma.notification.findFirst({
+        where: { userId, actorId: userId, type: "ARISE_POINTS_AVATAR" }
+      });
+      if (!existingNotif) {
+        incrementPoints += 2;
+        await prisma.notification.create({
+          data: { userId, actorId: userId, type: "ARISE_POINTS_AVATAR", message: "You earned 2 Arise Points for updating your Profile Picture!", link: `/profile` }
+        });
+      }
+    }
+
+    // Check for Banner update reward
+    if (bannerUrl) {
+      const existingNotif = await prisma.notification.findFirst({
+        where: { userId, actorId: userId, type: "ARISE_POINTS_BANNER" }
+      });
+      if (!existingNotif) {
+        incrementPoints += 2;
+        await prisma.notification.create({
+          data: { userId, actorId: userId, type: "ARISE_POINTS_BANNER", message: "You earned 2 Arise Points for updating your Banner!", link: `/profile` }
+        });
+      }
+    }
+
+    const updateData: any = {
+      ...(username && { username }),
+      ...(email && { email }),
+      ...(avatar !== undefined && { avatar }),
+      ...(bannerUrl !== undefined && { bannerUrl }),
+      ...(bio !== undefined && { bio }),
+    };
+
+    if (incrementPoints > 0) {
+      updateData.arisePoints = { increment: incrementPoints };
+    }
+
     const user = await prisma.user.update({
-      where: { id: req.params.id as string },
-      data: {
-        ...(username && { username }),
-        ...(email && { email }),
-        ...(avatar !== undefined && { avatar }),
-        ...(bannerUrl !== undefined && { bannerUrl }),
-        ...(bio !== undefined && { bio }),
-      },
+      where: { id: userId },
+      data: updateData,
     });
     
     res.json({ success: true, data: user });
@@ -142,20 +177,26 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
 
     const followingUser = await prisma.user.findUnique({ where: { id: followingId } });
     if (followingUser && followingUser.username.toLowerCase() === 'dejavuh') {
-      await prisma.user.update({
-        where: { id: followerId },
-        data: { arisePoints: { increment: 10 } }
+      const existingNotif = await prisma.notification.findFirst({
+        where: { userId: followerId, actorId: followingId, type: "ARISE_POINTS_EARNED" }
       });
-      
-      await prisma.notification.create({
-        data: {
-          userId: followerId,
-          actorId: followingId,
-          type: "ARISE_POINTS_EARNED",
-          message: "You earned 10 Arise Points for following the Lead Developer!",
-          link: `/user/dejavuh`
-        }
-      });
+
+      if (!existingNotif) {
+        await prisma.user.update({
+          where: { id: followerId },
+          data: { arisePoints: { increment: 10 } }
+        });
+        
+        await prisma.notification.create({
+          data: {
+            userId: followerId,
+            actorId: followingId,
+            type: "ARISE_POINTS_EARNED",
+            message: "You earned 10 Arise Points for following the Lead Developer!",
+            link: `/user/dejavuh`
+          }
+        });
+      }
     }
     
     // Get the follower's username to put in the notification message

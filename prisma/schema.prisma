@@ -14,9 +14,23 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   avatar    String?
+  bannerUrl String?
   bio       String?
 
   watchlist WatchlistItem[]
+  followers Follow[] @relation("followers")
+  following Follow[] @relation("following")
+}
+
+model Follow {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("following", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("followers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
 }
 
 model WatchlistItem {

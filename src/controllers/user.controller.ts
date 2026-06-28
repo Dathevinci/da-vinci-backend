@@ -20,7 +20,11 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.params.id as string },
-      include: { watchlist: true },
+      include: { 
+        watchlist: true,
+        followers: true,
+        following: true
+      },
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
     res.json({ success: true, data: user });
@@ -31,7 +35,7 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
 
 export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { username, email, avatar, bio } = req.body;
+    const { username, email, avatar, bannerUrl, bio } = req.body;
     
     const user = await prisma.user.update({
       where: { id: req.params.id as string },
@@ -39,6 +43,7 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
         ...(username && { username }),
         ...(email && { email }),
         ...(avatar !== undefined && { avatar }),
+        ...(bannerUrl !== undefined && { bannerUrl }),
         ...(bio !== undefined && { bio }),
       },
     });
@@ -48,6 +53,83 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     if (error.code === 'P2002') {
       return res.status(400).json({ success: false, message: "Username or email already exists" });
     }
+    next(error);
+  }
+};
+
+export const getUserByUsername = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { username: req.params.username as string },
+      include: { 
+        watchlist: true,
+        followers: true,
+        following: true 
+      },
+    });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+    res.json({ success: true, data: user });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        followers: true,
+        following: true
+      }
+    });
+    res.json({ success: true, data: users });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const followUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { followerId } = req.body; // The user who is doing the following
+    const followingId = req.params.id as string; // The user being followed
+
+    if (followerId === followingId) {
+      return res.status(400).json({ success: false, message: "Cannot follow yourself" });
+    }
+
+    const follow = await prisma.follow.create({
+      data: {
+        followerId,
+        followingId
+      }
+    });
+    
+    res.json({ success: true, data: follow });
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ success: false, message: "Already following" });
+    }
+    next(error);
+  }
+};
+
+export const unfollowUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { followerId } = req.body;
+    const followingId = req.params.id as string;
+
+    await prisma.follow.delete({
+      where: {
+        followerId_followingId: {
+          followerId,
+          followingId
+        }
+      }
+    });
+    
+    res.json({ success: true, message: "Unfollowed successfully" });
+  } catch (error) {
     next(error);
   }
 };

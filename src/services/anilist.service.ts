@@ -52,6 +52,13 @@ export const queries = {
         ...AnimeCard
         trailer { id site thumbnail }
         externalLinks { site url type }
+        characters(sort: [ROLE, RELEVANCE], page: 1, perPage: 12) {
+          edges {
+            role
+            node { id name { full } image { large } }
+            voiceActors(language: JAPANESE, sort: [RELEVANCE]) { id name { full } image { large } }
+          }
+        }
       }
     }
     ${AnimeCardFragment}

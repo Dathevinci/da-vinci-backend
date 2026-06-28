@@ -28,3 +28,26 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
     next(error);
   }
 };
+
+export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { username, email, avatar, bio } = req.body;
+    
+    const user = await prisma.user.update({
+      where: { id: req.params.id as string },
+      data: {
+        ...(username && { username }),
+        ...(email && { email }),
+        ...(avatar !== undefined && { avatar }),
+        ...(bio !== undefined && { bio }),
+      },
+    });
+    
+    res.json({ success: true, data: user });
+  } catch (error: any) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ success: false, message: "Username or email already exists" });
+    }
+    next(error);
+  }
+};

@@ -13,6 +13,8 @@ model User {
   email     String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  avatar    String?
+  bio       String?
 
   watchlist WatchlistItem[]
 }

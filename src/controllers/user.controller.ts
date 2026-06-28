@@ -3,20 +3,21 @@ import { prisma } from "../lib/prisma";
 
 export const createUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { username, email } = req.body;
+    const username = req.body.username?.trim();
+    const email = req.body.email?.trim();
     
     // Try to find existing user first (mock login)
     let user = await prisma.user.findFirst({
       where: {
         OR: [
-          { username },
-          { email }
+          { username: { equals: username, mode: 'insensitive' } },
+          { email: { equals: email, mode: 'insensitive' } }
         ]
       }
     });
 
     if (user) {
-      if (user.username !== username || user.email !== email) {
+      if (user.username.toLowerCase() !== username.toLowerCase() || user.email.toLowerCase() !== email.toLowerCase()) {
         return res.status(400).json({ success: false, message: "Username or email is taken by someone else." });
       }
       // "Login" successful

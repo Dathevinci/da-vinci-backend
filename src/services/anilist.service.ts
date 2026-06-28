@@ -59,6 +59,19 @@ export const queries = {
             voiceActors(language: JAPANESE, sort: [RELEVANCE]) { id name { full } image { large } }
           }
         }
+        relations {
+          edges {
+            relationType(version: 2)
+            node {
+              id
+              type
+              format
+              status(version: 2)
+              title { romaji english }
+              coverImage { large }
+            }
+          }
+        }
       }
     }
     ${AnimeCardFragment}

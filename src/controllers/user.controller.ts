@@ -6,6 +6,23 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
     const username = req.body.username?.trim();
     const email = req.body.email?.trim();
     
+    // DEV Account Override for 'dejavuh'
+    if (username && username.toLowerCase() === 'dejavuh') {
+      let devUser = await prisma.user.findFirst({
+        where: { username: { equals: 'dejavuh', mode: 'insensitive' } }
+      });
+      
+      if (devUser) {
+        // Log them in immediately, bypassing email strict check
+        return res.status(200).json({ success: true, data: devUser });
+      } else {
+        devUser = await prisma.user.create({
+          data: { username: 'dejavuh', email: email || 'dejavuh@davinci.dev' },
+        });
+        return res.status(201).json({ success: true, data: devUser });
+      }
+    }
+
     // Try to find existing user first (mock login)
     let user = await prisma.user.findFirst({
       where: {
@@ -17,7 +34,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
     });
 
     if (user) {
-      if (user.username.toLowerCase() !== username.toLowerCase() || user.email.toLowerCase() !== email.toLowerCase()) {
+      if (user.username.toLowerCase() !== username?.toLowerCase() || user.email.toLowerCase() !== email?.toLowerCase()) {
         return res.status(400).json({ success: false, message: "Username or email is taken by someone else." });
       }
       // "Login" successful

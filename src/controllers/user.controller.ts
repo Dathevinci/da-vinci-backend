@@ -4,14 +4,31 @@ import { prisma } from "../lib/prisma";
 export const createUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { username, email } = req.body;
-    const user = await prisma.user.create({
+    
+    // Try to find existing user first (mock login)
+    let user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { username },
+          { email }
+        ]
+      }
+    });
+
+    if (user) {
+      if (user.username !== username || user.email !== email) {
+        return res.status(400).json({ success: false, message: "Username or email is taken by someone else." });
+      }
+      // "Login" successful
+      return res.status(200).json({ success: true, data: user });
+    }
+
+    // Register new user
+    user = await prisma.user.create({
       data: { username, email },
     });
     res.status(201).json({ success: true, data: user });
   } catch (error: any) {
-    if (error.code === 'P2002') {
-      return res.status(400).json({ success: false, message: "Username or email already exists" });
-    }
     next(error);
   }
 };

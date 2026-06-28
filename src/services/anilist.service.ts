@@ -77,10 +77,10 @@ export const queries = {
     ${AnimeCardFragment}
   `,
   searchAnime: `
-    query SearchAnime($page: Int, $search: String, $status: MediaStatus, $season: MediaSeason, $seasonYear: Int, $format: MediaFormat) {
+    query SearchAnime($page: Int, $search: String, $status: MediaStatus, $season: MediaSeason, $seasonYear: Int, $format: MediaFormat, $genre_in: [String], $sort: [MediaSort]) {
       Page(page: $page, perPage: 50) {
         pageInfo { total currentPage lastPage hasNextPage }
-        media(type: ANIME, search: $search, status: $status, season: $season, seasonYear: $seasonYear, format: $format, sort: POPULARITY_DESC, isAdult: false) {
+        media(type: ANIME, search: $search, status: $status, season: $season, seasonYear: $seasonYear, format: $format, genre_in: $genre_in, sort: $sort, isAdult: false) {
           ...AnimeCard
         }
       }

@@ -17,6 +17,8 @@ model User {
   bannerUrl String?
   bio       String?
   arisePoints Int      @default(0)
+  isPrivate   Boolean  @default(false)
+  theme       String   @default("dark")
 
   watchlist    WatchlistItem[]
   followers    Follow[] @relation("followers")
@@ -26,6 +28,35 @@ model User {
   comments     Comment[]
   commentVotes CommentVote[]
   pointLogs    PointLog[]
+  conversationsAsUser1 Conversation[] @relation("ConversationUser1")
+  conversationsAsUser2 Conversation[] @relation("ConversationUser2")
+  messages             Message[]
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  user1Id   String
+  user2Id   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user1     User      @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2     User      @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([user1Id, user2Id])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 }
 
 model Comment {

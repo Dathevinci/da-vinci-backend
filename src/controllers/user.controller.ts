@@ -74,7 +74,7 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
 
 export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { username, email, avatar, bannerUrl, bio, arisePoints } = req.body;
+    const { username, email, avatar, bannerUrl, bio, arisePoints, isPrivate, theme } = req.body;
     const userId = req.params.id as string;
     
     let incrementPoints = 0;
@@ -118,6 +118,8 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
       ...(bannerUrl !== undefined && { bannerUrl }),
       ...(bio !== undefined && { bio }),
       ...(arisePoints !== undefined && { arisePoints: Number(arisePoints) }),
+      ...(isPrivate !== undefined && { isPrivate: Boolean(isPrivate) }),
+      ...(theme !== undefined && { theme }),
     };
 
     if (incrementPoints > 0 && arisePoints === undefined) {
@@ -154,6 +156,8 @@ export const deleteUser = async (req: Request, res: Response, next: NextFunction
 
 export const getUserByUsername = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const { currentUserId } = req.query;
+    
     const user = await prisma.user.findUnique({
       where: { username: req.params.username as string },
       include: { 
@@ -163,6 +167,19 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
       },
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    // Privacy Filter
+    if (user.isPrivate) {
+      const isOwner = user.id === currentUserId;
+      const isApprovedFollower = user.followers.some(f => f.followerId === String(currentUserId));
+      
+      if (!isOwner && !isApprovedFollower) {
+        user.watchlist = [];
+        user.bio = "This profile is private. Follow to see their bio, banner, and watchlist.";
+        user.bannerUrl = null;
+      }
+    }
+
     res.json({ success: true, data: user });
   } catch (error) {
     next(error);

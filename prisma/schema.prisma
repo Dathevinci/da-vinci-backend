@@ -32,6 +32,7 @@ model Comment {
   id        String   @id @default(uuid())
   userId    String
   animeId   Int?     // Optional: for tying discussions to specific anime
+  animeTitle String? // Denormalized title for rendering in global feed
   parentId  String?  // Optional: references another comment
   content   String
   createdAt DateTime @default(now())

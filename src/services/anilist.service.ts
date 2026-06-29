@@ -31,6 +31,7 @@ const AnimeCardFragment = `
     popularity
     nextAiringEpisode { airingAt timeUntilAiring episode }
     studios(isMain: true) { nodes { id name } }
+    trailer { id site thumbnail }
   }
 `;
 

@@ -74,7 +74,7 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
 
 export const updateUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { username, email, avatar, bannerUrl, bio } = req.body;
+    const { username, email, avatar, bannerUrl, bio, arisePoints } = req.body;
     const userId = req.params.id as string;
     
     let incrementPoints = 0;
@@ -111,9 +111,10 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
       ...(avatar !== undefined && { avatar }),
       ...(bannerUrl !== undefined && { bannerUrl }),
       ...(bio !== undefined && { bio }),
+      ...(arisePoints !== undefined && { arisePoints: Number(arisePoints) }),
     };
 
-    if (incrementPoints > 0) {
+    if (incrementPoints > 0 && arisePoints === undefined) {
       updateData.arisePoints = { increment: incrementPoints };
     }
 
@@ -127,6 +128,20 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     if (error.code === 'P2002') {
       return res.status(400).json({ success: false, message: "Username or email already exists" });
     }
+    next(error);
+  }
+};
+
+export const deleteUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.params.id as string;
+    
+    await prisma.user.delete({
+      where: { id: userId }
+    });
+    
+    res.json({ success: true, message: "User deleted successfully" });
+  } catch (error) {
     next(error);
   }
 };

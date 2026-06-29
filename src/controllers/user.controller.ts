@@ -171,11 +171,13 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
     // Privacy Filter
     if (user.isPrivate) {
       const isOwner = user.id === currentUserId;
-      const isApprovedFollower = user.followers.some(f => f.followerId === String(currentUserId));
+      const isFollowingThem = user.followers.some(f => f.followerId === String(currentUserId));
+      const theyAreFollowingMe = user.following.some(f => f.followingId === String(currentUserId));
+      const isMutual = isFollowingThem && theyAreFollowingMe;
       
-      if (!isOwner && !isApprovedFollower) {
+      if (!isOwner && !isMutual) {
         user.watchlist = [];
-        user.bio = "This profile is private. Follow to see their bio, banner, and watchlist.";
+        user.bio = "This profile is private. You must mutually follow each other to see their bio, banner, and watchlist.";
         user.bannerUrl = null;
       }
     }

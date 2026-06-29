@@ -9,6 +9,7 @@ import userRoutes from "./routes/user.routes";
 import watchlistRoutes from "./routes/watchlist.routes";
 import commentRoutes from "./routes/comment.routes";
 import messageRoutes from "./routes/message.routes";
+import systemRoutes from "./routes/system.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -30,6 +31,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/watchlist", watchlistRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/messages", messageRoutes);
+app.use("/api/system", systemRoutes);
 
 // Error Handler must be last
 app.use(errorHandler);

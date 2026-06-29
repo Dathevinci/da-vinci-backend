@@ -49,10 +49,10 @@ export const getConversations = async (req: Request, res: Response): Promise<voi
 
 export const getMessages = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username } = req.params;
-    const { currentUserId } = req.query;
+    const username = String(req.params.username);
+    const currentUserId = String(req.query.currentUserId);
 
-    if (!currentUserId || !username) {
+    if (!req.query.currentUserId || !req.params.username) {
       res.status(400).json({ success: false, message: 'currentUserId and username are required' });
       return;
     }
@@ -105,10 +105,11 @@ export const getMessages = async (req: Request, res: Response): Promise<void> =>
 
 export const sendMessage = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username } = req.params;
-    const { senderId, content } = req.body;
+    const username = String(req.params.username);
+    const senderId = String(req.body.senderId);
+    const content = String(req.body.content);
 
-    if (!senderId || !content || !username) {
+    if (!req.body.senderId || !req.body.content || !req.params.username) {
       res.status(400).json({ success: false, message: 'Missing fields' });
       return;
     }
@@ -129,8 +130,8 @@ export const sendMessage = async (req: Request, res: Response): Promise<void> =>
 
     // ENFORCE MUTUAL FOLLOW RULE (or messaging self)
     if (sender.id !== receiver.id) {
-      const senderFollowsReceiver = receiver.followers.some(f => f.followerId === sender.id);
-      const receiverFollowsSender = receiver.following.some(f => f.followingId === sender.id);
+      const senderFollowsReceiver = receiver.followers.some((f: any) => f.followerId === sender.id);
+      const receiverFollowsSender = receiver.following.some((f: any) => f.followingId === sender.id);
 
       if (!senderFollowsReceiver || !receiverFollowsSender) {
         res.status(403).json({ success: false, message: 'You can only message users who mutually follow you.' });

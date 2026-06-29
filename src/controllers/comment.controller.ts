@@ -3,11 +3,12 @@ import { prisma } from "../lib/prisma";
 
 export const getComments = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { animeId, userId } = req.query;
+    const animeId = req.query.animeId as string | undefined;
+    const userId = req.query.userId as string | undefined;
 
     const comments = await prisma.comment.findMany({
       where: {
-        ...(animeId ? { animeId: parseInt(animeId as string) } : {}),
+        ...(animeId ? { animeId: parseInt(animeId) } : {}),
       },
       orderBy: { createdAt: 'desc' },
       include: {
@@ -69,8 +70,8 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
 
 export const deleteComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
-    const { userId } = req.body; // In a real app, this should come from a verified JWT token
+    const id = req.params.id as string;
+    const userId = req.body.userId as string; // In a real app, this should come from a verified JWT token
 
     const comment = await prisma.comment.findUnique({ where: { id } });
 
@@ -98,7 +99,7 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
 
 export const voteComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { userId, value } = req.body; // value should be 1, -1, or 0 (to remove vote)
 
     if (!userId || typeof value !== 'number') {

@@ -7,6 +7,7 @@ import searchRoutes from "./routes/search.routes";
 import calendarRoutes from "./routes/calendar.routes";
 import userRoutes from "./routes/user.routes";
 import watchlistRoutes from "./routes/watchlist.routes";
+import commentRoutes from "./routes/comment.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -26,6 +27,7 @@ app.use("/api/search", searchRoutes);
 app.use("/api/calendar", calendarRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/watchlist", watchlistRoutes);
+app.use("/api/comments", commentRoutes);
 
 // Error Handler must be last
 app.use(errorHandler);

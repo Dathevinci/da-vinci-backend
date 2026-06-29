@@ -23,6 +23,32 @@ model User {
   following    Follow[] @relation("following")
   notifications Notification[] @relation("userNotifications")
   triggeredNotifications Notification[] @relation("actorNotifications")
+  comments     Comment[]
+  commentVotes CommentVote[]
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  userId    String
+  animeId   Int?     // Optional: for tying discussions to specific anime
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  votes     CommentVote[]
+}
+
+model CommentVote {
+  id        String   @id @default(uuid())
+  commentId String
+  userId    String
+  value     Int      // 1 for upvote, -1 for downvote
+
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
 }
 
 model Follow {

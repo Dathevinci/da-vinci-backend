@@ -1,0 +1,132 @@
+import { Request, Response, NextFunction } from "express";
+import { prisma } from "../lib/prisma";
+
+export const getComments = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { animeId, userId } = req.query;
+
+    const comments = await prisma.comment.findMany({
+      where: {
+        ...(animeId ? { animeId: parseInt(animeId as string) } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
+        votes: true,
+      }
+    });
+
+    // Format the response to include the calculated score and the current user's vote
+    const formattedComments = comments.map(comment => {
+      const score = comment.votes.reduce((acc, vote) => acc + vote.value, 0);
+      const userVote = userId ? comment.votes.find(v => v.userId === userId)?.value || 0 : 0;
+      
+      return {
+        ...comment,
+        score,
+        userVote,
+        votes: undefined // hide raw votes array to save bandwidth
+      };
+    });
+
+    res.json({ success: true, data: formattedComments });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, animeId, content } = req.body;
+
+    if (!userId || !content) {
+      return res.status(400).json({ success: false, message: "Missing required fields" });
+    }
+
+    const comment = await prisma.comment.create({
+      data: {
+        userId,
+        content,
+        animeId: animeId ? parseInt(animeId) : null,
+      },
+      include: {
+        user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
+        votes: true,
+      }
+    });
+
+    // Award 5 Arise Points for posting a view/review
+    await prisma.user.update({
+      where: { id: userId },
+      data: { arisePoints: { increment: 5 } }
+    });
+
+    res.status(201).json({ success: true, data: { ...comment, score: 0, userVote: 0, votes: undefined } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body; // In a real app, this should come from a verified JWT token
+
+    const comment = await prisma.comment.findUnique({ where: { id } });
+
+    if (!comment) {
+      return res.status(404).json({ success: false, message: "Comment not found" });
+    }
+
+    if (comment.userId !== userId) {
+      return res.status(403).json({ success: false, message: "You can only delete your own comments" });
+    }
+
+    await prisma.comment.delete({ where: { id } });
+    
+    // Deduct the 5 points they got from posting
+    await prisma.user.update({
+      where: { id: userId },
+      data: { arisePoints: { decrement: 5 } }
+    });
+
+    res.json({ success: true, message: "Comment deleted" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const voteComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { userId, value } = req.body; // value should be 1, -1, or 0 (to remove vote)
+
+    if (!userId || typeof value !== 'number') {
+      return res.status(400).json({ success: false, message: "Invalid payload" });
+    }
+
+    if (value === 0) {
+      // Remove vote
+      await prisma.commentVote.deleteMany({
+        where: { commentId: id, userId }
+      });
+    } else {
+      // Upsert vote (update if exists, create if not)
+      await prisma.commentVote.upsert({
+        where: {
+          commentId_userId: { commentId: id, userId }
+        },
+        update: { value },
+        create: {
+          commentId: id,
+          userId,
+          value
+        }
+      });
+    }
+
+    res.json({ success: true, message: "Vote registered" });
+  } catch (error) {
+    next(error);
+  }
+};

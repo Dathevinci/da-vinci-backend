@@ -9,7 +9,8 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
     // DEV Account Override for 'dejavuh'
     if (username && username.toLowerCase() === 'dejavuh') {
       let devUser = await prisma.user.findFirst({
-        where: { username: { equals: 'dejavuh', mode: 'insensitive' } }
+        where: { username: { equals: 'dejavuh', mode: 'insensitive' } },
+        include: { followers: { include: { follower: true } }, following: { include: { following: true } } }
       });
       
       if (devUser) {
@@ -18,6 +19,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
       } else {
         devUser = await prisma.user.create({
           data: { username: 'dejavuh', email: email || 'dejavuh@davinci.dev' },
+          include: { followers: { include: { follower: true } }, following: { include: { following: true } } }
         });
         return res.status(201).json({ success: true, data: devUser });
       }
@@ -30,7 +32,8 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
           { username: { equals: username, mode: 'insensitive' } },
           { email: { equals: email, mode: 'insensitive' } }
         ]
-      }
+      },
+      include: { followers: { include: { follower: true } }, following: { include: { following: true } } }
     });
 
     if (user) {
@@ -44,6 +47,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
     // Register new user
     user = await prisma.user.create({
       data: { username, email },
+      include: { followers: { include: { follower: true } }, following: { include: { following: true } } }
     });
     res.status(201).json({ success: true, data: user });
   } catch (error: any) {

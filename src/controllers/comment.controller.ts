@@ -58,14 +58,14 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
       }
     });
 
-    // Award 5 Arise Points for posting a view/review
+    // Award 1 Arise Points for posting a view/review
     await prisma.user.update({
       where: { id: userId },
-      data: { arisePoints: { increment: 5 } }
+      data: { arisePoints: { increment: 1 } }
     });
     
     await prisma.pointLog.create({
-      data: { userId, amount: 5, reason: "Shared your views with the community" }
+      data: { userId, amount: 1, reason: "Shared your views with the community" }
     });
 
     res.status(201).json({ success: true, data: { ...comment, score: 0, userVote: 0, votes: undefined } });
@@ -91,14 +91,14 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
 
     await prisma.comment.delete({ where: { id } });
     
-    // Deduct the 5 points they got from posting
+    // Deduct the 1 points they got from posting
     await prisma.user.update({
       where: { id: userId },
-      data: { arisePoints: { decrement: 5 } }
+      data: { arisePoints: { decrement: 1 } }
     });
 
     await prisma.pointLog.create({
-      data: { userId, amount: -5, reason: "Deleted a community view" }
+      data: { userId, amount: -1, reason: "Deleted a community view" }
     });
 
     res.json({ success: true, message: "Comment deleted" });

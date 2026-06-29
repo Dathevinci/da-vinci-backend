@@ -228,7 +228,7 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
       if (!existingNotif) {
         await prisma.user.update({
           where: { id: followerId },
-          data: { arisePoints: { increment: 10 } }
+          data: { arisePoints: { increment: 1 } }
         });
         
         await prisma.notification.create({
@@ -236,13 +236,13 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
             userId: followerId,
             actorId: followingId,
             type: "ARISE_POINTS_EARNED",
-            message: "You earned 10 Arise Points for following the Lead Developer!",
+            message: "You earned 1 Arise Point for following the Lead Developer!",
             link: `/user/dejavuh`
           }
         });
         
         await prisma.pointLog.create({
-          data: { userId: followerId, amount: 10, reason: "Followed the Lead Developer" }
+          data: { userId: followerId, amount: 1, reason: "Followed the Lead Developer" }
         });
       }
     }

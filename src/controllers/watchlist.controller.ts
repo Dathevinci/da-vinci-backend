@@ -11,7 +11,7 @@ export const addToWatchlist = async (req: Request, res: Response, next: NextFunc
     if (userId) {
       await prisma.user.update({
         where: { id: userId },
-        data: { arisePoints: { increment: 2 } }
+        data: { arisePoints: { increment: 1 } }
       });
       
       await prisma.notification.create({

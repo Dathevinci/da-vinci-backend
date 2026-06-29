@@ -38,7 +38,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
 
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, animeId, content } = req.body;
+    const { userId, animeId, content, parentId } = req.body;
 
     if (!userId || !content) {
       return res.status(400).json({ success: false, message: "Missing required fields" });
@@ -49,6 +49,7 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
         userId,
         content,
         animeId: animeId ? parseInt(animeId) : null,
+        parentId: parentId ? parentId : null,
       },
       include: {
         user: { select: { id: true, username: true, avatar: true, arisePoints: true } },

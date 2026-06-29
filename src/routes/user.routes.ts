@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser } from "../controllers/user.controller";
+import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs } from "../controllers/user.controller";
 import { getUserNotifications, markNotificationAsRead, markAllAsRead } from "../controllers/notification.controller";
 import { validateRequest } from "../middleware/validateRequest";
 import { createUserSchema } from "../schemas/watchlist.schema";
@@ -11,6 +11,7 @@ router.get("/", getAllUsers);
 
 router.post("/", validateRequest(createUserSchema), createUser);
 router.get("/:id", getUser);
+router.get("/:id/point-logs", getUserPointLogs);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);
 

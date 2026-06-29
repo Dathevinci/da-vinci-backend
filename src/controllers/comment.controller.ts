@@ -62,6 +62,10 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
       where: { id: userId },
       data: { arisePoints: { increment: 5 } }
     });
+    
+    await prisma.pointLog.create({
+      data: { userId, amount: 5, reason: "Shared your views with the community" }
+    });
 
     res.status(201).json({ success: true, data: { ...comment, score: 0, userVote: 0, votes: undefined } });
   } catch (error) {
@@ -92,6 +96,10 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
       data: { arisePoints: { decrement: 5 } }
     });
 
+    await prisma.pointLog.create({
+      data: { userId, amount: -5, reason: "Deleted a community view" }
+    });
+
     res.json({ success: true, message: "Comment deleted" });
   } catch (error) {
     next(error);
@@ -101,19 +109,40 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
 export const voteComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { userId, value } = req.body; // value should be 1, -1, or 0 (to remove vote)
+    const { userId, value } = req.body;
 
     if (!userId || typeof value !== 'number') {
       return res.status(400).json({ success: false, message: "Invalid payload" });
     }
 
+    const comment = await prisma.comment.findUnique({ where: { id } });
+    if (!comment) return res.status(404).json({ success: false, message: "Comment not found" });
+
+    const existingVote = await prisma.commentVote.findUnique({
+      where: { commentId_userId: { commentId: id, userId } }
+    });
+
+    const oldScore = existingVote ? existingVote.value : 0;
+    const newScore = value;
+
+    // Only award points if the voter is NOT the author of the comment
+    if (comment.userId !== userId) {
+      if (newScore === 1 && oldScore <= 0) {
+        // Award point to AUTHOR for new upvote
+        await prisma.user.update({ where: { id: comment.userId }, data: { arisePoints: { increment: 1 } } });
+        await prisma.pointLog.create({ data: { userId: comment.userId, amount: 1, reason: "Received an upvote on your comment" } });
+      } else if (oldScore === 1 && newScore <= 0) {
+        // Deduct point if upvote is removed
+        await prisma.user.update({ where: { id: comment.userId }, data: { arisePoints: { decrement: 1 } } });
+        await prisma.pointLog.create({ data: { userId: comment.userId, amount: -1, reason: "Upvote removed from your comment" } });
+      }
+    }
+
     if (value === 0) {
-      // Remove vote
       await prisma.commentVote.deleteMany({
         where: { commentId: id, userId }
       });
     } else {
-      // Upsert vote (update if exists, create if not)
       await prisma.commentVote.upsert({
         where: {
           commentId_userId: { commentId: id, userId }

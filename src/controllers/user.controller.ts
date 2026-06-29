@@ -89,6 +89,9 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
         await prisma.notification.create({
           data: { userId, actorId: userId, type: "ARISE_POINTS_AVATAR", message: "You earned 2 Arise Points for updating your Profile Picture!", link: `/profile` }
         });
+        await prisma.pointLog.create({
+          data: { userId, amount: 2, reason: "Updated Profile Picture" }
+        });
       }
     }
 
@@ -101,6 +104,9 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
         incrementPoints += 2;
         await prisma.notification.create({
           data: { userId, actorId: userId, type: "ARISE_POINTS_BANNER", message: "You earned 2 Arise Points for updating your Banner!", link: `/profile` }
+        });
+        await prisma.pointLog.create({
+          data: { userId, amount: 2, reason: "Updated Banner Image" }
         });
       }
     }
@@ -215,6 +221,10 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
             link: `/user/dejavuh`
           }
         });
+        
+        await prisma.pointLog.create({
+          data: { userId: followerId, amount: 10, reason: "Followed the Lead Developer" }
+        });
       }
     }
     
@@ -256,6 +266,18 @@ export const unfollowUser = async (req: Request, res: Response, next: NextFuncti
     });
     
     res.json({ success: true, message: "Unfollowed successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getUserPointLogs = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const logs = await prisma.pointLog.findMany({
+      where: { userId: req.params.id as string },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json({ success: true, data: logs });
   } catch (error) {
     next(error);
   }

@@ -25,6 +25,7 @@ model User {
   triggeredNotifications Notification[] @relation("actorNotifications")
   comments     Comment[]
   commentVotes CommentVote[]
+  pointLogs    PointLog[]
 }
 
 model Comment {
@@ -102,4 +103,14 @@ model Notification {
 
   user      User     @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
   actor     User     @relation("actorNotifications", fields: [actorId], references: [id], onDelete: Cascade)
+}
+
+model PointLog {
+  id        String   @id @default(uuid())
+  userId    String
+  amount    Int
+  reason    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

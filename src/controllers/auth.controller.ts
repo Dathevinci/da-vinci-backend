@@ -2,8 +2,6 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
-import axios from "axios";
-
 // Nodemailer config for welcome emails
 const transporter = nodemailer.createTransport({
   service: "gmail",
@@ -148,97 +146,4 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
-// DISCORD OAUTH CONFIG
-const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID || "";
-const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
-const DISCORD_REDIRECT_URI = process.env.NEXT_PUBLIC_API_URL 
-  ? \`\${process.env.NEXT_PUBLIC_API_URL}/api/auth/discord/callback\` 
-  : "http://localhost:5000/api/auth/discord/callback";
 
-export const discordLogin = (req: Request, res: Response) => {
-  const url = \`https://discord.com/api/oauth2/authorize?client_id=\${DISCORD_CLIENT_ID}&redirect_uri=\${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify%20email\`;
-  res.redirect(url);
-};
-
-export const discordCallback = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { code } = req.query;
-    if (!code) return res.status(400).send("No code provided.");
-
-    // Exchange code for token
-    const tokenResponse = await axios.post(
-      "https://discord.com/api/oauth2/token",
-      new URLSearchParams({
-        client_id: DISCORD_CLIENT_ID,
-        client_secret: DISCORD_CLIENT_SECRET,
-        grant_type: "authorization_code",
-        code: code as string,
-        redirect_uri: DISCORD_REDIRECT_URI,
-      }).toString(),
-      { headers: { "Content-Type": "application/x-www-form-urlencoded" } }
-    );
-
-    const { access_token } = tokenResponse.data;
-
-    // Get user info
-    const userResponse = await axios.get("https://discord.com/api/users/@me", {
-      headers: { Authorization: \`Bearer \${access_token}\` },
-    });
-
-    const discordUser = userResponse.data;
-
-    let user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { discordId: discordUser.id },
-          { email: discordUser.email },
-        ],
-      },
-      include: { followers: { include: { follower: true } }, following: { include: { following: true } } },
-    });
-
-    if (user) {
-      // Update discordId if they had an email account but are now linking discord
-      if (!user.discordId) {
-        user = await prisma.user.update({
-          where: { id: user.id },
-          data: { discordId: discordUser.id, avatar: \`https://cdn.discordapp.com/avatars/\${discordUser.id}/\${discordUser.avatar}.png\` },
-          include: { followers: { include: { follower: true } }, following: { include: { following: true } } },
-        });
-      }
-    } else {
-      // Create new user
-      // Ensure unique username
-      let baseUsername = discordUser.username;
-      let uniqueUsername = baseUsername;
-      let counter = 1;
-      while (await prisma.user.findUnique({ where: { username: uniqueUsername } })) {
-        uniqueUsername = \`\${baseUsername}\${counter}\`;
-        counter++;
-      }
-
-      user = await prisma.user.create({
-        data: {
-          username: uniqueUsername,
-          email: discordUser.email,
-          discordId: discordUser.id,
-          avatar: \`https://cdn.discordapp.com/avatars/\${discordUser.id}/\${discordUser.avatar}.png\`,
-        },
-        include: { followers: { include: { follower: true } }, following: { include: { following: true } } },
-      });
-
-      sendWelcomeEmail(user.email, user.username);
-    }
-
-    const { password: _, ...userWithoutPassword } = user;
-    
-    // Encode user state to pass securely back to frontend
-    const encodedUser = Buffer.from(JSON.stringify(userWithoutPassword)).toString("base64");
-    
-    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
-    res.redirect(\`\${FRONTEND_URL}/auth/callback?data=\${encodedUser}\`);
-  } catch (error) {
-    console.error("Discord OAuth Error:", error);
-    res.redirect(\`\${process.env.FRONTEND_URL || "http://localhost:3000"}?error=DiscordLoginFailed\`);
-  }
-};

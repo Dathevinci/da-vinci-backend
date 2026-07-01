@@ -1,5 +1,46 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
+import nodemailer from "nodemailer";
+
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.GMAIL_USER || "siddharthashahthakuri447@gmail.com",
+    pass: process.env.GMAIL_APP_PASSWORD || "", // Must be provided in .env
+  },
+});
+
+const sendWelcomeEmail = async (email: string, username: string) => {
+  try {
+    if (!process.env.GMAIL_APP_PASSWORD) return;
+    await transporter.sendMail({
+      from: `"Da Vinci Anime Tracker" <${process.env.GMAIL_USER || "siddharthashahthakuri447@gmail.com"}>`,
+      to: email,
+      subject: "Welcome to Da-vinci anime tracker!",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #0f0f11; color: #fff; padding: 20px; border-radius: 10px;">
+          <h1 style="color: #6366f1; text-align: center;">Welcome to Da Vinci, ${username}!</h1>
+          <p style="font-size: 16px; line-height: 1.5; color: #cbd5e1;">
+            We are thrilled to have you join our anime tracking community. Your journey begins now.
+          </p>
+          <div style="background-color: #1e1e24; padding: 15px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #d946ef;">
+            <p style="margin: 0; font-size: 16px; color: #f8fafc; font-style: italic;">
+              "Tracking your anime shouldn't feel like a chore. Welcome to the smoothest experience on the web."
+            </p>
+            <p style="margin-top: 10px; font-size: 14px; color: #94a3b8; font-weight: bold;">
+              — Message from Lead Dev
+            </p>
+          </div>
+          <p style="font-size: 14px; color: #64748b; text-align: center; margin-top: 30px;">
+            Da Vinci Anime Tracker &copy; ${new Date().getFullYear()}
+          </p>
+        </div>
+      `,
+    });
+  } catch (error) {
+    console.error("Error sending welcome email:", error);
+  }
+};
 
 export const createUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -49,6 +90,10 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
       data: { username, email },
       include: { followers: { include: { follower: true } }, following: { include: { following: true } } }
     });
+    
+    // Send welcome email asynchronously
+    sendWelcomeEmail(user.email, user.username);
+    
     res.status(201).json({ success: true, data: user });
   } catch (error: any) {
     next(error);

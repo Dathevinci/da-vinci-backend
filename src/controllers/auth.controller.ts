@@ -1,24 +1,14 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import bcrypt from "bcryptjs";
-import nodemailer from "nodemailer";
-// Nodemailer config for welcome emails
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER || "siddharthashahthakuri447@gmail.com",
-    pass: process.env.GMAIL_APP_PASSWORD || "", // Must be provided in .env
-  },
-});
+import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY || "re_CAdrz8rF_C8ULQZR1zukmp54nXty3iaDw");
 
 const sendWelcomeEmail = async (email: string, username: string) => {
   try {
-    if (!process.env.GMAIL_APP_PASSWORD) {
-      console.warn("GMAIL_APP_PASSWORD missing. Skipping welcome email.");
-      return;
-    }
-    await transporter.sendMail({
-      from: `"Da Vinci Anime Tracker" <${process.env.GMAIL_USER || "siddharthashahthakuri447@gmail.com"}>`,
+    await resend.emails.send({
+      from: 'Da Vinci Anime Tracker <onboarding@resend.dev>',
       to: email,
       subject: "Welcome to Da-vinci anime tracker!",
       html: `

@@ -22,7 +22,6 @@
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.0.1",
-    "@types/nodemailer": "^8.0.1",
     "axios": "^1.18.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
@@ -30,8 +29,8 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
-    "nodemailer": "^9.0.3",
     "prisma": "^6.0.0",
+    "resend": "^6.16.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
     "zod": "^4.4.3"

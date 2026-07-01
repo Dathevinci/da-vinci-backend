@@ -31,6 +31,9 @@ model User {
   conversationsAsUser1 Conversation[] @relation("ConversationUser1")
   conversationsAsUser2 Conversation[] @relation("ConversationUser2")
   messages             Message[]
+  announcements        Announcement[]
+  announcementLikes    AnnouncementLike[]
+  announcementComments AnnouncementComment[]
 }
 
 model Conversation {
@@ -145,4 +148,42 @@ model PointLog {
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  authorId  String
+  title     String
+  content   String
+  tag       String
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes     AnnouncementLike[]
+  comments  AnnouncementComment[]
+}
+
+model AnnouncementLike {
+  id             String   @id @default(uuid())
+  announcementId String
+  userId         String
+  createdAt      DateTime @default(now())
+
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, userId])
+}
+
+model AnnouncementComment {
+  id             String   @id @default(uuid())
+  announcementId String
+  userId         String
+  content        String
+  createdAt      DateTime @default(now())
+
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

@@ -172,3 +172,29 @@ export const deleteComment = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+
+export const deleteAnnouncement = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const userId = req.body.userId as string; // or forceGodMode from frontend
+
+    const announcement = await prisma.announcement.findUnique({
+      where: { id },
+      include: { author: true },
+    });
+
+    if (!announcement) return res.status(404).json({ success: false, error: "Announcement not found" });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const isDev = user?.username.toLowerCase() === "dejavuh";
+
+    if (announcement.authorId !== userId && !isDev) {
+      return res.status(403).json({ success: false, error: "Unauthorized" });
+    }
+
+    await prisma.announcement.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};

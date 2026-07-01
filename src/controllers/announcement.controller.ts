@@ -83,8 +83,8 @@ export const createAnnouncement = async (req: Request, res: Response) => {
 
 export const toggleLike = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const { userId } = req.body;
+    const id = req.params.id as string;
+    const userId = req.body.userId as string;
 
     if (!userId) return res.status(400).json({ success: false, error: "Missing userId" });
 
@@ -110,7 +110,7 @@ export const toggleLike = async (req: Request, res: Response) => {
 
 export const getComments = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const comments = await prisma.announcementComment.findMany({
       where: { announcementId: id },
       orderBy: { createdAt: "asc" },
@@ -126,8 +126,9 @@ export const getComments = async (req: Request, res: Response) => {
 
 export const addComment = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const { userId, content } = req.body;
+    const id = req.params.id as string;
+    const userId = req.body.userId as string;
+    const content = req.body.content as string;
 
     if (!userId || !content) {
       return res.status(400).json({ success: false, error: "Missing userId or content" });
@@ -148,8 +149,8 @@ export const addComment = async (req: Request, res: Response) => {
 
 export const deleteComment = async (req: Request, res: Response) => {
   try {
-    const { commentId } = req.params;
-    const { userId } = req.body; // or forceGodMode from frontend
+    const commentId = req.params.commentId as string;
+    const userId = req.body.userId as string; // or forceGodMode from frontend
 
     const comment = await prisma.announcementComment.findUnique({
       where: { id: commentId },

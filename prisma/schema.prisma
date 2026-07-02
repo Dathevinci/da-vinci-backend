@@ -70,6 +70,7 @@ model Comment {
   animeId   Int?     // Optional: for tying discussions to specific anime
   animeTitle String? // Denormalized title for rendering in global feed
   parentId  String?  // Optional: references another comment
+  mediaUrl  String?  // Optional: attached image/GIF URL
   content   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -78,28 +78,36 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
 export const deleteComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const userId = req.body.userId as string; // In a real app, this should come from a verified JWT token
+    const userId = req.body.userId as string;
 
     const comment = await prisma.comment.findUnique({ where: { id } });
-
     if (!comment) {
       return res.status(404).json({ success: false, message: "Comment not found" });
     }
 
-    if (comment.userId !== userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const isAuthor = comment.userId === userId;
+    const isAdmin = user.username === 'Davinci' || user.username === 'dejavuh';
+
+    if (!isAuthor && !isAdmin) {
       return res.status(403).json({ success: false, message: "You can only delete your own comments" });
     }
 
     await prisma.comment.delete({ where: { id } });
     
-    // Deduct the 1 points they got from posting
+    // Only deduct points if the author deleted their own comment.
+    // If an admin deletes it, we should ideally deduct it too, but let's just deduct it for the author to prevent farming
     await prisma.user.update({
-      where: { id: userId },
+      where: { id: comment.userId },
       data: { arisePoints: { decrement: 1 } }
     });
 
     await prisma.pointLog.create({
-      data: { userId, amount: -1, reason: "Deleted a community view" }
+      data: { userId: comment.userId, amount: -1, reason: "Community view was deleted" }
     });
 
     res.json({ success: true, message: "Comment deleted" });
@@ -163,3 +171,42 @@ export const voteComment = async (req: Request, res: Response, next: NextFunctio
     next(error);
   }
 };
+
+export const editComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const { userId, content, mediaUrl } = req.body;
+
+    if (!userId || !content) {
+      return res.status(400).json({ success: false, message: "Invalid payload" });
+    }
+
+    const comment = await prisma.comment.findUnique({ where: { id }, include: { user: true } });
+    if (!comment) return res.status(404).json({ success: false, message: "Comment not found" });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    const isAuthor = comment.userId === userId;
+    const isAdmin = user.username === 'Davinci' || user.username === 'dejavuh';
+
+    if (!isAuthor && !isAdmin) {
+      return res.status(403).json({ success: false, message: "Not authorized to edit this comment" });
+    }
+
+    const updatedComment = await prisma.comment.update({
+      where: { id },
+      data: { content, mediaUrl: mediaUrl || null },
+      include: {
+        user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
+        votes: true
+      }
+    });
+
+    res.json({ success: true, data: updatedComment });
+  } catch (error) {
+    next(error);
+  }
+};
+
+

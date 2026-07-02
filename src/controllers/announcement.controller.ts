@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import { processMentions } from "../utils/mentions";
 
 const prisma = new PrismaClient();
 
@@ -101,6 +102,23 @@ export const toggleLike = async (req: Request, res: Response) => {
       await prisma.announcementLike.create({
         data: { announcementId: id, userId },
       });
+
+      const announcement = await prisma.announcement.findUnique({ where: { id } });
+      if (announcement && announcement.authorId !== userId) {
+        const actor = await prisma.user.findUnique({ where: { id: userId } });
+        if (actor) {
+          await prisma.notification.create({
+            data: {
+              userId: announcement.authorId,
+              actorId: userId,
+              type: "like",
+              message: `${actor.username} liked your update.`,
+              link: `/updates`
+            }
+          });
+        }
+      }
+
       res.json({ success: true, liked: true });
     }
   } catch (err: any) {
@@ -140,6 +158,25 @@ export const addComment = async (req: Request, res: Response) => {
         user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
       },
     });
+
+    const announcement = await prisma.announcement.findUnique({ where: { id } });
+    if (announcement && announcement.authorId !== userId) {
+      const actor = await prisma.user.findUnique({ where: { id: userId } });
+      if (actor) {
+        await prisma.notification.create({
+          data: {
+            userId: announcement.authorId,
+            actorId: userId,
+            type: "reply",
+            message: `${actor.username} commented on your update.`,
+            link: `/updates`
+          }
+        });
+      }
+    }
+
+    // Process @mentions in the comment content
+    await processMentions(content, userId, `/updates`);
 
     res.json({ success: true, data: comment });
   } catch (err: any) {

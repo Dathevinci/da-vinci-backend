@@ -12,6 +12,7 @@ import messageRoutes from "./routes/message.routes";
 import systemRoutes from "./routes/system.routes";
 import announcementRoutes from "./routes/announcement.routes";
 import authRoutes from "./routes/auth.routes";
+import notificationRoutes from "./routes/notification.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -36,6 +37,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/system", systemRoutes);
 app.use("/api/announcements", announcementRoutes);
 app.use("/api/auth", authRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // Error Handler must be last
 app.use(errorHandler);

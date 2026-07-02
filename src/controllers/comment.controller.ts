@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
+import { processMentions } from "../utils/mentions";
 
 export const getComments = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -64,10 +65,31 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
       where: { id: userId },
       data: { arisePoints: { increment: 1 } }
     });
+
+    if (parentId) {
+      const parent = await prisma.comment.findUnique({ where: { id: parentId } });
+      if (parent && parent.userId !== userId) {
+        const actor = await prisma.user.findUnique({ where: { id: userId } });
+        if (actor) {
+          await prisma.notification.create({
+            data: {
+              userId: parent.userId,
+              actorId: userId,
+              type: "reply",
+              message: `${actor.username} replied to your comment.`,
+              link: `/community`
+            }
+          });
+        }
+      }
+    }
     
     await prisma.pointLog.create({
       data: { userId, amount: 1, reason: "Shared your views with the community" }
     });
+
+    // Process @mentions in the comment content
+    await processMentions(content, userId, `/community`);
 
     res.status(201).json({ success: true, data: { ...comment, score: 0, userVote: 0, votes: undefined } });
   } catch (error) {
@@ -138,10 +160,28 @@ export const voteComment = async (req: Request, res: Response, next: NextFunctio
     // Only award points if the voter is NOT the author of the comment
     if (comment.userId !== userId) {
       if (newScore === 1 && oldScore <= 0) {
-        // Award point to AUTHOR for new upvote
-        await prisma.user.update({ where: { id: comment.userId }, data: { arisePoints: { increment: 1 } } });
-        await prisma.pointLog.create({ data: { userId: comment.userId, amount: 1, reason: "Received an upvote on your comment" } });
-      } else if (oldScore === 1 && newScore <= 0) {
+        // User changed vote to upvote OR upvoted for the first time
+        await prisma.user.update({
+          where: { id: comment.userId },
+          data: { arisePoints: { increment: 2 } }
+        });
+        await prisma.pointLog.create({
+          data: { userId: comment.userId, amount: 2, reason: "Your comment received an upvote" }
+        });
+
+        const actor = await prisma.user.findUnique({ where: { id: userId } });
+        if (actor) {
+          await prisma.notification.create({
+            data: {
+              userId: comment.userId,
+              actorId: userId,
+              type: "like",
+              message: `${actor.username} liked your comment.`,
+              link: `/community`
+            }
+          });
+        }
+      } else if (newScore === 0 && oldScore === 1) {
         // Deduct point if upvote is removed
         await prisma.user.update({ where: { id: comment.userId }, data: { arisePoints: { decrement: 1 } } });
         await prisma.pointLog.create({ data: { userId: comment.userId, amount: -1, reason: "Upvote removed from your comment" } });

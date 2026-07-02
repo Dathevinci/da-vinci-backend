@@ -77,7 +77,7 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
               actorId: userId,
               type: "reply",
               message: `${actor.username} replied to your comment.`,
-              link: `/community`
+              link: animeId ? `/anime/${animeId}` : `/community`
             }
           });
         }
@@ -89,7 +89,8 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
     });
 
     // Process @mentions in the comment content
-    await processMentions(content, userId, `/community`);
+    const commentLink = animeId ? `/anime/${animeId}` : `/community`;
+    await processMentions(content, userId, commentLink);
 
     res.status(201).json({ success: true, data: { ...comment, score: 0, userVote: 0, votes: undefined } });
   } catch (error) {
@@ -177,7 +178,7 @@ export const voteComment = async (req: Request, res: Response, next: NextFunctio
               actorId: userId,
               type: "like",
               message: `${actor.username} liked your comment.`,
-              link: `/community`
+              link: comment.animeId ? `/anime/${comment.animeId}` : `/community`
             }
           });
         }

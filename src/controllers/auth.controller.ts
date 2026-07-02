@@ -136,4 +136,34 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   }
 };
 
+export const changePassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, currentPassword, newPassword } = req.body;
+
+    if (!userId || !currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: "Missing required fields." });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ success: false, message: "Incorrect current password." });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    res.json({ success: true, message: "Password updated successfully." });
+  } catch (error) {
+    next(error);
+  }
+};
+
 

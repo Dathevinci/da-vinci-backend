@@ -4,6 +4,12 @@ const prisma = new PrismaClient();
 
 const announcementsData = [
   {
+    title: "Netflix-Style UI & Security Upgrade",
+    tag: "Major Update",
+    content: "What's New in this Update?\n\n- Netflix-Style Quick View: Hovering and clicking the chevron on any anime card now pops open a sleek, glassmorphic Quick View modal right over your dashboard!\n- Background Trailers: The new Quick View modal features seamless, autoplaying background trailers just like Netflix.\n- Change Password: You can now securely change your password directly from the Profile Settings tab.\n- Mobile Responsiveness: The entire platform has been polished to perfection on all mobile devices, eliminating horizontal scroll bugs and ensuring perfectly constrained layouts.",
+    image: null,
+  },
+  {
     title: "Cinematic Transitions & GIF Banners",
     tag: "Platform Updates",
     content: "Latest Platform Improvements\n\n- Cinematic Page Transitions: The entire website now features fluid fade and slide animations when navigating between pages.\n- Animated GIF Banners: Users who have reached 500 Arise Points (or Lead Dev status) can now upload animated GIFs for their profile background banners!\n- Community Fixes: We've completely bulletproofed the Community page against crashes from deleted accounts or missing data.",
@@ -58,6 +64,12 @@ async function main() {
     console.error("dejavuh user not found! Cannot seed announcements.");
     return;
   }
+
+  // Clear existing announcements to prevent duplicates
+  await prisma.announcement.deleteMany({
+    where: { authorId: devUser.id }
+  });
+  console.log("Cleared existing announcements.");
 
   // Insert backwards so they show up in chronological order in the feed
   for (let i = announcementsData.length - 1; i >= 0; i--) {

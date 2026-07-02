@@ -4,6 +4,12 @@ const prisma = new PrismaClient();
 
 const announcementsData = [
   {
+    title: "Cinematic Splash Screen & Fluid Loading",
+    tag: "Massive UI Overhaul",
+    content: "What's New in this Update?\n\n- The Gojo Splash Screen: We've added an incredibly smooth cinematic intro that plays the first time you load the site, featuring a stunning Gojo background with dynamic CSS water droplets and progressive blurs!\n- Buttery Smooth Animations: Rebuilt the loading sequence using Pure CSS Keyframes (hardware accelerated) so there is absolutely zero lag or choppiness.\n- Zero White Flash: Eradicated the white screen flash bug entirely by rendering the site inherently in dark mode from the first millisecond.\n- Sleek Minimalist Loader: Internal page transitions now feature a sleek, glowing indigo spinner that keeps the vibe immersive.",
+    image: null,
+  },
+  {
     title: "Netflix-Style UI & Security Upgrade",
     tag: "Major Update",
     content: "What's New in this Update?\n\n- Netflix-Style Quick View: Hovering and clicking the chevron on any anime card now pops open a sleek, glassmorphic Quick View modal right over your dashboard!\n- Background Trailers: The new Quick View modal features seamless, autoplaying background trailers just like Netflix.\n- Change Password: You can now securely change your password directly from the Profile Settings tab.\n- Mobile Responsiveness: The entire platform has been polished to perfection on all mobile devices, eliminating horizontal scroll bugs and ensuring perfectly constrained layouts.",

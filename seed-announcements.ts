@@ -4,6 +4,12 @@ const prisma = new PrismaClient();
 
 const announcementsData = [
   {
+    title: "Official Platform Roles & Hierarchy",
+    tag: "Staff Updates",
+    content: "We're officially rolling out the platform hierarchy!\n\n- Lead Developer: @dejavuh is the Lead Dev and creator of the Da Vinci platform, handling the architecture, database scaling, and major cinematic overhauls.\n- Administrator: @Davinci is our official Admin! The Admin has god-mode privileges over the community, including the power to moderate posts, delete updates, and manage community interactions to keep the platform safe.\n\nBoth roles have full access to edit and delete ANY post or comment on the updates page. If you see their names glowing in indigo, you know who you are talking to!",
+    image: null,
+  },
+  {
     title: "Cinematic Splash Screen & Fluid Loading",
     tag: "Massive UI Overhaul",
     content: "What's New in this Update?\n\n- The Gojo Splash Screen: We've added an incredibly smooth cinematic intro that plays the first time you load the site, featuring a stunning Gojo background with dynamic CSS water droplets and progressive blurs!\n- Buttery Smooth Animations: Rebuilt the loading sequence using Pure CSS Keyframes (hardware accelerated) so there is absolutely zero lag or choppiness.\n- Zero White Flash: Eradicated the white screen flash bug entirely by rendering the site inherently in dark mode from the first millisecond.\n- Sleek Minimalist Loader: Internal page transitions now feature a sleek, glowing indigo spinner that keeps the vibe immersive.",

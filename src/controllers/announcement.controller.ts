@@ -161,8 +161,9 @@ export const deleteComment = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const isDev = user?.username.toLowerCase() === "dejavuh";
+    const isAdmin = user?.username.toLowerCase() === "davinci";
 
-    if (comment.userId !== userId && !isDev) {
+    if (comment.userId !== userId && !isDev && !isAdmin) {
       return res.status(403).json({ success: false, error: "Unauthorized" });
     }
 
@@ -187,8 +188,9 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     const isDev = user?.username.toLowerCase() === "dejavuh";
+    const isAdmin = user?.username.toLowerCase() === "davinci";
 
-    if (announcement.authorId !== userId && !isDev) {
+    if (announcement.authorId !== userId && !isDev && !isAdmin) {
       return res.status(403).json({ success: false, error: "Unauthorized" });
     }
 
@@ -198,3 +200,75 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: err.message });
   }
 };
+
+export const editComment = async (req: Request, res: Response) => {
+  try {
+    const commentId = req.params.commentId as string;
+    const { userId, content } = req.body;
+
+    const comment = await prisma.announcementComment.findUnique({
+      where: { id: commentId },
+    });
+
+    if (!comment) return res.status(404).json({ success: false, error: "Comment not found" });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const isDev = user?.username.toLowerCase() === "dejavuh";
+    const isAdmin = user?.username.toLowerCase() === "davinci";
+
+    if (comment.userId !== userId && !isDev && !isAdmin) {
+      return res.status(403).json({ success: false, error: "Unauthorized" });
+    }
+
+    const updated = await prisma.announcementComment.update({
+      where: { id: commentId },
+      data: { content },
+      include: {
+        user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
+      },
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+export const editAnnouncement = async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const { userId, title, content } = req.body;
+
+    const announcement = await prisma.announcement.findUnique({
+      where: { id },
+    });
+
+    if (!announcement) return res.status(404).json({ success: false, error: "Announcement not found" });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const isDev = user?.username.toLowerCase() === "dejavuh";
+    const isAdmin = user?.username.toLowerCase() === "davinci";
+
+    if (announcement.authorId !== userId && !isDev && !isAdmin) {
+      return res.status(403).json({ success: false, error: "Unauthorized" });
+    }
+
+    const updated = await prisma.announcement.update({
+      where: { id },
+      data: { title, content },
+      include: {
+        author: {
+          select: { id: true, username: true, avatar: true, arisePoints: true },
+        },
+        _count: {
+          select: { likes: true, comments: true },
+        },
+      },
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+

@@ -1,0 +1,323 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  email     String   @unique
+  password  String?
+  discordId String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  avatar    String?
+  bannerUrl String?
+  bannerPosition Int  @default(50)   // vertical focus of the cover banner (object-position %, 0=top, 100=bottom)
+  bannerStyle String @default("full") // "full" = full-screen background, "cover" = header strip
+  bio       String?
+  arisePoints Int      @default(0)   // community currency
+  xp          Int      @default(0)   // drives level (max level 10), separate from currency
+  usernameChanges Int  @default(0)   // first username change is free, then costs Arise Points
+  role        String   @default("USER") // LEAD_DEV | ADMIN | USER — tied to the account, survives username changes
+  isPrivate   Boolean  @default(false)
+  isAdmin     Boolean  @default(false)
+  theme       String   @default("dark")
+  
+  purchasedBanners String[] @default([])
+  purchasedTags    String[] @default([])
+  purchasedRoles   String[] @default([])
+  purchasedEffects String[] @default([])
+  purchasedThemes  String[] @default([])
+  purchasedColors  String[] @default([])
+  purchasedFonts   String[] @default([])
+  purchasedFrames  String[] @default([])
+
+  activeRole       String?
+  activeTag        String?
+  activeEffect     String?
+  activeTheme      String?
+  activeColor      String?
+  activeFont       String?
+  activeFrame      String?
+
+  watchlist    WatchlistItem[]
+  likes        AnimeLike[]
+  followers    Follow[] @relation("followers")
+  following    Follow[] @relation("following")
+  notifications Notification[] @relation("userNotifications")
+  triggeredNotifications Notification[] @relation("actorNotifications")
+  comments     Comment[]
+  commentVotes CommentVote[]
+  pointLogs    PointLog[]
+  conversationsAsUser1 Conversation[] @relation("ConversationUser1")
+  conversationsAsUser2 Conversation[] @relation("ConversationUser2")
+  messages             Message[]
+  announcements        Announcement[]
+  announcementLikes    AnnouncementLike[]
+  announcementComments AnnouncementComment[]
+
+  createdInvites       InviteCode[] @relation("createdInvites")
+  usedInvite           InviteCode?  @relation("usedInvites")
+
+  novelBookmarks       NovelBookmark[]
+  manhwaBookmarks      ManhwaBookmark[]
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  user1Id   String
+  user2Id   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user1     User      @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2     User      @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages  Message[]
+
+  @@unique([user1Id, user2Id])
+}
+
+model Message {
+  id             String   @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  userId    String
+  animeId   Int?     // Optional: for tying discussions to specific anime
+  animeTitle String? // Denormalized title for rendering in global feed
+  
+  // Manhwa support
+  mangaId      String?  // The AsuraScans slug (e.g. 'standard-of-reincarnation')
+  mangaTitle   String?  // Title for global feed rendering
+  chapterId    String?  // The specific chapter ID
+  chapterTitle String?  // e.g. 'Chapter 190'
+
+  parentId  String?  // Optional: references another comment
+  mediaUrl  String?  // Optional: attached image/GIF URL
+  content   String
+  isPinned  Boolean  @default(false)
+  blessed   Boolean  @default(false) // an admin/lead-dev granted this comment a Divine Blessing
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    Comment?      @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[]     @relation("CommentReplies")
+  votes     CommentVote[]
+}
+
+model CommentVote {
+  id        String   @id @default(uuid())
+  commentId String
+  userId    String
+  value     Int      // 1 for upvote, -1 for downvote
+
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+}
+
+model Follow {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("following", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("followers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+}
+
+model WatchlistItem {
+  id         String   @id @default(uuid())
+  userId     String
+  anilistId  Int
+  title      String
+  coverImage String?
+  genre      String?  // The primary genre of the anime
+  status     String   // "INTERESTED", "WATCHING", "WAITING", "FINISHED", "DROPPED"
+  score      Int?     // 0-10 or 0-100
+  notes      String?
+  // Runtime metadata from AniList, used to compute watch TIME (hours) — which
+  // drives both the finish payout and the "Hours Watched" stat on the profile.
+  // Nullable: older rows predate this and are backfilled by backfill-runtimes.ts.
+  episodes   Int?     // total episode count
+  duration   Int?     // minutes per episode (~24 for most TV anime)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, anilistId])
+}
+
+// A public "Like" / favourite for an anime. Independent from WatchlistItem so an
+// anime can be both liked and tracked. Shown on the user's public profile.
+model AnimeLike {
+  id         String   @id @default(uuid())
+  userId     String
+  anilistId  Int
+  title      String
+  coverImage String?
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, anilistId])
+}
+
+model CacheItem {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  data      String   // JSON string
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  actorId   String
+  type      String   // e.g., "NEW_FOLLOWER"
+  message   String
+  isRead    Boolean  @default(false)
+  link      String?  // Optional link to navigate to
+  createdAt DateTime @default(now())
+
+  user      User     @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User     @relation("actorNotifications", fields: [actorId], references: [id], onDelete: Cascade)
+}
+
+model PointLog {
+  id        String   @id @default(uuid())
+  userId    String
+  amount    Int
+  reason    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Announcement {
+  id        String   @id @default(uuid())
+  authorId  String
+  title     String
+  content   String
+  tag       String
+  image     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes     AnnouncementLike[]
+  comments  AnnouncementComment[]
+}
+
+model AnnouncementLike {
+  id             String   @id @default(uuid())
+  announcementId String
+  userId         String
+  createdAt      DateTime @default(now())
+
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, userId])
+}
+
+model AnnouncementComment {
+  id             String   @id @default(uuid())
+  announcementId String
+  userId         String
+  content        String
+  createdAt      DateTime @default(now())
+
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model InviteCode {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  createdBy String
+  isUsed    Boolean  @default(false)
+  usedBy    String?  @unique
+  createdAt DateTime @default(now())
+
+  creator     User  @relation("createdInvites", fields: [createdBy], references: [id], onDelete: Cascade)
+  usedByUser  User? @relation("usedInvites", fields: [usedBy], references: [id], onDelete: SetNull)
+}
+
+model Novel {
+  id          String   @id @default(uuid())
+  title       String
+  synopsis    String
+  author      String
+  coverImage  String?
+  status      String   @default("ONGOING") // ONGOING, COMPLETED, HIATUS
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  chapters    Chapter[]
+  bookmarks   NovelBookmark[]
+}
+
+model Chapter {
+  id          String   @id @default(uuid())
+  novelId     String
+  chapterNum  Int
+  title       String
+  content     String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  novel       Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  bookmarks   NovelBookmark[]
+
+  @@unique([novelId, chapterNum])
+}
+
+model NovelBookmark {
+  id              String   @id @default(uuid())
+  userId          String
+  novelId         String
+  lastReadChapter String?  // Optional: references Chapter id
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  novel           Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  chapter         Chapter? @relation(fields: [lastReadChapter], references: [id], onDelete: SetNull)
+
+  @@unique([userId, novelId])
+}
+
+model ManhwaBookmark {
+  id         String   @id @default(uuid())
+  userId     String
+  mangaId    String   // The AsuraScans slug
+  title      String
+  coverImage String?
+  status     String   @default("READING") // READING, COMPLETED, ON_HOLD, DROPPED, PLAN_TO_READ
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, mangaId])
+}

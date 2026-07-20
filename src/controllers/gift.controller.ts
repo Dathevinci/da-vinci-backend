@@ -94,3 +94,73 @@ export const giftItem = async (req: Request, res: Response, next: NextFunction) 
     next(error);
   }
 };
+
+/**
+ * Buy a shop item for YOURSELF with your own Arise Points. Server-authoritative:
+ * price + inventory slot come from the backend catalog, the balance is checked
+ * against the DB, and deduct+grant+log run atomically. This is what makes AP a
+ * real currency — the client can no longer set its own balance or inventory.
+ *
+ * POST /api/users/purchase
+ * body: { userId, itemId }
+ */
+export const purchaseItem = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, itemId } = req.body as { userId?: string; itemId?: string };
+
+    if (!userId || !itemId) {
+      return res.status(400).json({ success: false, message: "Missing userId or itemId." });
+    }
+
+    const item = SHOP_CATALOG[itemId];
+    if (!item) {
+      return res.status(400).json({ success: false, message: "That item isn't for sale." });
+    }
+    const field = PURCHASED_FIELD[item.type];
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ success: false, message: "User not found." });
+
+    // Already owned → idempotent success (covers double-clicks / retries).
+    const owned = ((user as any)[field] as string[]) || [];
+    if (owned.includes(itemId)) {
+      return res.json({ success: true, alreadyOwned: true, arisePoints: user.arisePoints });
+    }
+
+    // Staff (Lead Dev / Admin) buy free, mirroring the shop UI. Role is tied to
+    // the account and self-heals from the username for un-backfilled accounts.
+    const role = (user as any).role && (user as any).role !== "USER" ? (user as any).role : getRole(user.username);
+    const staff = role === "LEAD_DEV" || role === "ADMIN";
+    const cost = staff ? 0 : item.price;
+
+    if (user.arisePoints < cost) {
+      return res.status(402).json({
+        success: false,
+        message: `You need ${item.price.toLocaleString()} Arise Points — you have ${user.arisePoints.toLocaleString()}.`,
+      });
+    }
+
+    const ops: any[] = [
+      prisma.user.update({
+        where: { id: user.id },
+        data: {
+          ...(cost > 0 && { arisePoints: { decrement: cost } }),
+          [field]: { push: itemId },
+        },
+      }),
+    ];
+    if (cost > 0) {
+      ops.push(
+        prisma.pointLog.create({
+          data: { userId: user.id, amount: -cost, reason: `Bought "${itemId}"` },
+        })
+      );
+    }
+
+    const [updated] = await prisma.$transaction(ops);
+
+    res.json({ success: true, cost, arisePoints: (updated as any).arisePoints, itemId, type: item.type });
+  } catch (error) {
+    next(error);
+  }
+};

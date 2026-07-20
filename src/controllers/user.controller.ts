@@ -199,25 +199,19 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     }
 
     const updateData: any = {
-      // NOTE: username is intentionally NOT updatable here — it goes through the
-      // dedicated, gated changeUsername endpoint (free once, then costs AP).
+      // NOTE: username goes through the gated changeUsername endpoint.
+      // arisePoints + purchased* are DELIBERATELY not client-writable — money and
+      // inventory change ONLY via server-authoritative paths (the /purchase and
+      // /gift endpoints, the Ko-fi webhook, and the avatar/banner reward below).
+      // This is what stops the browser minting points or granting itself items.
       ...(email && { email }),
       ...(avatar !== undefined && { avatar }),
       ...(bannerUrl !== undefined && { bannerUrl }),
       ...(bannerPosition !== undefined && { bannerPosition: Math.max(0, Math.min(100, Number(bannerPosition))) }),
       ...(bannerStyle !== undefined && { bannerStyle: bannerStyle === "cover" ? "cover" : "full" }),
       ...(bio !== undefined && { bio }),
-      ...(arisePoints !== undefined && { arisePoints: Number(arisePoints) }),
       ...(isPrivate !== undefined && { isPrivate: Boolean(isPrivate) }),
       ...(theme !== undefined && { theme }),
-      ...(purchasedBanners !== undefined && { purchasedBanners }),
-      ...(purchasedTags !== undefined && { purchasedTags }),
-      ...(purchasedRoles !== undefined && { purchasedRoles }),
-      ...(purchasedEffects !== undefined && { purchasedEffects }),
-      ...(purchasedThemes !== undefined && { purchasedThemes }),
-      ...(purchasedColors !== undefined && { purchasedColors }),
-      ...(purchasedFonts !== undefined && { purchasedFonts }),
-      ...(purchasedFrames !== undefined && { purchasedFrames }),
       ...(activeRole !== undefined && { activeRole }),
       ...(activeTag !== undefined && { activeTag }),
       ...(activeEffect !== undefined && { activeEffect }),

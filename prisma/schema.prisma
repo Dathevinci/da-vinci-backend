@@ -274,7 +274,6 @@ model Novel {
   updatedAt   DateTime @updatedAt
 
   chapters    Chapter[]
-  bookmarks   NovelBookmark[]
 }
 
 model Chapter {
@@ -287,22 +286,25 @@ model Chapter {
   updatedAt   DateTime @updatedAt
 
   novel       Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
-  bookmarks   NovelBookmark[]
 
   @@unique([novelId, chapterNum])
 }
 
+// Tracks a SCRAPED novel on a user's profile. novelId is the source slug
+// ("fmtl:<slug>" for FanMTL, or a bare ReadNovelFull slug) — NOT a Novel row —
+// so this mirrors ManhwaBookmark (denormalized title/cover, no FK to Novel).
 model NovelBookmark {
   id              String   @id @default(uuid())
   userId          String
-  novelId         String
-  lastReadChapter String?  // Optional: references Chapter id
+  novelId         String   // source slug, e.g. "fmtl:omniscient-readers-viewpoint"
+  title           String?  // denormalized for profile rendering
+  coverImage      String?  // raw source cover URL (proxied client-side via /api/novel-image)
+  status          String   @default("READING") // READING, FINISHED, WAITING, INTERESTED, DROPPED
+  lastReadChapter String?  // optional reading-progress pointer (plain string; no FK)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  novel           Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
-  chapter         Chapter? @relation(fields: [lastReadChapter], references: [id], onDelete: SetNull)
 
   @@unique([userId, novelId])
 }

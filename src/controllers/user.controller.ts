@@ -73,6 +73,7 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
       include: {
         watchlist: true,
         manhwaBookmarks: true,
+        novelBookmarks: true,
         likes: true,
         followers: { include: { follower: true } },
         following: { include: { following: true } }
@@ -267,6 +268,7 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
       include: {
         watchlist: true,
         manhwaBookmarks: true,
+        novelBookmarks: true,
         likes: true,
         followers: { include: { follower: true } },
         following: { include: { following: true } }
@@ -284,6 +286,7 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
       if (!isOwner && !isMutual) {
         user.watchlist = [];
         user.manhwaBookmarks = [];
+        user.novelBookmarks = [];
         user.likes = [];
         user.bio = "This profile is private. You must mutually follow each other to see their bio, banner, and watchlist.";
         user.bannerUrl = null;

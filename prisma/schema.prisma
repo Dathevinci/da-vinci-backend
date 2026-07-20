@@ -323,3 +323,25 @@ model ManhwaBookmark {
 
   @@unique([userId, mangaId])
 }
+
+// A Ko-fi payment (donation / membership / shop order), logged by the webhook.
+// kofiTxnId is unique so the webhook is idempotent (Ko-fi may retry). Not FK'd
+// to User — we keep the row even if the payer never matched an account, so the
+// public total still counts it. matchedUserId is set when we resolved the
+// Da Vinci username from the payment note.
+model Donation {
+  id            String   @id @default(uuid())
+  kofiTxnId     String   @unique
+  type          String   // "Donation" | "Subscription" | "Shop Order"
+  fromName      String   // Ko-fi display name of the payer
+  amount        Float
+  currency      String   @default("GBP")
+  message       String?  // the payer's note (where they put their username)
+  tierName      String?  // membership tier, if any
+  isSubscription Boolean @default(false)
+  isPublic      Boolean  @default(true) // Ko-fi "show me publicly" choice — gates the supporters wall
+  matchedUserId String?  // resolved Da Vinci user, if the note matched one
+  matchedUsername String? // denormalized for the public "recent supporters" feed
+  apGranted     Int      @default(0)
+  createdAt     DateTime @default(now())
+}

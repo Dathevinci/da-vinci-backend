@@ -5,6 +5,41 @@ const prisma = new PrismaClient();
 // The Dev Blog entries that should exist on the Updates page (newest first).
 const announcementsData = [
   {
+    title: "Da Vinci — Dev Blog 1.5.1: Light Novels, Real Support & a Safer Account",
+    tag: "Dev Blog",
+    content:
+      "Da Vinci — Dev Blog 1.5.1\n\n" +
+      "1.5 reimagined your profile. 1.5.1 grows the library, opens up real ways to support the atelier, and quietly makes your account a lot safer. Here's everything.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Light Novels\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Da Vinci is no longer just anime and manhwa — there's a whole third mode for Light Novels, wrapped in its own pink theme. Browse a Netflix-style home feed with a hero banner, Trending and Recently Updated shelves and HD covers, then drop into a clean reader with adjustable font size that remembers exactly where you left off. We now pull from two sources, so the catalogue is huge — including the ones you kept asking for, like Omniscient Reader's Viewpoint. Switch modes any time from the nav bar.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Novels on your profile\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Your profile Collection now has a third tab: Novels. Track what you're Reading, Finished, or planning to start — exactly like your anime and manhwa, with the status picker right on the card. Your whole library, finally in one place.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Support the atelier\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "We keep Da Vinci ad-free — and now it's easy to help keep it that way. The Support page has been completely redesigned with a live funding tracker and a Hall of Patrons. Become a Supporter through Ko-fi and you'll earn a gold Supporter badge on your profile plus Arise Points, applied automatically. Prefer to just top up? You can buy Arise Points directly. Pop your username in the Ko-fi note and the perks land within a minute.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "The shop, upgraded\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Every frame and effect is still yours for Arise Points — and if you're short, you can now top up with real money right from the shop. Same cosmetics, more ways to get them.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Behind the scenes\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Your account is meaningfully safer: sign-ins now issue a secure session token, and only you can change or delete your own account. We also smoothed out scrolling and loading across the app. Nothing you need to do — it just works.\n\n" +
+
+      "Thank you for being here. More soon. 💜",
+    image: null,
+  },
+  {
     title: "Da Vinci — Dev Blog 1.5: The Profile, Reimagined — Popouts, a New Card & Divine Blessings",
     tag: "Dev Blog",
     content:
@@ -476,7 +511,7 @@ async function main() {
   // message so re-running the seed on each deploy never spams anyone; brand-new
   // users who join later still receive it.
   const BROADCAST_MSG =
-    "📢 @everyone — Dev Blog 1.5 is live: the whole profile is now a Discord-style card with your effect playing across all of it, profile popouts everywhere you click a name, effects that finally stick when you scroll, and Divine Blessings in the comments. Read it in Updates.";
+    "📢 @everyone — Dev Blog 1.5.1 is live: Light Novels are here (a whole new mode!), you can track novels on your profile, support the atelier for a gold Supporter badge + Arise Points, and your account is safer than ever. Read it in Updates.";
 
   const allUsers = await prisma.user.findMany({ select: { id: true } });
   let notified = 0;
@@ -498,7 +533,7 @@ async function main() {
     });
     notified++;
   }
-  console.log(`Broadcast Dev Blog 1.5 to ${notified} user(s).`);
+  console.log(`Broadcast Dev Blog 1.5.1 to ${notified} user(s).`);
 
   console.log("Seeding complete!");
 }

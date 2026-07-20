@@ -25,6 +25,7 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   effect_mahoraga: { type: "effect", price: 8000 },
   effect_tempest: { type: "effect", price: 7500 },
   effect_blackhole: { type: "effect", price: 7500 },
+  effect_void: { type: "effect", price: 21200 },
   effect_unblinking: { type: "effect", price: 20000 },
   effect_evernight: { type: "effect", price: 6500 },
   effect_fool: { type: "effect", price: 6000 },

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { payout, getRole } from "../utils/economy";
 import { sanitizeOwnUser, sanitizePublicUser, sanitizePublicUsers } from "../utils/sanitizeUser";
+import { signToken, getActorId } from "../lib/jwt";
 
 
 export const createUser = async (req: Request, res: Response, next: NextFunction) => {
@@ -26,7 +27,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
         return res.status(400).json({ success: false, message: "Username or email is taken by someone else." });
       }
       // "Login" successful
-      return res.status(200).json({ success: true, data: sanitizeOwnUser(user) });
+      return res.status(200).json({ success: true, data: sanitizeOwnUser(user), token: signToken(user.id) });
     }
 
     // Register new user (requires invite code)
@@ -60,7 +61,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
     });
 
 
-    res.status(201).json({ success: true, data: sanitizeOwnUser(user) });
+    res.status(201).json({ success: true, data: sanitizeOwnUser(user), token: signToken(user.id) });
   } catch (error: any) {
     next(error);
   }
@@ -94,6 +95,14 @@ export const USERNAME_CHANGE_COST = 500;
 export const changeUsername = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.params.id as string;
+
+    // Only the owner may rename this account (verified token wins; tokenless
+    // pre-JWT sessions are grandfathered).
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only change your own username." });
+    }
+
     const raw = (req.body.username || "").trim();
 
     if (!/^[a-zA-Z0-9_]{3,20}$/.test(raw)) {
@@ -163,7 +172,15 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
             purchasedBanners, purchasedTags, purchasedRoles, purchasedEffects, purchasedThemes, purchasedColors, purchasedFonts, purchasedFrames,
             activeRole, activeTag, activeEffect, activeTheme, activeColor, activeFont, activeFrame } = req.body;
     const userId = req.params.id as string;
-    
+
+    // Identity guard (soft): if the request carries a VERIFIED token, it must be
+    // the owner. Tokenless pre-JWT sessions are grandfathered so nobody is locked
+    // out mid-session — they get a token on their next login and become protected.
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only edit your own profile." });
+    }
+
     let incrementPoints = 0;
 
     // Check for Avatar update reward
@@ -242,7 +259,22 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
 export const deleteUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.params.id as string;
-    
+
+    // Deletion is destructive + irreversible → HARD-require a verified token
+    // (the owner, or an admin). No frontend exposes this, so no legitimate user
+    // is affected; it closes the "anyone can delete any account" hole.
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to delete your account." });
+    }
+    if (actor !== userId) {
+      const actingUser = await prisma.user.findUnique({ where: { id: actor } });
+      const role = (actingUser as any)?.role;
+      if (role !== "ADMIN" && role !== "LEAD_DEV") {
+        return res.status(403).json({ success: false, message: "You can only delete your own account." });
+      }
+    }
+
     await prisma.user.delete({
       where: { id: userId }
     });

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getRole } from "../utils/economy";
 import { SHOP_CATALOG, PURCHASED_FIELD } from "../data/shopCatalog";
+import { getActorId } from "../lib/jwt";
 
 /**
  * Gift a shop item to another user, paid for with the gifter's own Arise Points.
@@ -24,6 +25,13 @@ export const giftItem = async (req: Request, res: Response, next: NextFunction) 
 
     if (!gifterId || !recipientUsername || !itemId) {
       return res.status(400).json({ success: false, message: "Missing gifterId, recipientUsername, or itemId." });
+    }
+
+    // You can only spend your OWN points (verified token wins; tokenless
+    // pre-JWT sessions grandfathered).
+    const actor = getActorId(req);
+    if (actor && actor !== gifterId) {
+      return res.status(403).json({ success: false, message: "You can only gift with your own Arise Points." });
     }
 
     const item = SHOP_CATALOG[itemId];
@@ -110,6 +118,13 @@ export const purchaseItem = async (req: Request, res: Response, next: NextFuncti
 
     if (!userId || !itemId) {
       return res.status(400).json({ success: false, message: "Missing userId or itemId." });
+    }
+
+    // You can only buy for yourself (verified token wins; tokenless pre-JWT
+    // sessions grandfathered).
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only buy with your own Arise Points." });
     }
 
     const item = SHOP_CATALOG[itemId];

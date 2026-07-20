@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import bcrypt from "bcryptjs";
 import { sanitizeOwnUser } from "../utils/sanitizeUser";
+import { signToken } from "../lib/jwt";
 
 
 export const signup = async (req: Request, res: Response, next: NextFunction) => {
@@ -61,7 +62,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
     });
 
 
-    res.status(201).json({ success: true, data: sanitizeOwnUser(user) });
+    res.status(201).json({ success: true, data: sanitizeOwnUser(user), token: signToken(user.id) });
   } catch (error) {
     next(error);
   }
@@ -98,7 +99,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
       return res.status(401).json({ success: false, message: "Invalid credentials." });
     }
 
-    res.status(200).json({ success: true, data: sanitizeOwnUser(user) });
+    res.status(200).json({ success: true, data: sanitizeOwnUser(user), token: signToken(user.id) });
   } catch (error) {
     next(error);
   }

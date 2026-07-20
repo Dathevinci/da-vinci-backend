@@ -428,6 +428,30 @@ async function main() {
   }
   console.log(`Crimson donor backfill: ${crimsonBearers.length} account(s) marked.`);
 
+  // ── Supporter badge: mark donors as Supporters (rename-proof) ──
+  // The persistent "supporter" marker is tag_supporter in purchasedTags; the
+  // profile renders a Supporter badge off it. Grant it to anyone who owns an
+  // exclusive donor effect (effect_crimson) — i.e. our donors — so a rename can
+  // never strip it. Runs AFTER the crimson backfill above, so a freshly-stamped
+  // donor is caught in the same deploy. Idempotent — skips accounts that have it.
+  const supporterBearers = await prisma.user.findMany({
+    where: {
+      AND: [
+        { purchasedEffects: { has: "effect_crimson" } },
+        { NOT: { purchasedTags: { has: "tag_supporter" } } },
+      ],
+    },
+    select: { id: true, username: true },
+  });
+  for (const u of supporterBearers) {
+    await prisma.user.update({
+      where: { id: u.id },
+      data: { purchasedTags: { push: "tag_supporter" } },
+    });
+    console.log(`Supporter badge granted to ${u.username}.`);
+  }
+  console.log(`Supporter backfill: ${supporterBearers.length} account(s) marked.`);
+
   // Remove ALL existing updates so the Updates page starts clean.
   const deleted = await prisma.announcement.deleteMany({});
   console.log(`Cleared ${deleted.count} existing announcement(s).`);

@@ -5,6 +5,36 @@ const prisma = new PrismaClient();
 // The Dev Blog entries that should exist on the Updates page (newest first).
 const announcementsData = [
   {
+    title: "Da Vinci — Dev Blog 1.5.2: Every Episode & Chapter Now Pays",
+    tag: "Dev Blog",
+    content:
+      "Da Vinci — Dev Blog 1.5.2\n\n" +
+      "Quick one, but a good one: your time on Da Vinci now pays you back across ALL THREE modes. Watch anime, read manhwa, read light novels — you earn Arise Points and XP for it, automatically. Here's exactly what everything's worth.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Watching anime\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Every episode you watch: +3 Arise Points and +25 XP. Counted once per episode, so rewatching won't farm points — but grinding through a long series really stacks up.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Reading manhwa & novels\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Every chapter you read — manhwa or light novel — pays +2 Arise Points and +15 XP. Just open it and read; the points land on their own. Once per chapter, so a re-read won't double up.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Adding to your library\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Add a manhwa or novel to your profile for the first time and pocket a one-time +5 Arise Points. Track what you love, get paid for it.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "What it's all for\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Arise Points buy everything in the Arise Shop — animated avatar frames and cinematic profile effects, all the way up to the new SSS-grade Domain Expansion: Infinite Void. XP levels you up. So the more you watch and read, the more you've got to flex — and your balance ticks up live in the nav bar the moment you earn.\n\n" +
+
+      "Now go watch something. Or read something. Ideally both. 💜",
+    image: null,
+  },
+  {
     title: "Da Vinci — Dev Blog 1.5.1: Light Novels, Real Support & a Safer Account",
     tag: "Dev Blog",
     content:
@@ -511,7 +541,7 @@ async function main() {
   // message so re-running the seed on each deploy never spams anyone; brand-new
   // users who join later still receive it.
   const BROADCAST_MSG =
-    "📢 @everyone — Dev Blog 1.5.1 is live: Light Novels are here (a whole new mode!), you can track novels on your profile, support the atelier for a gold Supporter badge + Arise Points, and your account is safer than ever. Read it in Updates.";
+    "📢 @everyone — Dev Blog 1.5.2 is live: you now EARN Arise Points across every mode — +3 AP per anime episode, +2 AP per manhwa/novel chapter, and +5 for adding a title to your library. Full breakdown in Updates.";
 
   const allUsers = await prisma.user.findMany({ select: { id: true } });
   let notified = 0;
@@ -533,7 +563,7 @@ async function main() {
     });
     notified++;
   }
-  console.log(`Broadcast Dev Blog 1.5.1 to ${notified} user(s).`);
+  console.log(`Broadcast Dev Blog 1.5.2 to ${notified} user(s).`);
 
   console.log("Seeding complete!");
 }

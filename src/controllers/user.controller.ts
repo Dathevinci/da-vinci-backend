@@ -479,3 +479,53 @@ export const addXpForWatching = async (req: Request, res: Response, next: NextFu
     next(error);
   }
 };
+
+// Award Arise Points + XP for a repeatable content action — reading a manhwa /
+// novel chapter, or adding a title to your library. This is the manhwa/novel
+// analogue of addXpForWatching. Server-authoritative + idempotent: the payout is
+// fixed by a WHITELISTED `action` (so the client can't pick the amount) and
+// deduped on a per-key PointLog reason (so the same chapter/title never pays
+// twice).
+//
+// POST /api/users/:id/earn   body: { action: "read" | "track", key: string }
+//   read  → key "manhwa:<mangaId>:<chapterId>" | "novel:<novelId>:<chapterId>"
+//   track → key "manhwa:<mangaId>"             | "novel:<novelId>"
+const EARN_ACTIONS = ["read", "track"] as const;
+
+export const earnPoints = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.params.id as string;
+    const { action, key } = (req.body || {}) as { action?: string; key?: string };
+
+    // Only the owner may earn for this account (verified token wins; tokenless
+    // pre-JWT sessions grandfathered).
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only earn for your own account." });
+    }
+
+    if (!action || !key || !EARN_ACTIONS.includes(action as any) || key.length > 300) {
+      return res.status(400).json({ success: false, message: "Invalid earn action." });
+    }
+
+    const reason = `${action}:${key}`;
+
+    // Dedup — award only the FIRST time for this exact key.
+    const already = await prisma.pointLog.findFirst({ where: { userId, reason } });
+    if (already) {
+      const current = await prisma.user.findUnique({ where: { id: userId }, select: { arisePoints: true, xp: true } });
+      return res.json({ success: true, awarded: false, data: { arisePoints: current?.arisePoints ?? 0, xp: current?.xp ?? 0 } });
+    }
+
+    const { ap, xp } = payout(action as any);
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: { arisePoints: { increment: ap }, xp: { increment: xp } },
+    });
+    await prisma.pointLog.create({ data: { userId, amount: ap, reason } });
+
+    res.json({ success: true, awarded: true, data: { arisePoints: user.arisePoints, xp: user.xp } });
+  } catch (error) {
+    next(error);
+  }
+};

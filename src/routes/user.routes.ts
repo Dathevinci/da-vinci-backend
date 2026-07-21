@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs, addXpForWatching, changeUsername } from "../controllers/user.controller";
+import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs, addXpForWatching, earnPoints, changeUsername } from "../controllers/user.controller";
 import { getUserNotifications, markNotificationAsRead, markAllAsRead } from "../controllers/notification.controller";
 import { giftItem, purchaseItem } from "../controllers/gift.controller";
 import { validateRequest } from "../middleware/validateRequest";
@@ -19,6 +19,7 @@ router.post("/", validateRequest(createUserSchema), createUser);
 router.get("/:id", getUser);
 router.get("/:id/point-logs", getUserPointLogs);
 router.post("/:id/add-xp", addXpForWatching);
+router.post("/:id/earn", earnPoints);
 router.patch("/:id/username", changeUsername);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);

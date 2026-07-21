@@ -22,6 +22,8 @@ export function getRole(username: string | null | undefined): Role {
 // a passive XP = floor(ap / 10) so accumulating AP nudges the level bar.
 export const PAYOUTS = {
   watch: { ap: 3, xp: 25 },   // per UNIQUE episode watched (deduped in the controller)
+  read:  { ap: 2, xp: 15 },   // per UNIQUE manhwa/novel chapter read (deduped by reason)
+  track: { ap: 5, xp: 5 },    // first time adding a manhwa/novel to your library
   comment: { ap: 5, xp: 2 },
   follow: { ap: 5, xp: 0 },
 } as const;

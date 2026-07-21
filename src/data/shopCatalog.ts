@@ -11,6 +11,14 @@ export type ShopItemType = "effect" | "frame";
 export interface CatalogEntry {
   type: ShopItemType;
   price: number;
+  // Limited-time drops: after this ISO instant the item can no longer be
+  // bought OR gifted (checked server-side in gift.controller). Owners keep it.
+  availableUntil?: string;
+}
+
+// True when a catalog item is still purchasable/giftable right now.
+export function isAvailable(item: CatalogEntry): boolean {
+  return !item.availableUntil || Date.now() <= new Date(item.availableUntil).getTime();
 }
 
 export const SHOP_CATALOG: Record<string, CatalogEntry> = {
@@ -27,6 +35,8 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   effect_blackhole: { type: "effect", price: 7500 },
   effect_void: { type: "effect", price: 21200 },
   effect_unblinking: { type: "effect", price: 20000 },
+  // LIMITED DROP — vanishes from sale after the window closes (owners keep it).
+  effect_dejavu: { type: "effect", price: 15000, availableUntil: "2026-07-24T23:59:59Z" },
   effect_evernight: { type: "effect", price: 6500 },
   effect_fool: { type: "effect", price: 6000 },
   effect_ascension: { type: "effect", price: 5000 },

@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getRole } from "../utils/economy";
-import { SHOP_CATALOG, PURCHASED_FIELD } from "../data/shopCatalog";
+import { SHOP_CATALOG, PURCHASED_FIELD, isAvailable } from "../data/shopCatalog";
 import { getActorId } from "../lib/jwt";
 
 /**
@@ -37,6 +37,11 @@ export const giftItem = async (req: Request, res: Response, next: NextFunction) 
     const item = SHOP_CATALOG[itemId];
     if (!item) {
       return res.status(400).json({ success: false, message: "That item can't be gifted." });
+    }
+    // Limited-time drops: once the window closes, gifting is off too — the
+    // countdown would be meaningless if the gift endpoint stayed open.
+    if (!isAvailable(item)) {
+      return res.status(410).json({ success: false, message: "That item's limited window has closed — it can no longer be gifted." });
     }
     const field = PURCHASED_FIELD[item.type];
 
@@ -137,9 +142,17 @@ export const purchaseItem = async (req: Request, res: Response, next: NextFuncti
     if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
     // Already owned → idempotent success (covers double-clicks / retries).
+    // Deliberately checked BEFORE the limited-window wall so a retry of a
+    // purchase that succeeded at 23:59:58 doesn't error at 00:00:01.
     const owned = ((user as any)[field] as string[]) || [];
     if (owned.includes(itemId)) {
       return res.json({ success: true, alreadyOwned: true, arisePoints: user.arisePoints });
+    }
+
+    // Limited-time drops: server-side wall, so the shop countdown can't be
+    // bypassed by calling the endpoint directly after the window closes.
+    if (!isAvailable(item)) {
+      return res.status(410).json({ success: false, message: "This limited item is no longer available — its window has closed." });
     }
 
     // Staff (Lead Dev / Admin) buy free, mirroring the shop UI. Role is tied to

@@ -215,6 +215,37 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
       }
     }
 
+    // Cosmetic-equip ownership gate: you can only DISPLAY what you own.
+    // Purchases/gifts are already server-authoritative, but equipping was not —
+    // anyone could PATCH activeEffect:"effect_dejavu" and wear a limited SSS
+    // effect they never bought, gutting its exclusivity. Rules: unequips (null)
+    // and the "effect_none" sentinel always pass; re-saving the value already
+    // stored passes (legacy grandfather — nobody's current look is stripped);
+    // staff pass; otherwise an equip of an unowned effect/frame is silently
+    // dropped so the rest of the profile save still applies.
+    let allowedActiveEffect = activeEffect;
+    let allowedActiveFrame = activeFrame;
+    const wantsEffect = typeof activeEffect === "string" && activeEffect && activeEffect !== "effect_none";
+    const wantsFrame = typeof activeFrame === "string" && activeFrame;
+    if (wantsEffect || wantsFrame) {
+      const current = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { username: true, role: true, activeEffect: true, activeFrame: true, purchasedEffects: true, purchasedFrames: true },
+      });
+      if (current) {
+        const role = current.role && current.role !== "USER" ? current.role : getRole(current.username);
+        const staff = role === "LEAD_DEV" || role === "ADMIN";
+        if (!staff) {
+          if (wantsEffect && activeEffect !== current.activeEffect && !current.purchasedEffects.includes(activeEffect)) {
+            allowedActiveEffect = undefined;
+          }
+          if (wantsFrame && activeFrame !== current.activeFrame && !current.purchasedFrames.includes(activeFrame)) {
+            allowedActiveFrame = undefined;
+          }
+        }
+      }
+    }
+
     const updateData: any = {
       // NOTE: username goes through the gated changeUsername endpoint.
       // arisePoints + purchased* are DELIBERATELY not client-writable — money and
@@ -231,11 +262,11 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
       ...(theme !== undefined && { theme }),
       ...(activeRole !== undefined && { activeRole }),
       ...(activeTag !== undefined && { activeTag }),
-      ...(activeEffect !== undefined && { activeEffect }),
+      ...(allowedActiveEffect !== undefined && { activeEffect: allowedActiveEffect }),
       ...(activeTheme !== undefined && { activeTheme }),
       ...(activeColor !== undefined && { activeColor }),
       ...(activeFont !== undefined && { activeFont }),
-      ...(activeFrame !== undefined && { activeFrame }),
+      ...(allowedActiveFrame !== undefined && { activeFrame: allowedActiveFrame }),
     };
 
     if (incrementPoints > 0 && arisePoints === undefined) {

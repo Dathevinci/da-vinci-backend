@@ -106,6 +106,10 @@ model Comment {
   chapterId    String?  // The specific chapter ID
   chapterTitle String?  // e.g. 'Chapter 190'
 
+  // Novel support (novel-level discussion, NOT per-chapter)
+  novelId      String?  // novel source id, e.g. 'nf:overlord-ln'
+  novelTitle   String?  // Title for global feed rendering
+
   parentId  String?  // Optional: references another comment
   mediaUrl  String?  // Optional: attached image/GIF URL
   content   String

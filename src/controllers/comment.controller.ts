@@ -8,7 +8,8 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     const animeId = req.query.animeId as string | undefined;
     const mangaId = req.query.mangaId as string | undefined;
     const chapterId = req.query.chapterId as string | undefined;
-    
+    const novelId = req.query.novelId as string | undefined;
+
     const userId = req.query.userId as string | undefined;
     const sort = req.query.sort as string | undefined;
     const search = req.query.search as string | undefined;
@@ -22,6 +23,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     if (animeId) where.animeId = parseInt(animeId);
     if (mangaId) where.mangaId = mangaId;
     if (chapterId) where.chapterId = chapterId;
+    if (novelId) where.novelId = novelId; // novel comments are novel-level (no chapters)
     if (!animeId && mangaId && !chapterId) {
       where.chapterId = null; // When viewing manhwa top-level, exclude chapter-specific comments
     }
@@ -93,7 +95,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
 
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, content, parentId, mediaUrl } = req.body;
+    const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl } = req.body;
 
     if (!userId || !content) {
       return res.status(400).json({ success: false, message: "Missing required fields" });
@@ -109,6 +111,8 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
         mangaTitle: mangaTitle || null,
         chapterId: chapterId ? String(chapterId) : null,
         chapterTitle: chapterTitle || null,
+        novelId: novelId || null,
+        novelTitle: novelTitle || null,
         parentId: parentId ? parentId : null,
         mediaUrl: mediaUrl || null,
       },

@@ -19,8 +19,9 @@ async function main() {
         username: 'Davinci',
         email: 'admin@davinci.dev',
         arisePoints: 99999,
-        avatar: 'https://i.imgur.com/Gz4B5p0.png', // A generic cool avatar or logo
-        bio: 'The architect of Da Vinci.'
+        avatar: 'https://i.imgur.com/Gz4B5p0.png',
+        bio: 'The architect of Da Vinci.',
+        role: 'LEAD_DEV'
       }
     });
   }
@@ -28,9 +29,9 @@ async function main() {
   const announcement = await prisma.announcement.create({
     data: {
       authorId: davinci.id,
-      title: "Interactive Leveling System is Live! 📈",
-      content: "Hello everyone! We are extremely excited to announce a massive new feature to reward our most dedicated users: **The Da Vinci Leveling System**.\n\n✨ **What's New?**\n- **Dynamic Leveling:** You now have a Level based on your Arise Points (XP). The more you use the platform, the higher you climb. Note that it gets exponentially harder to level up!\n- **Watch to Earn:** You now earn +5 XP every time you start watching an episode!\n- **Finished Bonus:** Setting a show to `FINISHED` in your Watchlist grants a massive +50 XP bonus.\n- **New Badges & Progress Bars:** Check out your profile to see your glowing Level Badge and a real-time Progress Bar showing exactly how much XP you need for the next level.\n\nTime to binge some anime and level up! Enjoy the climb. 🚀",
-      tag: "Platform Updates, New Features",
+      title: "Dev Blog 1.6: Manhwa Mode Evolution",
+      content: "We just rolled out a massive quality of life update for the Manhwa reader!\n\n**Visual Upgrades**\n- Added incredibly smooth page transitions across all of Manhwa Mode using Framer Motion.\n- The Manhwa grid cards now smoothly cascade in.\n- Chapter images in the reader now beautifully fade in as you scroll down, eliminating jarring pop-ins.\n\n**Bug Fixes & Polish**\n- Fixed the infamous bug where clicking \"All Comics\" opened up the Anime modal for Transformers (The Anime Provider was intercepting the URL param!).\n- Manhwa ratings are now strictly formatted to 1 decimal place everywhere.\n- The mobile floating bottom navigation now properly hides itself completely when you enter fullscreen reading mode, ensuring a true 100% distraction-free experience.\n\nRefresh your page to experience the magic! 📖✨",
+      tag: "Platform Updates",
       image: null,
     }
   });

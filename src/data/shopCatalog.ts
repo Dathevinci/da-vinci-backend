@@ -35,6 +35,7 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   effect_blackhole: { type: "effect", price: 7500 },
   effect_void: { type: "effect", price: 21200 },
   effect_unblinking: { type: "effect", price: 20000 },
+  effect_hollow: { type: "effect", price: 17500 },
   // LIMITED DROP — vanishes from sale after the window closes (owners keep it).
   effect_dejavu: { type: "effect", price: 15000, availableUntil: "2026-07-24T23:59:59Z" },
   effect_evernight: { type: "effect", price: 6500 },

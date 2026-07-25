@@ -5,6 +5,48 @@ const prisma = new PrismaClient();
 // The Dev Blog entries that should exist on the Updates page (newest first).
 const announcementsData = [
   {
+    title: "Da Vinci — Dev Blog 1.5.3: Now In Your Pocket",
+    tag: "Dev Blog",
+    content:
+      "Da Vinci — Dev Blog 1.5.3\n\n" +
+      "This one's a big one. Da Vinci is now an actual app on your phone, there's a new SSS effect that we may have gone slightly overboard on, and about half the site got a fresh coat of paint. Let's go.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Da Vinci on Android 📱\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Yes, really. There's an Android app now — grab the APK from our GitHub releases, install it, and Da Vinci lives on your home screen like a proper app. Full screen, no browser bar, your own icon in the app drawer.\n\n" +
+      "It's tiny (a few megabytes) and it always stays current — every update we ship shows up in the app instantly. No app store queue, no \"update available\" nag. On iPhone? Add Da Vinci to your Home Screen from Safari and you get the same thing.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "New SSS Effect: Hollow Technique — Purple\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "17,500 Arise Points. Two opposing forces slam together on your profile, go dead silent for a heartbeat, and then erase everything in a purple eruption that cracks the space around your card. It's a four-act cinematic, not a loop, and it is absolutely the loudest thing you can put on your profile right now.\n\n" +
+      "Preview it in the Arise Shop before you commit. Or don't. Live dangerously.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Never lose your place again\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Continue Reading is now right on your home feed for both manhwa and novels. Stopped at chapter 214 at 2am? It's waiting for you at the top of the page with the exact chapter, one tap away. No more scrolling your library trying to remember where you left off.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Make the novel reader yours\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Open any novel chapter and hit the settings icon. Seven fonts — proper serif faces for the classic book feel, clean sans for speed, and a dyslexia-friendly option. Five background themes including a warm sepia and a true-black mode for reading in bed. Plus font size, line spacing and width.\n\n" +
+      "Set it once and it follows you to every chapter you open.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "A whole lot of polish\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "• The Community feed got rebuilt — cleaner cards, a composer that stays out of your way until you want it, and sorting that actually makes sense.\n" +
+      "• Notifications got a real redesign: every type has its own icon and colour now, you can filter to just unread, and everything's grouped by Today / Yesterday / Earlier.\n" +
+      "• Settings is a proper panel now, with live previews of your avatar and banner as you paste the link.\n" +
+      "• Switching between Anime, Manhwa and Novel modes finally looks like it was designed on purpose.\n" +
+      "• Profile effects run noticeably smoother — and Performance Mode in your Control Center genuinely turns the heavy stuff off if your device is struggling.\n\n" +
+
+      "That's 1.5.3. Go install the app, then go break something. 💜",
+    image: null,
+  },
+  {
     title: "Da Vinci — Dev Blog 1.5.2: Every Episode & Chapter Now Pays",
     tag: "Dev Blog",
     content:

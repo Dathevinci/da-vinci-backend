@@ -327,8 +327,12 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
   try {
     const { currentUserId } = req.query;
     
-    const user = await prisma.user.findUnique({
-      where: { username: req.params.username as string },
+    // Case-INSENSITIVE on purpose: changeUsername already enforces
+    // case-insensitive uniqueness (line ~124), so "Ash" and "ash" can never be
+    // two different people — but an exact findUnique still 404'd /user/ash for
+    // an account stored as "Ash", breaking lowercase links and @mentions.
+    const user = await prisma.user.findFirst({
+      where: { username: { equals: req.params.username as string, mode: "insensitive" } },
       include: {
         watchlist: true,
         manhwaBookmarks: true,

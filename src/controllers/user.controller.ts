@@ -149,6 +149,10 @@ export const changeUsername = async (req: Request, res: Response, next: NextFunc
         role, // lock the role onto the account so this and future renames keep it
         ...(cost > 0 && { arisePoints: { decrement: cost } }),
       },
+      // The client replaces its whole cached user with this response, so it has
+      // to carry the relations too — otherwise a rename silently empties the
+      // viewer's follower/following lists until the next full refetch.
+      include: { followers: { include: { follower: true } }, following: { include: { following: true } } },
     });
 
     if (cost > 0) {
@@ -276,6 +280,9 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     const user = await prisma.user.update({
       where: { id: userId },
       data: updateData,
+      // Same reason as changeUsername above — this response replaces the
+      // cached user wholesale on the client.
+      include: { followers: { include: { follower: true } }, following: { include: { following: true } } },
     });
 
     res.json({ success: true, data: sanitizeOwnUser(user) });

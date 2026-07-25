@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 import { processMentions } from "../utils/mentions";
+import { resolveActor, requireStaff } from "../lib/staff";
 
 const prisma = new PrismaClient();
 
@@ -51,15 +52,13 @@ export const getAnnouncements = async (req: Request, res: Response) => {
 
 export const createAnnouncement = async (req: Request, res: Response) => {
   try {
-    const { userId, title, content, tag, image } = req.body;
-    
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return res.status(403).json({ success: false, error: "Unauthorized" });
-    const isDev = user.username.toLowerCase() === "dejavuh";
-    const isAdmin = user.isAdmin || user.username.toLowerCase() === "davinci" || user.username.toLowerCase() === "xhackerdevil" || user.username.toLowerCase() === "coffee" || user.username.toLowerCase() === "speyvenerable";
-    if (!isDev && !isAdmin) {
-      return res.status(403).json({ success: false, error: "Only Lead Dev and Admins can post announcements" });
-    }
+    const { title, content, tag, image } = req.body;
+
+    // Staff-only, proven by the verified token. This used to trust
+    // req.body.userId and its own copy of the admin username list.
+    const actor = await requireStaff(req, res);
+    if (!actor) return;
+    const userId = actor.id;
 
     const announcement = await prisma.announcement.create({
       data: {
@@ -190,7 +189,9 @@ export const addComment = async (req: Request, res: Response) => {
 export const deleteComment = async (req: Request, res: Response) => {
   try {
     const commentId = req.params.commentId as string;
-    const userId = req.body.userId as string; // or forceGodMode from frontend
+    const actor = await resolveActor(req);
+    if (!actor) return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    const userId = actor.id;
 
     const comment = await prisma.announcementComment.findUnique({
       where: { id: commentId },
@@ -199,11 +200,8 @@ export const deleteComment = async (req: Request, res: Response) => {
 
     if (!comment) return res.status(404).json({ success: false, error: "Comment not found" });
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    const isDev = user?.username.toLowerCase() === "dejavuh";
-    const isAdmin = user?.isAdmin || user?.username.toLowerCase() === "davinci" || user?.username.toLowerCase() === "xhackerdevil" || user?.username.toLowerCase() === "coffee" || user?.username.toLowerCase() === "speyvenerable";
 
-    if (comment.userId !== userId && !isDev && !isAdmin) {
+    if (comment.userId !== userId && !actor.isStaff) {
       return res.status(403).json({ success: false, error: "Unauthorized" });
     }
 
@@ -217,7 +215,9 @@ export const deleteComment = async (req: Request, res: Response) => {
 export const deleteAnnouncement = async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const userId = req.body.userId as string; // or forceGodMode from frontend
+    const actor = await resolveActor(req);
+    if (!actor) return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    const userId = actor.id;
 
     const announcement = await prisma.announcement.findUnique({
       where: { id },
@@ -226,11 +226,8 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 
     if (!announcement) return res.status(404).json({ success: false, error: "Announcement not found" });
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    const isDev = user?.username.toLowerCase() === "dejavuh";
-    const isAdmin = user?.isAdmin || user?.username.toLowerCase() === "davinci" || user?.username.toLowerCase() === "xhackerdevil" || user?.username.toLowerCase() === "coffee" || user?.username.toLowerCase() === "speyvenerable";
 
-    if (announcement.authorId !== userId && !isDev && !isAdmin) {
+    if (announcement.authorId !== userId && !actor.isStaff) {
       return res.status(403).json({ success: false, error: "Unauthorized" });
     }
 
@@ -244,7 +241,10 @@ export const deleteAnnouncement = async (req: Request, res: Response) => {
 export const editComment = async (req: Request, res: Response) => {
   try {
     const commentId = req.params.commentId as string;
-    const { userId, content } = req.body;
+    const { content } = req.body;
+    const actor = await resolveActor(req);
+    if (!actor) return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    const userId = actor.id;
 
     const comment = await prisma.announcementComment.findUnique({
       where: { id: commentId },
@@ -252,11 +252,8 @@ export const editComment = async (req: Request, res: Response) => {
 
     if (!comment) return res.status(404).json({ success: false, error: "Comment not found" });
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    const isDev = user?.username.toLowerCase() === "dejavuh";
-    const isAdmin = user?.isAdmin || user?.username.toLowerCase() === "davinci" || user?.username.toLowerCase() === "xhackerdevil" || user?.username.toLowerCase() === "coffee" || user?.username.toLowerCase() === "speyvenerable";
 
-    if (comment.userId !== userId && !isDev && !isAdmin) {
+    if (comment.userId !== userId && !actor.isStaff) {
       return res.status(403).json({ success: false, error: "Unauthorized" });
     }
 
@@ -277,7 +274,10 @@ export const editComment = async (req: Request, res: Response) => {
 export const editAnnouncement = async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { userId, title, content } = req.body;
+    const { title, content } = req.body;
+    const actor = await resolveActor(req);
+    if (!actor) return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    const userId = actor.id;
 
     const announcement = await prisma.announcement.findUnique({
       where: { id },
@@ -285,11 +285,8 @@ export const editAnnouncement = async (req: Request, res: Response) => {
 
     if (!announcement) return res.status(404).json({ success: false, error: "Announcement not found" });
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    const isDev = user?.username.toLowerCase() === "dejavuh";
-    const isAdmin = user?.isAdmin || user?.username.toLowerCase() === "davinci" || user?.username.toLowerCase() === "xhackerdevil" || user?.username.toLowerCase() === "coffee" || user?.username.toLowerCase() === "speyvenerable";
 
-    if (announcement.authorId !== userId && !isDev && !isAdmin) {
+    if (announcement.authorId !== userId && !actor.isStaff) {
       return res.status(403).json({ success: false, error: "Unauthorized" });
     }
 

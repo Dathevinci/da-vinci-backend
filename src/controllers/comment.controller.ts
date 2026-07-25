@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { processMentions } from "../utils/mentions";
 import { payout } from "../utils/economy";
+import { resolveActor, requireStaff } from "../lib/staff";
 
 export const getComments = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -164,22 +165,21 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
 export const deleteComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const userId = req.body.userId as string;
+
+    // Identity comes from the VERIFIED token, never req.body.userId — that was
+    // unauthenticated client input, so anyone knowing a staff id could moderate.
+    const actor = await resolveActor(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const userId = actor.id;
 
     const comment = await prisma.comment.findUnique({ where: { id } });
     if (!comment) {
       return res.status(404).json({ success: false, message: "Comment not found" });
     }
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    const isAuthor = comment.userId === userId;
-    const isAdmin = user.isAdmin || user.username.toLowerCase() === 'davinci' || user.username.toLowerCase() === 'dejavuh' || user.username.toLowerCase() === 'xhackerdevil' || user.username.toLowerCase() === 'coffee' || user.username.toLowerCase() === 'speyvenerable';
-
-    if (!isAuthor && !isAdmin) {
+    if (comment.userId !== userId && !actor.isStaff) {
       return res.status(403).json({ success: false, message: "You can only delete your own comments" });
     }
 
@@ -332,16 +332,14 @@ export const tipComment = async (req: Request, res: Response, next: NextFunction
 export const blessComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { userId } = req.body;
-    if (!userId) return res.status(400).json({ success: false, message: "Missing userId" });
-
     const BLESSING_AMOUNT = 500;
 
-    const admin = await prisma.user.findUnique({ where: { id: userId } });
-    if (!admin) return res.status(404).json({ success: false, message: "User not found" });
-
-    const isAdmin = admin.isAdmin || ["davinci", "dejavuh", "xhackerdevil", "coffee", "speyvenerable"].includes(admin.username.toLowerCase());
-    if (!isAdmin) return res.status(403).json({ success: false, message: "Only admins can grant a Divine Blessing." });
+    // This MINTS currency, so it is a hard staff gate on the verified token.
+    // It previously trusted req.body.userId, meaning anyone who knew a staff
+    // user id could print 500 Arise Points at will.
+    const admin = await requireStaff(req, res);
+    if (!admin) return;
+    const userId = admin.id;
 
     const comment = await prisma.comment.findUnique({ where: { id } });
     if (!comment) return res.status(404).json({ success: false, message: "Comment not found" });
@@ -371,22 +369,23 @@ export const blessComment = async (req: Request, res: Response, next: NextFuncti
 export const editComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { userId, content, mediaUrl } = req.body;
+    const { content, mediaUrl } = req.body;
 
-    if (!userId || !content) {
+    if (!content) {
       return res.status(400).json({ success: false, message: "Invalid payload" });
     }
+
+    // Verified identity only — never req.body.userId.
+    const actor = await resolveActor(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const userId = actor.id;
 
     const comment = await prisma.comment.findUnique({ where: { id }, include: { user: true } });
     if (!comment) return res.status(404).json({ success: false, message: "Comment not found" });
 
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-    const isAuthor = comment.userId === userId;
-    const isAdmin = user.isAdmin || user.username.toLowerCase() === 'davinci' || user.username.toLowerCase() === 'dejavuh' || user.username.toLowerCase() === 'xhackerdevil' || user.username.toLowerCase() === 'coffee' || user.username.toLowerCase() === 'speyvenerable';
-
-    if (!isAuthor && !isAdmin) {
+    if (comment.userId !== userId && !actor.isStaff) {
       return res.status(403).json({ success: false, message: "Not authorized to edit this comment" });
     }
 
@@ -408,18 +407,11 @@ export const editComment = async (req: Request, res: Response, next: NextFunctio
 export const togglePinComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { userId } = req.body;
 
-    if (!userId) return res.status(400).json({ success: false, message: "Invalid payload" });
-
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return res.status(404).json({ success: false, message: "User not found" });
-
-    const isAdmin = user.isAdmin || user.username.toLowerCase() === 'davinci' || user.username.toLowerCase() === 'dejavuh' || user.username.toLowerCase() === 'xhackerdevil' || user.username.toLowerCase() === 'coffee' || user.username.toLowerCase() === 'speyvenerable';
-
-    if (!isAdmin) {
-      return res.status(403).json({ success: false, message: "Only admins can pin comments" });
-    }
+    // A pin floats a comment to the top of every thread site-wide — staff only,
+    // proven by the verified token rather than a body-supplied userId.
+    const actor = await requireStaff(req, res);
+    if (!actor) return;
 
     const comment = await prisma.comment.findUnique({ where: { id } });
     if (!comment) return res.status(404).json({ success: false, message: "Comment not found" });

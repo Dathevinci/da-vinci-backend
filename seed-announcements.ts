@@ -454,7 +454,7 @@ async function main() {
     where: { username: { equals: "dejavuh", mode: "insensitive" } },
     data: { role: "LEAD_DEV" },
   });
-  for (const admin of ["davinci", "xhackerdevil", "coffee", "speyvenerable"]) {
+  for (const admin of ["davinci", "xhackerdevil", "coffee", "speyvenerable", "ash"]) {
     await prisma.user.updateMany({
       where: { username: { equals: admin, mode: "insensitive" } },
       data: { role: "ADMIN" },

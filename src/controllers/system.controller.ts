@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
+import { requireStaff } from "../lib/staff";
 
 const prisma = new PrismaClient();
 
@@ -21,12 +22,15 @@ export const getSystemStatus = async (req: Request, res: Response) => {
 
 export const setSystemMaintenance = async (req: Request, res: Response) => {
   try {
-    const { enabled, username } = req.body;
+    const { enabled } = req.body;
 
-    // Strict security check
-    if (username?.toLowerCase() !== "dejavuh") {
-      return res.status(403).json({ success: false, message: "Unauthorized access" });
-    }
+    // Lead-Dev only, proven by the VERIFIED token.
+    //
+    // This previously compared a plaintext `username` string from the request
+    // BODY against "dejavuh" — no token, no lookup — so a single unauthenticated
+    // curl could take the whole site down (or quietly lift a lockdown).
+    const actor = await requireStaff(req, res, { leadDevOnly: true });
+    if (!actor) return;
 
     // Upsert the cache item so it persists through backend restarts
     await prisma.cacheItem.upsert({

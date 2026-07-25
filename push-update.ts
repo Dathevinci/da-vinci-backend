@@ -13,17 +13,12 @@ async function main() {
   });
 
   if (!davinci) {
-    console.log("User Davinci not found. Creating admin user Davinci...");
-    davinci = await prisma.user.create({
-      data: {
-        username: 'Davinci',
-        email: 'admin@davinci.dev',
-        arisePoints: 99999,
-        avatar: 'https://i.imgur.com/Gz4B5p0.png',
-        bio: 'The architect of Da Vinci.',
-        role: 'LEAD_DEV'
-      }
-    });
+    // Deliberately do NOT create the account. This used to auto-create a
+    // 'Davinci' user with role LEAD_DEV — minting a SECOND lead dev (full
+    // moderation + free everything) as a side effect of publishing a dev blog,
+    // and handing that power to whoever happened to hold the name.
+    console.error("Author account 'Davinci' not found — create it first, then re-run. Aborting.");
+    return;
   }
 
   const announcement = await prisma.announcement.create({

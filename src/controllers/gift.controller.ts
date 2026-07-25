@@ -63,8 +63,13 @@ export const giftItem = async (req: Request, res: Response, next: NextFunction) 
       return res.status(409).json({ success: false, message: `${recipient.username} already owns that.` });
     }
 
-    // Lead Dev has infinite Arise Points, so their gifts are free (mirrors the shop).
-    const cost = getRole(gifter.username) === "LEAD_DEV" ? 0 : item.price;
+    // Lead Dev has infinite Arise Points, so their gifts are free (mirrors the
+    // shop). Read the persistent role column first — this used to consult ONLY
+    // getRole(username), so renaming would silently start charging them.
+    const gifterRole = (gifter as any).role && (gifter as any).role !== "USER"
+      ? (gifter as any).role
+      : getRole(gifter.username);
+    const cost = gifterRole === "LEAD_DEV" ? 0 : item.price;
     if (gifter.arisePoints < cost) {
       return res.status(402).json({
         success: false,

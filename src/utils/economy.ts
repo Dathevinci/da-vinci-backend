@@ -9,7 +9,9 @@
 export type Role = "LEAD_DEV" | "ADMIN" | "USER";
 
 const LEAD_DEV = ["dejavuh"];
-const ADMINS = ["davinci", "xhackerdevil", "coffee", "speyvenerable"];
+// Fallback ONLY — the persistent `role` column is authoritative (see
+// backfill-roles.ts). Keep in sync with the frontend src/lib/admin.ts.
+const ADMINS = ["davinci", "xhackerdevil", "coffee", "speyvenerable", "ash"];
 
 export function getRole(username: string | null | undefined): Role {
   const u = (username || "").toLowerCase();

@@ -76,8 +76,8 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
         include: COMMENT_INCLUDE,
       });
       scanned.sort((a: any, b: any) => {
-        const sa = a.votes.reduce((acc, v) => acc + v.value, 0);
-        const sb = b.votes.reduce((acc, v) => acc + v.value, 0);
+        const sa = a.votes.reduce((acc: number, v: any) => acc + v.value, 0);
+        const sb = b.votes.reduce((acc: number, v: any) => acc + v.value, 0);
         if (sb !== sa) return sb - sa;
         // Pinned wins ties, then recency — "top" is the one view where a pinned
         // post leading actually reads as intentional.
@@ -136,9 +136,12 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     }
 
     // Format the response to include the calculated score and the current user's vote
-    const formattedComments = allComments.map(comment => {
-      const score = comment.votes.reduce((acc, vote) => acc + vote.value, 0);
-      const userVote = userId ? comment.votes.find(v => v.userId === userId)?.value || 0 : 0;
+    // Callback params are annotated because `allComments` is any[] (the two
+    // fetch branches for top vs chronological produce the same shape but not the
+    // same inferred type). Without these, noImplicitAny rejects the build.
+    const formattedComments = allComments.map((comment: any) => {
+      const score = comment.votes.reduce((acc: number, vote: any) => acc + vote.value, 0);
+      const userVote = userId ? comment.votes.find((v: any) => v.userId === userId)?.value || 0 : 0;
       
       return {
         ...comment,

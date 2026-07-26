@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import { corsOptions } from "./config/cors";
-import { apiLimiter } from "./middleware/rateLimiter";
+import { apiLimiter, consoleLimiter } from "./middleware/rateLimiter";
 import dashboardRoutes from "./routes/dashboard.routes";
 import animeRoutes from "./routes/anime.routes";
 import searchRoutes from "./routes/search.routes";
@@ -21,6 +21,7 @@ import novelRoutes from "./routes/novel.routes";
 import manhwaBookmarkRoutes from "./routes/manhwaBookmarks";
 import novelBookmarkRoutes from "./routes/novelBookmarks";
 import kofiRoutes from "./routes/kofi.routes";
+import consoleRoutes from "./routes/console.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -36,6 +37,13 @@ app.use(helmet());
 
 app.use(cors(corsOptions));
 app.use(express.json({ limit: "100kb" }));
+
+// The console mounts ABOVE the global limiter on purpose. apiLimiter is 300 req
+// / 15 min / IP across the entire API; a four-panel console would otherwise burn
+// the lead dev's whole browsing budget and start 429-ing normal page loads from
+// the same IP. Safe, because requireStaff — not the limiter — is the gate, and
+// every console request still costs one user lookup inside resolveActor.
+app.use("/api/console", consoleLimiter, consoleRoutes);
 
 // Baseline rate limit on the whole API (auth routes get a stricter limiter of
 // their own inside auth.routes.ts).

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs, addXpForWatching, earnPoints, changeUsername } from "../controllers/user.controller";
 import { getUserNotifications, markNotificationAsRead, markAllAsRead } from "../controllers/notification.controller";
 import { giftItem, purchaseItem } from "../controllers/gift.controller";
+import { getDailyQuests, claimDailyQuest } from "../controllers/quest.controller";
 import { validateRequest } from "../middleware/validateRequest";
 import { createUserSchema } from "../schemas/watchlist.schema";
 
@@ -20,6 +21,12 @@ router.get("/:id", getUser);
 router.get("/:id/point-logs", getUserPointLogs);
 router.post("/:id/add-xp", addXpForWatching);
 router.post("/:id/earn", earnPoints);
+
+// Daily quests. More specific than "/:id", so declared before the bare
+// PATCH/DELETE below for the same reason /gift and /purchase are hoisted.
+router.get("/:id/quests", getDailyQuests);
+router.post("/:id/quests/:questId/claim", claimDailyQuest);
+
 router.patch("/:id/username", changeUsername);
 router.patch("/:id", updateUser);
 router.delete("/:id", deleteUser);

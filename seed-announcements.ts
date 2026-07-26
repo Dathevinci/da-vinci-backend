@@ -5,6 +5,52 @@ const prisma = new PrismaClient();
 // The Dev Blog entries that should exist on the Updates page (newest first).
 const announcementsData = [
   {
+    title: "Da Vinci — Dev Blog 1.5.4: Quests, Zoom & Picking Up Where You Left Off",
+    tag: "Dev Blog",
+    content:
+      "Da Vinci — Dev Blog 1.5.4\n\n" +
+      "There's a new way to earn, the manhwa reader finally zooms, and the site now remembers exactly where you stopped watching. Plus a pile of things that were quietly broken and aren't anymore.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Daily Quests\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Five quests a day, paying up to 80 Arise Points on top of what watching and reading already earn you. Check in, watch some episodes, read some chapters, post a view, add something to your library — then clear the whole board for a bonus.\n\n" +
+      "Find them under Daily Quests in the nav, or on your home feed. There's a streak counter for showing up day after day.\n\n" +
+      "The line-up isn't fixed either — it rotates every three days, and every board is built to have one watching goal, one reading goal, one social goal and one that counts both. So you'll never get handed four anime quests if all you do is read manhwa.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Zoom in the manhwa reader\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Small text, dense panels, tiny background details — you can finally get closer. Zoom from 50% up to 300% with the controls in the corner of the reader, Ctrl/Cmd and the scroll wheel, or the +, − and 0 keys.\n\n" +
+      "Your zoom level sticks between chapters, so set it once and keep reading.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Pick up exactly where you left off\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Watch half an episode, close the tab, come back later — the anime is waiting on your home feed with the right episode, and pressing play drops you back at the exact second you stopped. Properly, like it should have worked all along.\n\n" +
+      "Anything you start watching now also adds itself to Continue Watching on its own. No need to tap Add to Tracker first.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "FIXED — Community feed sorting\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Top was completely broken. It returned exactly the same posts as New, and because it only ever looked at the most recent handful, the genuinely highest-rated posts were never even loaded. It now actually ranks by score.\n\n" +
+      "New and Old were being overruled too — a pinned post sat at the top no matter what you picked, so choosing New could open with something weeks old. New and Old are now strictly by date, and pinned posts lead in Top where that makes sense.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "FIXED — Media filter and chapter links\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "The Media filter was stripping every reply, so image posts showed up with their conversations missing. Threads stay intact now.\n\n" +
+      "And comments left on a specific chapter finally link to that chapter. Before, tapping \"Chapter 8\" dumped you on the series page to go find it yourself.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "CHANGED — Dev Blog comments\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Comments on these update posts are gone. Take it to the community feed or Discord instead — that's where the conversation actually happens.\n\n" +
+
+      "That's 1.5.4. Go earn something. 💜",
+    image: null,
+  },
+  {
     title: "Da Vinci — Dev Blog 1.5.3: Now In Your Pocket",
     tag: "Dev Blog",
     content:

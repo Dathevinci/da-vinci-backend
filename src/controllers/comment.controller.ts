@@ -64,13 +64,18 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     let comments: any[];
 
     if (sort === 'top') {
-      const scanned = await prisma.comment.findMany({
+      // Annotated any[]: COMMENT_INCLUDE is a variable, so TS widens its
+      // `votes: true` to `boolean`, and Prisma's payload conditionals then
+      // resolve to a union that doesn't expose `.votes`. Inline literals narrow
+      // fine; a shared constant does not. Explicit here rather than risking a
+      // tsc failure, which on this backend takes the whole API down.
+      const scanned: any[] = await prisma.comment.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         take: TOP_SCAN_CAP,
         include: COMMENT_INCLUDE,
       });
-      scanned.sort((a, b) => {
+      scanned.sort((a: any, b: any) => {
         const sa = a.votes.reduce((acc, v) => acc + v.value, 0);
         const sb = b.votes.reduce((acc, v) => acc + v.value, 0);
         if (sb !== sa) return sb - sa;

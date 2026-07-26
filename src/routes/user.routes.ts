@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs, addXpForWatching, earnPoints, changeUsername } from "../controllers/user.controller";
 import { getUserNotifications, markNotificationAsRead, markAllAsRead } from "../controllers/notification.controller";
-import { giftItem, purchaseItem } from "../controllers/gift.controller";
+import { giftItem, purchaseItem, purchaseBundle } from "../controllers/gift.controller";
 import { getDailyQuests, claimDailyQuest } from "../controllers/quest.controller";
 import { validateRequest } from "../middleware/validateRequest";
 import { createUserSchema } from "../schemas/watchlist.schema";
@@ -15,6 +15,7 @@ router.get("/", getAllUsers);
 // backend). Declared before the "/:id" routes so they're never read as an id.
 router.post("/gift", giftItem);
 router.post("/purchase", purchaseItem);
+router.post("/purchase-bundle", purchaseBundle);
 
 router.post("/", validateRequest(createUserSchema), createUser);
 router.get("/:id", getUser);

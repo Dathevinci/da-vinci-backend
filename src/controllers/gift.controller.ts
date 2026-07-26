@@ -1,7 +1,14 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getRole } from "../utils/economy";
-import { SHOP_CATALOG, PURCHASED_FIELD, isAvailable } from "../data/shopCatalog";
+import {
+  SHOP_CATALOG,
+  PURCHASED_FIELD,
+  isAvailable,
+  SHOP_BUNDLES,
+  BUNDLE_DISCOUNT,
+  type CatalogEntry,
+} from "../data/shopCatalog";
 import { getActorId } from "../lib/jwt";
 
 /**
@@ -108,6 +115,116 @@ export const giftItem = async (req: Request, res: Response, next: NextFunction) 
     const [updatedGifter] = await prisma.$transaction(ops);
 
     res.json({ success: true, cost, arisePoints: (updatedGifter as any).arisePoints });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Buy a whole themed collection at a discount.
+ *
+ * POST /api/users/purchase-bundle
+ * body: { userId, bundleId }
+ *
+ * Server-authoritative in the same way purchaseItem is — the client sends only
+ * the bundle id. The backend works out which members are still missing, prices
+ * ONLY those, applies the discount, and grants them in one transaction.
+ *
+ * Charging for the full set regardless of ownership would be the obvious bug
+ * here, so the remainder is computed from the DB inventory, never from anything
+ * the client claims.
+ */
+export const purchaseBundle = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, bundleId } = req.body as { userId?: string; bundleId?: string };
+
+    if (!userId || !bundleId) {
+      return res.status(400).json({ success: false, message: "Missing userId or bundleId." });
+    }
+
+    // You can only buy for yourself (verified token wins; tokenless pre-JWT
+    // sessions grandfathered, matching purchaseItem).
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only buy with your own Arise Points." });
+    }
+
+    const bundle = SHOP_BUNDLES[bundleId];
+    if (!bundle) return res.status(400).json({ success: false, message: "That bundle doesn't exist." });
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ success: false, message: "User not found." });
+
+    // Work out what's actually missing, skipping anything whose limited window
+    // has closed — a bundle must not become a side door onto an expired drop.
+    const missing: { id: string; item: CatalogEntry }[] = [];
+    let expiredSkipped = 0;
+
+    for (const id of bundle.items) {
+      const item = SHOP_CATALOG[id];
+      if (!item) continue;
+      const owned = ((user as any)[PURCHASED_FIELD[item.type]] as string[]) || [];
+      if (owned.includes(id)) continue;
+      if (!isAvailable(item)) {
+        expiredSkipped++;
+        continue;
+      }
+      missing.push({ id, item });
+    }
+
+    if (missing.length === 0) {
+      return res.status(409).json({
+        success: false,
+        message: expiredSkipped > 0
+          ? "Everything still available in this collection is already yours."
+          : "You already own this entire collection.",
+      });
+    }
+
+    const full = missing.reduce((sum, m) => sum + m.item.price, 0);
+    const role = (user as any).role && (user as any).role !== "USER" ? (user as any).role : getRole(user.username);
+    const staff = role === "LEAD_DEV" || role === "ADMIN";
+    const cost = staff ? 0 : Math.round(full * (1 - BUNDLE_DISCOUNT));
+
+    if (user.arisePoints < cost) {
+      return res.status(402).json({
+        success: false,
+        message: `You need ${cost.toLocaleString()} Arise Points for the rest of this collection — you have ${user.arisePoints.toLocaleString()}.`,
+      });
+    }
+
+    // Group the pushes by inventory field so each field is written once.
+    const byField: Record<string, string[]> = {};
+    for (const m of missing) {
+      const f = PURCHASED_FIELD[m.item.type];
+      (byField[f] ||= []).push(m.id);
+    }
+    const data: any = {};
+    for (const [f, ids] of Object.entries(byField)) data[f] = { push: ids };
+    if (cost > 0) data.arisePoints = { decrement: cost };
+
+    const ops: any[] = [prisma.user.update({ where: { id: user.id }, data })];
+    if (cost > 0) {
+      ops.push(
+        prisma.pointLog.create({
+          data: { userId: user.id, amount: -cost, reason: `Bought "${bundle.name}" (${missing.length} items)` },
+        })
+      );
+    }
+
+    const [updated] = await prisma.$transaction(ops);
+
+    res.json({
+      success: true,
+      data: {
+        bundleId,
+        granted: missing.map((m) => m.id),
+        cost,
+        saved: staff ? 0 : full - cost,
+        expiredSkipped,
+        arisePoints: (updated as any).arisePoints,
+      },
+    });
   } catch (error) {
     next(error);
   }

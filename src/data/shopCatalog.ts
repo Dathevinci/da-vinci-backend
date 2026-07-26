@@ -60,3 +60,41 @@ export const PURCHASED_FIELD: Record<ShopItemType, "purchasedEffects" | "purchas
   effect: "purchasedEffects",
   frame: "purchasedFrames",
 };
+
+/**
+ * Themed bundles — buy a whole collection at a discount.
+ *
+ * Server-authoritative, exactly like SHOP_CATALOG: the client never sends a
+ * price. The backend decides which of the set you still need, sums those, and
+ * applies the discount to that remainder — so someone who already owns three of
+ * four does not pay for all four.
+ *
+ * The member lists mirror the collections shown on the shop page. They live here
+ * as well because the frontend copy is display-only; this one is the one that
+ * decides what you are charged and what you receive.
+ */
+export const BUNDLE_DISCOUNT = 0.2; // 20% off the items you don't already own
+
+export interface BundleEntry {
+  name: string;
+  items: string[];
+}
+
+export const SHOP_BUNDLES: Record<string, BundleEntry> = {
+  bundle_jujutsu: {
+    name: "The Sorcery Collection",
+    items: ["effect_void", "effect_hollow", "effect_mahoraga", "effect_ritual"],
+  },
+  bundle_mysteries: {
+    name: "The Mysteries Collection",
+    items: ["effect_fool", "effect_evernight"],
+  },
+  bundle_nature: {
+    name: "The Wild Collection",
+    items: ["effect_himalaya", "effect_jungle", "effect_lotus", "effect_canopy"],
+  },
+  bundle_cosmic: {
+    name: "The Cosmic Collection",
+    items: ["effect_blackhole", "effect_ascension", "effect_unblinking"],
+  },
+};

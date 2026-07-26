@@ -96,10 +96,26 @@ export const changeUsername = async (req: Request, res: Response, next: NextFunc
   try {
     const userId = req.params.id as string;
 
-    // Only the owner may rename this account (verified token wins; tokenless
-    // pre-JWT sessions are grandfathered).
+    /**
+     * HARD gate — a verified token is REQUIRED. Deliberately not grandfathered
+     * like the earn/progress endpoints.
+     *
+     * With the old `if (actor && actor !== userId)` an unauthenticated request
+     * skipped the check entirely, so anyone could rename any account. That was
+     * full platform takeover, not just griefing: usernames are unique, and
+     * resolveActor falls back to getRole(username) when the role column is
+     * "USER". So an attacker could rename the owner away, claim the name, and be
+     * treated as LEAD_DEV — and backfill-roles.ts, which runs on every deploy,
+     * would then write LEAD_DEV into the authoritative column for them.
+     *
+     * The cost is that a pre-JWT session must sign in again before renaming.
+     * That is the correct trade for an identity-changing operation.
+     */
     const actor = getActorId(req);
-    if (actor && actor !== userId) {
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to change your username." });
+    }
+    if (actor !== userId) {
       return res.status(403).json({ success: false, message: "You can only change your own username." });
     }
 

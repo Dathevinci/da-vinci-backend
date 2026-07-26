@@ -1,9 +1,26 @@
 import jwt from "jsonwebtoken";
 import type { Request } from "express";
 
-// Signed session tokens. Set JWT_SECRET in the Render env — without it, tokens
-// fall back to an insecure dev secret (fine for local, NOT for production).
-const SECRET: string = process.env.JWT_SECRET || "dev-insecure-secret-change-me";
+/**
+ * Signed session tokens.
+ *
+ * In production JWT_SECRET is REQUIRED and the process refuses to boot without
+ * it. The old silent fallback to a constant that lives in this repo meant that
+ * if the env var were ever missing on Render, every token would be signed with a
+ * publicly known value — anyone could forge a token for any account, including
+ * the Lead Dev, and nothing would look wrong from the outside.
+ *
+ * Failing to start is the correct behaviour: a backend that is up but trivially
+ * forgeable is worse than one that is visibly down.
+ */
+const RAW_SECRET = process.env.JWT_SECRET;
+
+if (!RAW_SECRET && process.env.NODE_ENV === "production") {
+  console.error("FATAL: JWT_SECRET is not set. Refusing to start with a known-public signing key.");
+  process.exit(1);
+}
+
+const SECRET: string = RAW_SECRET || "dev-insecure-secret-change-me";
 const EXPIRES_IN_SECONDS = 60 * 24 * 60 * 60; // 60 days (numeric avoids @types StringValue pitfalls)
 
 export function signToken(userId: string): string {

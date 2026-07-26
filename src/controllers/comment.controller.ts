@@ -37,24 +37,79 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
        where.parentId = null;
     }
 
-    const comments = await prisma.comment.findMany({
-      where,
-      orderBy: [
-        { isPinned: 'desc' },
-        { createdAt: sort === 'oldest' ? 'asc' : 'desc' }
-      ],
-      take: limit,
-      skip,
-      include: {
-        user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
-        votes: true,
-      }
-    });
+    const COMMENT_INCLUDE = {
+      user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
+      votes: true,
+    };
+
+    /**
+     * `top` cannot be expressed as a Prisma orderBy: score is the SUM of
+     * CommentVote.value (each +1/-1), not a count, so `votes: { _count: 'desc' }`
+     * would rank a post with 5 downvotes above one with 4 upvotes.
+     *
+     * It used to fall through to the `createdAt desc` branch below, which made
+     * `sort=top` return byte-identical results to `sort=newest` — and because
+     * only the first `limit` rows were fetched, the genuinely highest-scoring
+     * comments (which are usually the OLDER ones that have had time to collect
+     * votes) were never even loaded, so no amount of client-side re-sorting
+     * could surface them.
+     *
+     * So for `top` we pull the candidate set, score it in JS, then paginate.
+     * TOP_SCAN_CAP bounds the work; past that we're ranking a sample, not the
+     * whole feed, which is an acceptable trade at this scale.
+     */
+    const TOP_SCAN_CAP = 500;
+    // Explicitly typed: both branches produce the same shape (COMMENT_INCLUDE),
+    // and an un-annotated `let` here would rely on evolving-any inference.
+    let comments: any[];
+
+    if (sort === 'top') {
+      const scanned = await prisma.comment.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: TOP_SCAN_CAP,
+        include: COMMENT_INCLUDE,
+      });
+      scanned.sort((a, b) => {
+        const sa = a.votes.reduce((acc, v) => acc + v.value, 0);
+        const sb = b.votes.reduce((acc, v) => acc + v.value, 0);
+        if (sb !== sa) return sb - sa;
+        // Pinned wins ties, then recency — "top" is the one view where a pinned
+        // post leading actually reads as intentional.
+        if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      comments = scanned.slice(skip, skip + limit);
+    } else {
+      /**
+       * `isPinned: 'desc'` used to lead this orderBy for EVERY sort, which meant
+       * an explicitly-chosen "New" still opened with a pinned comment that could
+       * be weeks older than the actual newest post — the sort looked broken.
+       * An explicit chronological choice is now honoured strictly; pinning still
+       * ranks in `top` above.
+       */
+      comments = await prisma.comment.findMany({
+        where,
+        orderBy: { createdAt: sort === 'oldest' ? 'asc' : 'desc' },
+        take: limit,
+        skip,
+        include: COMMENT_INCLUDE,
+      });
+    }
 
     let allComments = [...comments];
 
-    // If we fetched root comments, fetch their replies recursively up to depth 4
-    if (!search && !mediaOnly && comments.length > 0) {
+    /**
+     * Fetch replies for whatever we matched, recursively, up to depth 4.
+     *
+     * This used to be skipped entirely when searching or filtering by media, so
+     * the Media view rendered every post with an empty thread beneath it — the
+     * conversation simply vanished. The `where` clause decides which comments
+     * MATCH; it shouldn't also decide whether those matches get to keep their
+     * replies. Descendants are pulled unfiltered on purpose: a media post's
+     * text-only replies are still part of that thread.
+     */
+    if (comments.length > 0) {
        let currentParents = comments.map(c => c.id);
        
        for (let i = 0; i < 4; i++) {

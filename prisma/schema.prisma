@@ -162,6 +162,14 @@ model WatchlistItem {
   // Nullable: older rows predate this and are backfilled by backfill-runtimes.ts.
   episodes   Int?     // total episode count
   duration   Int?     // minutes per episode (~24 for most TV anime)
+  // Resume point. Previously this lived ONLY in localStorage, so "Continue
+  // watching" showed a bare "CONTINUE" on any device that hadn't played the
+  // episode locally, and everything was lost on clearing browser data.
+  // All nullable so `prisma db push` applies this additively with no data loss.
+  progressEpisode  Int?      // which episode you're on (1-based)
+  progressSeconds  Int?      // position within that episode
+  progressDuration Int?      // that episode's length, for the % bar
+  progressAt       DateTime? // last time the resume point moved
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

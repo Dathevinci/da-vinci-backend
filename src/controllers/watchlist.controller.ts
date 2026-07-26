@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { finishBonus } from "../utils/economy";
+import { getActorId } from "../lib/jwt";
 
 // Award the completion payout for finishing an anime, priced off its RUNTIME —
 // once per anime per user (deduped via the point log), whether the item was
@@ -109,6 +110,69 @@ export const getWatchlist = async (req: Request, res: Response, next: NextFuncti
       orderBy: { updatedAt: "desc" },
     });
     res.json({ success: true, data: list });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Save the resume point for a tracked anime.
+ *
+ * POST /api/watchlist/progress
+ * body: { userId, anilistId, episode, seconds?, duration? }
+ *
+ * NOTE ON THE KEY: `anilistId` actually stores the MAL id — the frontend sends
+ * `anime.mal_id` into that column (see useAnimeStatus.ts, which documents keeping
+ * the old field name to avoid a breaking rename). So this keys off exactly the
+ * same value the Continue Watching card uses, with no id-space translation.
+ *
+ * Uses updateMany rather than upsert on purpose: `title` and `status` are
+ * required columns, so a progress ping for an untracked anime must NOT invent a
+ * half-populated watchlist row. Zero rows updated is the correct outcome there.
+ */
+export const saveWatchProgress = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, anilistId, episode, seconds, duration } = (req.body || {}) as {
+      userId?: string;
+      anilistId?: number | string;
+      episode?: number | string;
+      seconds?: number | string;
+      duration?: number | string;
+    };
+
+    if (!userId || anilistId == null || episode == null) {
+      return res.status(400).json({ success: false, message: "Missing userId, anilistId or episode." });
+    }
+
+    // You can only move your own resume point (verified token wins; tokenless
+    // pre-JWT sessions grandfathered, matching earnPoints/addXpForWatching).
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only update your own progress." });
+    }
+
+    const id = Number(anilistId);
+    const ep = Number(episode);
+    if (!Number.isFinite(id) || !Number.isFinite(ep) || ep < 0) {
+      return res.status(400).json({ success: false, message: "Invalid anilistId or episode." });
+    }
+
+    const secs = Number(seconds);
+    const dur = Number(duration);
+
+    const result = await prisma.watchlistItem.updateMany({
+      where: { userId, anilistId: id },
+      data: {
+        progressEpisode: Math.floor(ep),
+        // Only overwrite the position when we actually have a sane one, so a
+        // ping fired before the player reports timing can't wipe a good value.
+        ...(Number.isFinite(secs) && secs > 0 ? { progressSeconds: Math.floor(secs) } : {}),
+        ...(Number.isFinite(dur) && dur > 0 ? { progressDuration: Math.floor(dur) } : {}),
+        progressAt: new Date(),
+      },
+    });
+
+    res.json({ success: true, updated: result.count });
   } catch (error) {
     next(error);
   }

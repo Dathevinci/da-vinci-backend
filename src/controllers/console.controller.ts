@@ -348,10 +348,20 @@ export const grantItem = async (req: Request, res: Response, next: NextFunction)
     }
     const field = PURCHASED_FIELD[item.type];
 
-    const target = await prisma.user.findUnique({ where: { id }, select: { id: true, username: true, [field]: true } as any });
+    /**
+     * Annotated `any` because the select uses a COMPUTED key ([field]) and is
+     * cast, which stops Prisma narrowing the payload — every property then
+     * resolves to a union of all possible User field types (including relation
+     * arrays like WatchlistItem[]), so even `target.id` isn't a string. Casting
+     * at each use site is easy to forget; typing it once here is not.
+     */
+    const target: any = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, username: true, [field]: true } as any,
+    });
     if (!target) return res.status(404).json({ success: false, message: "User not found." });
 
-    const owned = (((target as any)[field] as string[]) || []);
+    const owned = ((target[field] as string[]) || []);
     if (owned.includes(itemId)) {
       return res.json({ success: true, data: { itemId, alreadyOwned: true } });
     }
@@ -417,7 +427,10 @@ export const revokeItem = async (req: Request, res: Response, next: NextFunction
     const field = PURCHASED_FIELD[item.type];
     const activeField = item.type === "effect" ? "activeEffect" : "activeFrame";
 
-    const target = await prisma.user.findUnique({
+    // `any` for the same reason as grantItem above: a computed-key select can't
+    // narrow, so every property becomes a union. Typed once here rather than
+    // relying on remembering a cast at each use.
+    const target: any = await prisma.user.findUnique({
       where: { id },
       select: { id: true, username: true, arisePoints: true, [field]: true, [activeField]: true } as any,
     });

@@ -2,14 +2,18 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import {
-  DAILY_QUESTS,
   ALL_DONE_BONUS,
   QUEST_PREFIX,
+  ROTATION_DAYS,
+  activeQuests,
+  cycleEndsAt,
+  cycleIndex,
   getQuest,
   dayKey,
   startOfUtcDay,
   nextUtcMidnight,
   claimReason,
+  type DailyQuest,
 } from "../data/dailyQuests";
 
 /**
@@ -30,8 +34,27 @@ function ownsAccount(req: Request, userId: string): boolean {
   return !actor || actor === userId;
 }
 
-/** Count today's qualifying rows for each quest in ONE query. */
-async function loadToday(userId: string) {
+/** Does a ledger reason count toward this quest? */
+function matches(q: DailyQuest, reason: string): boolean {
+  switch (q.match.kind) {
+    case "prefix":
+      return reason.startsWith(q.match.value);
+    case "prefixAny":
+      return q.match.values.some((p) => reason.startsWith(p));
+    case "exact":
+      return reason === q.match.value;
+    case "checkin":
+      return false; // nothing to measure — claiming IS the action
+  }
+}
+
+/**
+ * Count today's qualifying rows for each quest on the CURRENT board, in one
+ * query. `board` is passed in so the caller and this function can't disagree
+ * about which lineup is live (they'd diverge if a rotation boundary fell between
+ * two separate activeQuests() calls in the same request).
+ */
+async function loadToday(userId: string, board: DailyQuest[]) {
   const rows = await prisma.pointLog.findMany({
     where: { userId, createdAt: { gte: startOfUtcDay() } },
     select: { reason: true },
@@ -42,9 +65,8 @@ async function loadToday(userId: string) {
   const counts: Record<string, number> = {};
 
   for (const r of rows) {
-    // Claim rows are bookkeeping, never progress. Guarding this matters: without
-    // it a `quest:` row could satisfy a prefix quest and quests would feed
-    // themselves.
+    // Claim rows are bookkeeping, never progress. Without this guard a `quest:`
+    // row could satisfy a prefix quest and quests would feed themselves.
     if (r.reason.startsWith(QUEST_PREFIX)) {
       const suffix = `:${today}`;
       if (r.reason.endsWith(suffix)) {
@@ -52,12 +74,8 @@ async function loadToday(userId: string) {
       }
       continue;
     }
-    for (const q of DAILY_QUESTS) {
-      if (q.match.kind === "prefix" && r.reason.startsWith(q.match.value)) {
-        counts[q.id] = (counts[q.id] || 0) + 1;
-      } else if (q.match.kind === "exact" && r.reason === q.match.value) {
-        counts[q.id] = (counts[q.id] || 0) + 1;
-      }
+    for (const q of board) {
+      if (matches(q, r.reason)) counts[q.id] = (counts[q.id] || 0) + 1;
     }
   }
 
@@ -107,10 +125,13 @@ export const getDailyQuests = async (req: Request, res: Response, next: NextFunc
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-    const { counts, claimed } = await loadToday(userId);
+    // Resolve the board ONCE and thread it through, so a rotation boundary
+    // crossed mid-request can't make the counting disagree with the response.
+    const board = activeQuests();
+    const { counts, claimed } = await loadToday(userId, board);
     const streak = await computeStreak(userId);
 
-    const quests = DAILY_QUESTS.map((q) => {
+    const quests = board.map((q) => {
       // The check-in has nothing to measure — it's complete by definition and the
       // claim itself is the action.
       const progress = q.match.kind === "checkin" ? (claimed.has(q.id) ? 1 : 0) : Math.min(counts[q.id] || 0, q.target);
@@ -137,6 +158,10 @@ export const getDailyQuests = async (req: Request, res: Response, next: NextFunc
       data: {
         day: dayKey(),
         resetsAt: nextUtcMidnight().toISOString(),
+        // The lineup clock, separate from the daily progress clock.
+        cycle: cycleIndex(),
+        rotationDays: ROTATION_DAYS,
+        rotatesAt: cycleEndsAt().toISOString(),
         streak,
         quests,
         bonus: {
@@ -163,16 +188,26 @@ export const claimDailyQuest = async (req: Request, res: Response, next: NextFun
       return res.status(403).json({ success: false, message: "You can only claim your own quests." });
     }
 
+    const board = activeQuests();
     const isBonus = questId === ALL_DONE_BONUS.id;
     const quest = isBonus ? null : getQuest(questId);
     if (!isBonus && !quest) {
       return res.status(400).json({ success: false, message: "Unknown quest." });
     }
 
+    /**
+     * The quest must be on the CURRENT board. getQuest() searches the whole pool,
+     * so without this a client could claim any quest from any rotation — including
+     * an easy one that isn't live — by posting its id directly.
+     */
+    if (!isBonus && !board.some((q) => q.id === questId)) {
+      return res.status(409).json({ success: false, message: "That quest isn't in today's lineup." });
+    }
+
     const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) return res.status(404).json({ success: false, message: "User not found." });
 
-    const { counts, claimed } = await loadToday(userId);
+    const { counts, claimed } = await loadToday(userId, board);
 
     if (claimed.has(questId)) {
       return res.status(409).json({ success: false, message: "Already claimed today." });
@@ -180,7 +215,7 @@ export const claimDailyQuest = async (req: Request, res: Response, next: NextFun
 
     // Re-verify completion HERE. Never trust the client's idea of progress.
     if (isBonus) {
-      const allDone = DAILY_QUESTS.every((q) => claimed.has(q.id));
+      const allDone = board.every((q) => claimed.has(q.id));
       if (!allDone) {
         return res.status(400).json({ success: false, message: "Claim every quest first." });
       }

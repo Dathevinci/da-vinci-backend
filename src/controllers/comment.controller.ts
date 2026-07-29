@@ -161,8 +161,19 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
   try {
     const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl } = req.body;
 
-    if (!userId || !content) {
-      return res.status(400).json({ success: false, message: "Missing required fields" });
+    /**
+     * A post needs an author and SOMETHING to show — text or media, not
+     * necessarily both.
+     *
+     * This used to require `content`, so posting a GIF on its own was rejected
+     * with "Missing required fields". That is the normal way people post a
+     * reaction image, and it was impossible.
+     */
+    const hasText = typeof content === "string" && content.trim().length > 0;
+    const hasMedia = typeof mediaUrl === "string" && mediaUrl.trim().length > 0;
+
+    if (!userId || (!hasText && !hasMedia)) {
+      return res.status(400).json({ success: false, message: "Write something or attach an image." });
     }
 
     const comment = await prisma.comment.create({

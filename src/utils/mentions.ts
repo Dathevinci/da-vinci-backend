@@ -7,6 +7,11 @@ import { prisma } from "../lib/prisma";
  * @param link - An optional link to associate with the notification
  */
 export async function processMentions(content: string, actorId: string, link?: string) {
+  // A post can legitimately have no text — a GIF on its own is a valid comment.
+  // Without this guard, content.matchAll threw on every captionless post and
+  // took the whole request down after the comment had already been created.
+  if (typeof content !== "string" || content.length === 0) return;
+
   const mentionRegex = /@([a-zA-Z0-9_]+)/g;
   const matches = content.matchAll(mentionRegex);
   const mentionedUsernames = new Set<string>();

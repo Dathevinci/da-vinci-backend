@@ -191,8 +191,20 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
         parentId: parentId ? parentId : null,
         mediaUrl: mediaUrl || null,
       },
+      /**
+       * Must mirror getComments' shape exactly. The client prepends this object
+       * straight into the rendered list, so anything getComments provides and
+       * this doesn't is simply missing on the just-posted comment — it rendered
+       * with no rank colour, no frame, no effect and no score until a refresh.
+       */
       include: {
-        user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
+        user: {
+          select: {
+            id: true, username: true, avatar: true, arisePoints: true, xp: true,
+            activeRole: true, activeTag: true, activeEffect: true, activeTheme: true,
+            activeColor: true, activeFont: true, activeFrame: true,
+          },
+        },
         votes: true,
       }
     });

@@ -11,7 +11,7 @@ import {
   parsePage,
   confirmMatches,
 } from "../lib/consoleGuards";
-import { SHOP_CATALOG, PURCHASED_FIELD, isAvailable } from "../data/shopCatalog";
+import { SHOP_CATALOG, PURCHASED_FIELD, isAvailable, priceOf } from "../data/shopCatalog";
 import { getRole } from "../utils/economy";
 
 /**
@@ -452,13 +452,17 @@ export const revokeItem = async (req: Request, res: Response, next: NextFunction
     const data: any = { [field]: { set: owned.filter((x) => x !== itemId) } };
     // Don't leave them wearing something they no longer own.
     if ((target as any)[activeField] === itemId) data[activeField] = null;
-    if (refund) data.arisePoints = { increment: item.price };
+    // Refund what a purchase actually CHARGES (sale price), not the list
+    // price — refunding item.price on a discounted item would mint the
+    // difference on every buy→refund cycle.
+    const refundAmount = priceOf(item);
+    if (refund) data.arisePoints = { increment: refundAmount };
 
     const ops: any[] = [prisma.user.update({ where: { id }, data })];
     if (refund) {
       ops.push(
         prisma.pointLog.create({
-          data: { userId: id, amount: item.price, reason: `Console: refund for "${itemId}" — by ${actor.username}` },
+          data: { userId: id, amount: refundAmount, reason: `Console: refund for "${itemId}" — by ${actor.username}` },
         })
       );
     }

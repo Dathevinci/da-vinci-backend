@@ -5,6 +5,7 @@ import {
   SHOP_CATALOG,
   PURCHASED_FIELD,
   isAvailable,
+  priceOf,
   SHOP_BUNDLES,
   BUNDLE_DISCOUNT,
   type CatalogEntry,
@@ -76,11 +77,11 @@ export const giftItem = async (req: Request, res: Response, next: NextFunction) 
     const gifterRole = (gifter as any).role && (gifter as any).role !== "USER"
       ? (gifter as any).role
       : getRole(gifter.username);
-    const cost = gifterRole === "LEAD_DEV" ? 0 : item.price;
+    const cost = gifterRole === "LEAD_DEV" ? 0 : priceOf(item);
     if (gifter.arisePoints < cost) {
       return res.status(402).json({
         success: false,
-        message: `You need ${item.price.toLocaleString()} Arise Points to gift this — you have ${gifter.arisePoints.toLocaleString()}.`,
+        message: `You need ${priceOf(item).toLocaleString()} Arise Points to gift this — you have ${gifter.arisePoints.toLocaleString()}.`,
       });
     }
 
@@ -181,7 +182,9 @@ export const purchaseBundle = async (req: Request, res: Response, next: NextFunc
       });
     }
 
-    const full = missing.reduce((sum, m) => sum + m.item.price, 0);
+    // Sum each item's CURRENT price (per-item sales included) so the bundle
+    // discount stacks on the sale price rather than silently reverting it.
+    const full = missing.reduce((sum, m) => sum + priceOf(m.item), 0);
     const role = (user as any).role && (user as any).role !== "USER" ? (user as any).role : getRole(user.username);
     const staff = role === "LEAD_DEV" || role === "ADMIN";
     const cost = staff ? 0 : Math.round(full * (1 - BUNDLE_DISCOUNT));
@@ -281,12 +284,12 @@ export const purchaseItem = async (req: Request, res: Response, next: NextFuncti
     // the account and self-heals from the username for un-backfilled accounts.
     const role = (user as any).role && (user as any).role !== "USER" ? (user as any).role : getRole(user.username);
     const staff = role === "LEAD_DEV" || role === "ADMIN";
-    const cost = staff ? 0 : item.price;
+    const cost = staff ? 0 : priceOf(item);
 
     if (user.arisePoints < cost) {
       return res.status(402).json({
         success: false,
-        message: `You need ${item.price.toLocaleString()} Arise Points — you have ${user.arisePoints.toLocaleString()}.`,
+        message: `You need ${priceOf(item).toLocaleString()} Arise Points — you have ${user.arisePoints.toLocaleString()}.`,
       });
     }
 

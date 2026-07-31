@@ -14,11 +14,21 @@ export interface CatalogEntry {
   // Limited-time drops: after this ISO instant the item can no longer be
   // bought OR gifted (checked server-side in gift.controller). Owners keep it.
   availableUntil?: string;
+  // Per-item sale: percent knocked off `price` at charge time (0-100). `price`
+  // stays the list price so the frontend can show the strikethrough; what the
+  // buyer/gifter actually pays is priceOf(). Server-side like everything else.
+  discountPercent?: number;
 }
 
 // True when a catalog item is still purchasable/giftable right now.
 export function isAvailable(item: CatalogEntry): boolean {
   return !item.availableUntil || Date.now() <= new Date(item.availableUntil).getTime();
+}
+
+// What an item actually costs right now — list price minus any per-item sale.
+export function priceOf(item: CatalogEntry): number {
+  const off = item.discountPercent ?? 0;
+  return off > 0 ? Math.round(item.price * (1 - off / 100)) : item.price;
 }
 
 export const SHOP_CATALOG: Record<string, CatalogEntry> = {
@@ -36,6 +46,8 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   effect_void: { type: "effect", price: 21200 },
   effect_unblinking: { type: "effect", price: 20000 },
   effect_hollow: { type: "effect", price: 17500 },
+  // SSS launch drop — 10% off while it headlines the shop hero (12,000 → 10,800).
+  effect_outergod: { type: "effect", price: 12000, discountPercent: 10 },
   // LIMITED DROP — vanishes from sale after the window closes (owners keep it).
   effect_dejavu: { type: "effect", price: 15000, availableUntil: "2026-07-24T23:59:59Z" },
   effect_evernight: { type: "effect", price: 6500 },

@@ -48,6 +48,7 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   effect_hollow: { type: "effect", price: 17500 },
   // SSS launch drop — 10% off while it headlines the shop hero (12,000 → 10,800).
   effect_outergod: { type: "effect", price: 12000, discountPercent: 10 },
+  effect_gateway: { type: "effect", price: 12000 },
   // LIMITED DROP — vanishes from sale after the window closes (owners keep it).
   effect_dejavu: { type: "effect", price: 15000, availableUntil: "2026-07-24T23:59:59Z" },
   effect_evernight: { type: "effect", price: 6500 },

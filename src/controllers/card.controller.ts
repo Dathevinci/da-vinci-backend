@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
+import { getRole } from "../utils/economy";
 import {
   CARDS,
   PACK_PRICE,
@@ -50,6 +51,52 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
   }
 };
 
+// Staff buy free everywhere else in the shop; cards match that. Reads the
+// persistent role column first and self-heals from the username, so it survives
+// a rename (see the identity rule).
+async function isStaffFree(userId: string): Promise<boolean> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { username: true, role: true } });
+  if (!u) return false;
+  const role = u.role && u.role !== "USER" ? u.role : getRole(u.username);
+  return role === "LEAD_DEV" || role === "ADMIN";
+}
+
+// GET /api/cards/collectors — who owns what, ranked by completion. This is the
+// "see other people's collections" board.
+export const getCollectors = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const grouped = await prisma.userCard.groupBy({
+      by: ["userId"],
+      _count: { cardId: true },
+      _sum: { count: true },
+    });
+    if (grouped.length === 0) return res.json({ success: true, data: [] });
+
+    const users = await prisma.user.findMany({
+      where: { id: { in: grouped.map((g) => g.userId) } },
+      select: { id: true, username: true, avatar: true, cardTitle: true },
+    });
+    const byId = Object.fromEntries(users.map((u) => [u.id, u]));
+
+    const rows = grouped
+      .filter((g) => byId[g.userId])
+      .map((g) => ({
+        userId: g.userId,
+        username: byId[g.userId].username,
+        avatar: byId[g.userId].avatar,
+        cardTitle: byId[g.userId].cardTitle,
+        distinct: g._count.cardId,
+        total: g._sum.count || 0,
+      }))
+      .sort((a, b) => b.distinct - a.distinct || b.total - a.total)
+      .slice(0, 50);
+
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    next(error);
+  }
+};
+
 function ownerGuard(req: Request, res: Response, userId?: string): boolean {
   if (!userId) {
     res.status(400).json({ success: false, message: "Missing userId." });
@@ -94,16 +141,19 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
     if (!ownerGuard(req, res, userId)) return;
 
     const pulls = rollPack(PACK_SIZE); // roll BEFORE the tx — pure, no I/O
+    const free = await isStaffFree(userId!);
 
     try {
       const result = await prisma.$transaction(async (tx) => {
         // Atomic AP debit: check + deduct in one op. count 0 = couldn't afford.
-        const debit = await tx.user.updateMany({
-          where: { id: userId, arisePoints: { gte: PACK_PRICE } },
-          data: { arisePoints: { decrement: PACK_PRICE } },
-        });
-        if (debit.count === 0) throw new CardError(402, `A pack costs ${PACK_PRICE.toLocaleString()} Arise Points — you don't have enough.`);
-        await tx.pointLog.create({ data: { userId: userId!, amount: -PACK_PRICE, reason: "card-pack" } });
+        if (!free) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, arisePoints: { gte: PACK_PRICE } },
+            data: { arisePoints: { decrement: PACK_PRICE } },
+          });
+          if (debit.count === 0) throw new CardError(402, `A pack costs ${PACK_PRICE.toLocaleString()} Arise Points — you don't have enough.`);
+          await tx.pointLog.create({ data: { userId: userId!, amount: -PACK_PRICE, reason: "card-pack" } });
+        }
 
         // Grant each pull — upsert the per-card count so dupes stack.
         for (const cardId of pulls) {

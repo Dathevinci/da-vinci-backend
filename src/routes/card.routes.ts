@@ -1,12 +1,13 @@
 import { Router } from "express";
 import {
-  getCatalog, getCollection, openPack, dustCard, craftCard,
+  getCatalog, getCollection, getCollectors, openPack, dustCard, craftCard,
   foilCard, openRelicPack, claimSet,
 } from "../controllers/card.controller";
 
 const router = Router();
 
 router.get("/catalog", getCatalog);
+router.get("/collectors", getCollectors);
 router.get("/collection/:userId", getCollection);
 router.post("/open-pack", openPack);
 router.post("/dust", dustCard);

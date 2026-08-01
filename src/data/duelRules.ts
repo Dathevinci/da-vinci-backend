@@ -116,7 +116,11 @@ export function sideOf(state: DuelState, userId: string): "a" | "b" | null {
 export function applyAction(
   state: DuelState,
   userId: string,
-  action: { type: "attack" } | { type: "item"; item: ItemId },
+  // `index` on an attack is the card you're SENDING IN this turn — the
+  // tactical choice. It becomes your front fighter, which also makes it the
+  // one that eats the counter-attack, so leading with your legendary is a real
+  // decision rather than a free one.
+  action: { type: "attack"; index?: number } | { type: "item"; item: ItemId },
   roll: number
 ): { state: DuelState; finished: boolean; winnerId?: string } {
   const meKey = sideOf(state, userId);
@@ -126,6 +130,19 @@ export function applyAction(
   const s: DuelState = JSON.parse(JSON.stringify(state));
   const me = meKey === "a" ? s.a : s.b;
   const foe = meKey === "a" ? s.b : s.a;
+
+  // Deploying: an attack may name which of YOUR cards steps up. Ignored if the
+  // index is out of range or that card has already fallen, so a bad client
+  // can't field a corpse.
+  if (action.type === "attack" && typeof action.index === "number") {
+    const pick = me.fighters[action.index];
+    if (pick && pick.hp > 0) {
+      if (action.index !== me.active) {
+        s.log.push(`${me.username} sent out ${pick.name}.`);
+      }
+      me.active = action.index;
+    }
+  }
 
   // Make sure both sides point at a living fighter.
   if (me.fighters[me.active]?.hp <= 0) me.active = Math.max(0, livingIndex(me));

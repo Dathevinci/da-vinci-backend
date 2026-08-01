@@ -262,7 +262,7 @@ export const declineDuel = async (req: Request, res: Response, next: NextFunctio
 // POST /api/duels/:id/move  { userId, action: "attack" | "heal" | "shield" | "focus" }
 export const makeMove = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, action } = (req.body || {}) as { userId?: string; action?: string };
+    const { userId, action, index } = (req.body || {}) as { userId?: string; action?: string; index?: number };
     if (!guard(req, res, userId)) return;
     const id = req.params.id as string;
 
@@ -275,7 +275,7 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
     if (!sideOf(parsed, userId!)) return res.status(403).json({ success: false, message: "You're not in this duel." });
 
     const act = action === "attack"
-      ? { type: "attack" as const }
+      ? { type: "attack" as const, index: Number.isInteger(index) ? Number(index) : undefined }
       : { type: "item" as const, item: action as ItemId };
     if (act.type === "item" && !ITEMS[act.item]) {
       return res.status(400).json({ success: false, message: "Unknown action." });

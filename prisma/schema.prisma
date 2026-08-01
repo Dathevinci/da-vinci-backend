@@ -40,6 +40,7 @@ model User {
   shards           Int      @default(0)  // dust from duplicate cards; crafts/foils/relic packs
   duelItems        String[] @default([])  // bag of duel consumables; one entry = one charge
   claimedSets      String[] @default([])  // set names whose completion reward has been paid
+  showcaseCards    String[] @default([])  // up to 3 card ids pinned to the profile
   cardTitle        String?                // title earned from completing a set
   cards            UserCard[]
 

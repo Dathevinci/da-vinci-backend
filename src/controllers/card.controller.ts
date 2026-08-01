@@ -388,3 +388,85 @@ class CardError extends Error {
     super(message);
   }
 }
+
+// ── GET /api/cards/ladder ─────────────────────────────────────────────────
+// One board, three ways of being good at this place: how much you've watched
+// (XP/level), how well you duel (Elo), and how deep your collection runs
+// (distinct cards + shards). Keeping them in one response means the client can
+// re-sort without three round trips, and nobody has to guess which board is
+// "the real one".
+export const getLadder = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const [users, ratings, cardRows] = await Promise.all([
+      prisma.user.findMany({
+        where: { isPrivate: false },
+        select: {
+          id: true, username: true, avatar: true, xp: true, shards: true,
+          cardTitle: true, role: true, isPrivate: true,
+        },
+        orderBy: { xp: "desc" },
+        take: 200,
+      }),
+      prisma.duelRating.findMany({
+        select: { userId: true, rating: true, wins: true, losses: true, streak: true },
+      }),
+      prisma.userCard.groupBy({ by: ["userId"], _count: { cardId: true } }),
+    ]);
+
+    const byRating = new Map(ratings.map((r) => [r.userId, r]));
+    const byCards = new Map(cardRows.map((c) => [c.userId, c._count.cardId]));
+
+    const rows = users.map((u) => {
+      const r = byRating.get(u.id);
+      return {
+        userId: u.id,
+        username: u.username,
+        avatar: u.avatar,
+        cardTitle: u.cardTitle,
+        xp: u.xp,
+        shards: u.shards,
+        cards: byCards.get(u.id) || 0,
+        rating: r?.rating ?? null,
+        wins: r?.wins ?? 0,
+        losses: r?.losses ?? 0,
+        streak: r?.streak ?? 0,
+      };
+    });
+
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── PUT /api/cards/showcase ───────────────────────────────────────────────
+// The three cards pinned to a profile. Ownership is checked server-side: a
+// showcase is a claim about what you have, so it must not be possible to pin a
+// card you have never pulled.
+export const setShowcase = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardIds } = (req.body || {}) as { userId?: string; cardIds?: string[] };
+    if (!userId) return res.status(400).json({ success: false, message: "Missing userId." });
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only change your own showcase." });
+    }
+    if (!Array.isArray(cardIds) || cardIds.length > 3) {
+      return res.status(400).json({ success: false, message: "Pick up to three cards." });
+    }
+    const unique = [...new Set(cardIds)];
+    if (unique.length) {
+      const owned = await prisma.userCard.findMany({
+        where: { userId, cardId: { in: unique } },
+        select: { cardId: true },
+      });
+      if (owned.length !== unique.length) {
+        return res.status(400).json({ success: false, message: "You can only showcase cards you own." });
+      }
+    }
+    await prisma.user.update({ where: { id: userId }, data: { showcaseCards: { set: unique } } });
+    res.json({ success: true, data: { showcaseCards: unique } });
+  } catch (error) {
+    next(error);
+  }
+};

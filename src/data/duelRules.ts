@@ -52,7 +52,10 @@ export interface Side {
   active: number;          // index into fighters
   items: Record<string, number>; // itemId -> charges remaining
   shield: boolean;         // next incoming damage halved
-  focus: boolean;          // next outgoing attack boosted
+  focus: boolean;          // next outgoing attack boosted (legacy item)
+  block?: boolean;         // next incoming attack negated outright
+  focusMult?: number;      // multiplier from a support card's focus effect
+  usedSupports?: string[]; // support card ids already played THIS duel
 }
 
 export interface DuelState {
@@ -65,7 +68,9 @@ export interface DuelState {
 
 export function buildFighter(cardId: string, foil: boolean): Fighter | null {
   const def = CARDS[cardId];
-  if (!def) return null;
+  // Support cards are played, never fielded — they have no stat line, so
+  // letting one into a deck would field a fighter with undefined HP.
+  if (!def || def.support) return null;
   const base = CARD_STATS[def.rarity];
   const mult = foil ? FOIL_MULT : 1;
   const hp = Math.round(base.hp * mult);
@@ -93,7 +98,7 @@ export function makeSide(
   // active = -1 means NOBODY is on the field yet. The arena opens empty and
   // your first move is genuinely choosing who walks in, instead of the engine
   // having silently already picked for you.
-  return { userId, username, fighters, active: -1, items, shield: false, focus: false };
+  return { userId, username, fighters, active: -1, items, shield: false, focus: false, usedSupports: [] };
 }
 
 function livingIndex(side: Side): number {
@@ -123,7 +128,10 @@ export function applyAction(
   // tactical choice. It becomes your front fighter, which also makes it the
   // one that eats the counter-attack, so leading with your legendary is a real
   // decision rather than a free one.
-  action: { type: "attack"; index?: number } | { type: "item"; item: ItemId },
+  action:
+    | { type: "attack"; index?: number }
+    | { type: "item"; item: ItemId }
+    | { type: "support"; cardId: string },
   roll: number
 ): { state: DuelState; finished: boolean; winnerId?: string } {
   const meKey = sideOf(state, userId);
@@ -162,6 +170,58 @@ export function applyAction(
   const theirs = foe.fighters[foe.active];
   if (!mine || !theirs) return { state: s, finished: false };
 
+  // ── Playing a SUPPORT CARD ────────────────────────────────────────────────
+  // Ownership is checked by the caller (it needs the DB); the engine enforces
+  // the once-per-duel rule, so a card you own is never spent — only its use.
+  if (action.type === "support") {
+    const def = CARDS[action.cardId];
+    const eff = def?.support;
+    if (!eff) return { state: s, finished: false };
+    me.usedSupports = me.usedSupports || [];
+    if (me.usedSupports.includes(action.cardId)) return { state: s, finished: false };
+    me.usedSupports.push(action.cardId);
+
+    if (eff.kind === "heal") {
+      const before = mine.hp;
+      mine.hp = Math.min(mine.maxHp, mine.hp + eff.power);
+      s.log.push(`${me.username} played ${def.name} — ${mine.name} recovered ${mine.hp - before} HP.`);
+    } else if (eff.kind === "shield") {
+      me.shield = true;
+      s.log.push(`${me.username} played ${def.name}. The next blow will glance.`);
+    } else if (eff.kind === "block") {
+      me.block = true;
+      s.log.push(`${me.username} played ${def.name}. The next attack will not land at all.`);
+    } else if (eff.kind === "focus") {
+      me.focusMult = eff.power;
+      s.log.push(`${me.username} played ${def.name} — the next strike will hit far harder.`);
+    } else if (eff.kind === "mend") {
+      let healed = 0;
+      for (const f of me.fighters) {
+        if (f.hp > 0 && f.hp < f.maxHp) {
+          const b = f.hp;
+          f.hp = Math.min(f.maxHp, f.hp + eff.power);
+          healed += f.hp - b;
+        }
+      }
+      s.log.push(`${me.username} played ${def.name} — the whole line recovered ${healed} HP.`);
+    } else if (eff.kind === "revive") {
+      const fallen = me.fighters.findIndex((f) => f.hp <= 0);
+      if (fallen === -1) {
+        s.log.push(`${me.username} played ${def.name}, but nobody had fallen.`);
+      } else {
+        const f = me.fighters[fallen];
+        f.hp = Math.max(1, Math.round((f.maxHp * eff.power) / 100));
+        s.log.push(`${me.username} played ${def.name} — ${f.name} rose again at ${f.hp} HP.`);
+      }
+    }
+
+    // Playing a support card passes the turn, so it costs tempo.
+    s.turn = foe.userId;
+    s.round += 1;
+    if (s.log.length > 60) s.log = s.log.slice(-60);
+    return { state: s, finished: false };
+  }
+
   if (action.type === "item") {
     // The CALLER has already verified and consumed a charge from the user's
     // bag inside its transaction — the engine stays pure and just applies the
@@ -184,6 +244,19 @@ export function applyAction(
     if (me.focus) {
       dmg *= 1.75;
       me.focus = false;
+    }
+    if (me.focusMult && me.focusMult > 1) {
+      dmg *= me.focusMult;
+      me.focusMult = undefined;
+    }
+    // A block negates the hit entirely and is consumed; a shield only halves.
+    if (foe.block) {
+      foe.block = false;
+      s.log.push(`${theirs.name} turned the blow aside completely.`);
+      s.turn = foe.userId;
+      s.round += 1;
+      if (s.log.length > 60) s.log = s.log.slice(-60);
+      return { state: s, finished: false };
     }
     if (foe.shield) {
       dmg *= 0.5;

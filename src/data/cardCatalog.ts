@@ -22,6 +22,17 @@ export type CardMotif =
   | "heart" | "sea" | "dawn" | "web"
   | "leviathan" | "trench" | "blade" | "mask" | "bell" | "comet";
 
+// What a support card DOES when played. Support cards are collected like any
+// other card and owned permanently — the limit is one use of each per duel,
+// so a card you chased stays yours instead of being burned on a single fight.
+export type SupportEffect =
+  | { kind: "heal"; power: number }        // restore HP to your active card
+  | { kind: "shield" }                     // halve the next damage you take
+  | { kind: "block" }                      // negate the next attack entirely
+  | { kind: "focus"; power: number }       // multiply your next attack
+  | { kind: "mend"; power: number }        // heal EVERY living card you have
+  | { kind: "revive"; power: number };     // bring a fallen card back at power%
+
 export interface CardDef {
   id: string;
   name: string;
@@ -30,6 +41,8 @@ export interface CardDef {
   hue: number;      // 0-360, drives the palette
   motif: CardMotif; // drives WHAT is drawn
   flavor: string;
+  /** Units fight; support cards are played for an effect. Absent = unit. */
+  support?: SupportEffect;
 }
 
 // The base set. `event` cards are NOT in the normal pack pool (see PACK_POOL) —
@@ -98,6 +111,19 @@ export const CARDS: Record<string, CardDef> = {
 
   // ── Legendary ──
   card_lastronin:   { id: "card_lastronin",   name: "The Last Ronin",      rarity: "legendary", set: "Ronin", hue: 8,   motif: "blade", flavor: "No lord remains to serve, and still the blade is drawn at dawn." },
+
+  // ═══ SET · SUCCOUR — the support cards ════════════════════════════════════
+  // Collected from packs like everything else and owned forever; each may be
+  // played ONCE per duel. Kept in their own set so completing them is its own
+  // chase, and so they can be balanced without touching the fighters.
+  card_salve:      { id: "card_salve",      name: "Field Salve",      rarity: "common", set: "Succour", hue: 145, motif: "seed",   flavor: "Rough cloth, cold water, and someone willing to stay.", support: { kind: "heal", power: 10 } },
+  card_emberdraught:{ id: "card_emberdraught", name: "Ember Draught", rarity: "common", set: "Succour", hue: 28,  motif: "ember",  flavor: "It burns going down. That is rather the point.", support: { kind: "focus", power: 1.5 } },
+  card_stillwater: { id: "card_stillwater", name: "Stillwater Rite",  rarity: "common", set: "Succour", hue: 195, motif: "ripple", flavor: "Breathe. The blade will still be there after.", support: { kind: "shield" } },
+  card_deepsalve:  { id: "card_deepsalve",  name: "Deep Salve",       rarity: "rare",   set: "Succour", hue: 160, motif: "lotus",  flavor: "Closes what the field salve only quiets.", support: { kind: "heal", power: 22 } },
+  card_bulwark:    { id: "card_bulwark",    name: "Bulwark Ward",     rarity: "rare",   set: "Succour", hue: 210, motif: "gate",   flavor: "A door is only a wall that changed its mind.", support: { kind: "block" } },
+  card_warcry:     { id: "card_warcry",     name: "War Cry",          rarity: "rare",   set: "Succour", hue: 12,  motif: "bell",   flavor: "Not a plan. A promise, shouted.", support: { kind: "focus", power: 2 } },
+  card_communion:  { id: "card_communion",  name: "Quiet Communion",  rarity: "epic",   set: "Succour", hue: 280, motif: "heart",  flavor: "Everyone stands a little straighter, and nobody says why.", support: { kind: "mend", power: 12 } },
+  card_secondwind: { id: "card_secondwind", name: "Second Wind",      rarity: "legendary", set: "Succour", hue: 48, motif: "dawn", flavor: "The dead are only the resting, if you argue well enough.", support: { kind: "revive", power: 50 } },
 
   // ── Event (limited; NOT in normal packs) ──
   card_founder:    { id: "card_founder",    name: "The Founder's Seal", rarity: "event", set: "Genesis", hue: 290, motif: "seal", flavor: "Given to those who were here at the beginning." },
@@ -184,6 +210,7 @@ export interface SetReward {
   title: string;   // shown on the profile once claimed
 }
 export const SET_REWARDS: Record<string, SetReward> = {
+  Succour:   { set: "Succour",   ap: 2500, shards: 600, title: "Keeper of the Quiet Hand" },
   Ascension: { set: "Ascension", ap: 3000, shards: 500, title: "Archivist of Ascension" },
   Abyssal:   { set: "Abyssal",   ap: 3000, shards: 500, title: "Sounder of the Abyss" },
   Ronin:     { set: "Ronin",     ap: 3000, shards: 500, title: "Sword Without a Lord" },

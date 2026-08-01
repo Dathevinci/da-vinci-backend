@@ -262,7 +262,9 @@ export const declineDuel = async (req: Request, res: Response, next: NextFunctio
 // POST /api/duels/:id/move  { userId, action: "attack" | "heal" | "shield" | "focus" }
 export const makeMove = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, action, index } = (req.body || {}) as { userId?: string; action?: string; index?: number };
+    const { userId, action, index, cardId } = (req.body || {}) as {
+      userId?: string; action?: string; index?: number; cardId?: string;
+    };
     if (!guard(req, res, userId)) return;
     const id = req.params.id as string;
 
@@ -274,11 +276,29 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
     const parsed: DuelState = JSON.parse(duel.state);
     if (!sideOf(parsed, userId!)) return res.status(403).json({ success: false, message: "You're not in this duel." });
 
-    const act = action === "attack"
-      ? { type: "attack" as const, index: Number.isInteger(index) ? Number(index) : undefined }
-      : { type: "item" as const, item: action as ItemId };
-    if (act.type === "item" && !ITEMS[act.item]) {
-      return res.status(400).json({ success: false, message: "Unknown action." });
+    let act:
+      | { type: "attack"; index?: number }
+      | { type: "item"; item: ItemId }
+      | { type: "support"; cardId: string };
+
+    if (action === "attack") {
+      act = { type: "attack", index: Number.isInteger(index) ? Number(index) : undefined };
+    } else if (action === "support") {
+      const def = cardId ? CARDS[cardId] : undefined;
+      if (!def?.support) return res.status(400).json({ success: false, message: "That isn't a support card." });
+      // You must OWN the card to play it. Ownership is the only gate — the
+      // card is never consumed, so nothing is deducted here; the engine
+      // enforces once-per-duel.
+      const owned = await prisma.userCard.findUnique({
+        where: { userId_cardId: { userId: userId!, cardId: cardId! } },
+        select: { cardId: true },
+      });
+      if (!owned) return res.status(403).json({ success: false, message: `You don't own ${def.name}.` });
+      act = { type: "support", cardId: cardId! };
+    } else {
+      const item = action as ItemId;
+      if (!ITEMS[item]) return res.status(400).json({ success: false, message: "Unknown action." });
+      act = { type: "item", item };
     }
 
     const result = applyAction(parsed, userId!, act, Math.random());

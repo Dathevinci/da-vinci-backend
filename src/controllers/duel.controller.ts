@@ -133,8 +133,14 @@ export const createDuel = async (req: Request, res: Response, next: NextFunction
     if (amount < MIN_STAKE || amount > MAX_STAKE) {
       return res.status(400).json({ success: false, message: `Stake must be between ${MIN_STAKE} and ${MAX_STAKE} Arise Points.` });
     }
+    // `!deck` is redundant at runtime (deckProblem already rejects a non-array)
+    // but it is what narrows `deck` from `string[] | undefined` to `string[]`
+    // for everything below — extracting the checks into a helper moved the
+    // narrowing out of the compiler's view.
     const bad = deckProblem(deck);
-    if (bad) return res.status(400).json({ success: false, message: bad });
+    if (bad || !deck) {
+      return res.status(400).json({ success: false, message: bad ?? `Pick exactly ${DECK_SIZE} cards.` });
+    }
 
     const [me, foe] = await Promise.all([
       prisma.user.findUnique({ where: { id: userId }, select: { id: true, username: true } }),
@@ -201,8 +207,11 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     if (duel.opponentId !== userId) return res.status(403).json({ success: false, message: "This challenge isn't yours to accept." });
     if (duel.status !== "PENDING") return res.status(410).json({ success: false, message: "This challenge is no longer open." });
     if (duel.expiresAt.getTime() <= Date.now()) return res.status(410).json({ success: false, message: "This challenge expired." });
+    // `!deck` narrows to string[] for the spread and includes() calls below.
     const badDeck = deckProblem(deck);
-    if (badDeck) return res.status(400).json({ success: false, message: badDeck });
+    if (badDeck || !deck) {
+      return res.status(400).json({ success: false, message: badDeck ?? `Pick exactly ${DECK_SIZE} cards.` });
+    }
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },

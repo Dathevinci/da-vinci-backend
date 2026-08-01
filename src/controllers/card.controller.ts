@@ -252,8 +252,8 @@ export const craftCard = async (req: Request, res: Response, next: NextFunction)
 };
 
 // POST /api/cards/foil  body { userId, cardId }
-// Spend shards to turn a card you own into its animated foil variant. Pure
-// prestige — no gameplay edge, it just looks incredible.
+// Spend shards to turn a card you own into its animated foil variant: it looks
+// incredible AND fights 20% harder in duels (FOIL_MULT in duelRules).
 export const foilCard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, cardId } = (req.body || {}) as { userId?: string; cardId?: string };

@@ -154,9 +154,10 @@ export const TOTAL_CARDS = Object.keys(CARDS).length;
 // ═══ WHAT SHARDS ARE FOR ═══════════════════════════════════════════════════
 // Three sinks, so shards are a currency rather than a number that only goes up:
 //   1. CRAFT  — buy a specific card outright (CRAFT_COST above).
-//   2. FOIL   — upgrade a card you own into its animated foil variant. Pure
-//               prestige: no gameplay edge, it just looks incredible and shows
-//               everyone you went deep on that card.
+//   2. FOIL   — upgrade a card you own into its animated foil variant. It looks
+//               incredible AND fights 20% harder in duels (see FOIL_MULT in
+//               duelRules), so shards are the bridge between collecting and
+//               competing: dust what luck gave you, sharpen what you kept.
 //   3. RELIC PACK — a pack guaranteed to contain at least one EPIC or better.
 //               Bought with shards, not AP, so a patient collector can convert
 //               grinding into targeted luck.

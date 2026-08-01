@@ -37,7 +37,9 @@ model User {
   purchasedFonts   String[] @default([])
   purchasedFrames  String[] @default([])
 
-  shards           Int      @default(0)  // dust from duplicate cards; crafts specific cards
+  shards           Int      @default(0)  // dust from duplicate cards; crafts/foils/relic packs
+  claimedSets      String[] @default([])  // set names whose completion reward has been paid
+  cardTitle        String?                // title earned from completing a set
   cards            UserCard[]
 
   activeRole       String?
@@ -236,6 +238,7 @@ model UserCard {
   userId    String
   cardId    String   // id in the server-side card catalog (cardCatalog.ts)
   count     Int      @default(1)
+  foil      Boolean  @default(false) // shard-bought prestige variant
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

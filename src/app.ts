@@ -22,6 +22,7 @@ import manhwaBookmarkRoutes from "./routes/manhwaBookmarks";
 import novelBookmarkRoutes from "./routes/novelBookmarks";
 import kofiRoutes from "./routes/kofi.routes";
 import consoleRoutes from "./routes/console.routes";
+import auctionRoutes from "./routes/auction.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -73,6 +74,7 @@ app.use("/api/novels", novelRoutes);
 app.use("/api/manhwa-bookmarks", manhwaBookmarkRoutes);
 app.use("/api/novel-bookmarks", novelBookmarkRoutes);
 app.use("/api/kofi", kofiRoutes);
+app.use("/api/auctions", auctionRoutes);
 
 // Error Handler must be last
 app.use(errorHandler);

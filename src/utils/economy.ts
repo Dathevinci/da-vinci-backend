@@ -97,7 +97,16 @@ export async function remainingDailyAp(
   const since = new Date();
   since.setUTCHours(0, 0, 0, 0);
   const agg = await prisma.pointLog.aggregate({
-    where: { userId, amount: { gt: 0 }, createdAt: { gte: since } },
+    // Only CONTENT earnings count toward the grind cap. Auction refunds land in
+    // the ledger as positive entries too (points coming back to your wallet
+    // when you're outbid), and counting those as "earned today" would let a
+    // bidding war silently eat your ability to earn from watching.
+    where: {
+      userId,
+      amount: { gt: 0 },
+      createdAt: { gte: since },
+      NOT: { reason: { startsWith: "auction" } },
+    },
     _sum: { amount: true },
   });
   const earnedToday = (agg?._sum?.amount as number) || 0;

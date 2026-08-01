@@ -225,6 +225,48 @@ model PointLog {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// The Arise Auction House. The SERVER (Lead Dev) is the seller — bids are a
+// pure sink: the winning bid's points are deducted at bid time and never paid
+// out to anyone, so they leave circulation permanently. userIds are stored as
+// plain strings (no FK) so nothing has to change on the User model.
+model Auction {
+  id            String       @id @default(uuid())
+  itemId        String       // shop catalog id, e.g. "effect_outergod"
+  itemType      String       // "effect" | "frame"
+  title         String       // display-name snapshot at listing time
+  startPrice    Int
+  minIncrement  Int          @default(100)
+  topBid        Int          @default(0)  // 0 = no bids yet
+  topBidderId   String?
+  topBidderName String?
+  bidCount      Int          @default(0)
+  status        String       @default("ACTIVE") // ACTIVE | SETTLED | CANCELLED
+  endsAt        DateTime
+  settledAt     DateTime?
+  winnerId      String?
+  createdAt     DateTime     @default(now())
+
+  bids          AuctionBid[]
+
+  @@index([status, endsAt])
+}
+
+// Append-only bid log — for the "N bids" history UI and audit. NOT load-bearing
+// for correctness: Auction.topBid / topBidderId are the authoritative state,
+// updated under an optimistic guard so concurrent bids can't corrupt the total.
+model AuctionBid {
+  id        String   @id @default(uuid())
+  auctionId String
+  userId    String
+  username  String
+  amount    Int
+  createdAt DateTime @default(now())
+
+  auction   Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+
+  @@index([auctionId])
+}
+
 model Announcement {
   id        String   @id @default(uuid())
   authorId  String

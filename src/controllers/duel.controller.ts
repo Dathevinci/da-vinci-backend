@@ -412,11 +412,17 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
     if (!sideOf(parsed, userId!)) return res.status(403).json({ success: false, message: "You're not in this duel." });
 
     let act:
+      | { type: "deploy"; index: number }
       | { type: "attack"; index?: number }
       | { type: "item"; item: ItemId }
       | { type: "support"; cardId: string; target?: number };
 
-    if (action === "attack") {
+    if (action === "deploy") {
+      if (!Number.isInteger(index)) {
+        return res.status(400).json({ success: false, message: "Which card do you want to send in?" });
+      }
+      act = { type: "deploy", index: Number(index) };
+    } else if (action === "attack") {
       act = { type: "attack", index: Number.isInteger(index) ? Number(index) : undefined };
     } else if (action === "support") {
       const def = cardId ? CARDS[cardId] : undefined;
@@ -451,10 +457,20 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
     // rewritten identically, the turn never passes, and the client is told the
     // move succeeded while visibly nothing happened.
     if (result.state === parsed) {
-      return res.status(400).json({
-        success: false,
-        message: "That move would have no effect right now.",
-      });
+      const key = sideOf(parsed, userId!);
+      const meSide = key === "a" ? parsed.a : parsed.b;
+      const foeSide = key === "a" ? parsed.b : parsed.a;
+      let why = "That move would have no effect right now.";
+      if (act.type === "attack" && meSide.active < 0) {
+        why = "Send a card in first.";
+      } else if (act.type === "attack" && foeSide.active < 0) {
+        why = `${foeSide.username} hasn't sent anyone in yet.`;
+      } else if (act.type === "deploy") {
+        why = "That card can't be sent in.";
+      } else if (act.type === "support") {
+        why = "That card wouldn't do anything right now.";
+      }
+      return res.status(400).json({ success: false, message: why });
     }
 
     try {

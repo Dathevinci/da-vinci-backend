@@ -138,6 +138,13 @@ export function applyAction(
   // one that eats the counter-attack, so leading with your legendary is a real
   // decision rather than a free one.
   action:
+    // Deploying and attacking are SEPARATE moves. They used to be one — an
+    // attack carried the card index and sent it in on the way past — which
+    // meant dragging a card onto the field immediately swung with it, and the
+    // defender was force-deployed for them so neither player ever chose who
+    // walked out. Now you send a card in (costing the turn), they send theirs
+    // in, and only then does anyone swing.
+    | { type: "deploy"; index: number }
     | { type: "attack"; index?: number }
     | { type: "item"; item: ItemId }
     // `target` is the fighter a support card was dropped ON. Only heal and
@@ -153,21 +160,29 @@ export function applyAction(
   const me = meKey === "a" ? s.a : s.b;
   const foe = meKey === "a" ? s.b : s.a;
 
-  // Deploying: an attack may name which of YOUR cards steps up. Ignored if the
-  // index is out of range or that card has already fallen, so a bad client
-  // can't field a corpse.
-  if (action.type === "attack" && typeof action.index === "number") {
+  // ── DEPLOY ── send a card out. Costs the turn, deals nothing.
+  // Charging a turn for it is what stops you swapping to your best attacker
+  // every round for free; committing a card is a real decision.
+  if (action.type === "deploy") {
     const pick = me.fighters[action.index];
-    if (pick && pick.hp > 0) {
-      if (action.index !== me.active) {
-        s.log.push(`${me.username} sent out ${pick.name}.`);
-      }
-      me.active = action.index;
+    // Never field a corpse, and never spend a turn re-sending the card that is
+    // already out there.
+    if (!pick || pick.hp <= 0 || action.index === me.active) {
+      return { state, finished: false };
     }
+    me.active = action.index;
+    s.log.push(`${me.username} sent out ${pick.name}.`);
+    s.turn = foe.userId;
+    s.round += 1;
+    if (s.log.length > 60) s.log = s.log.slice(-60);
+    return { state: s, finished: false };
   }
 
-  // Nobody deployed and no card named? Can't act — the client must pick.
+  // You cannot swing with nobody on the field, and you cannot swing at an empty
+  // one. The defender is NOT dragged out automatically any more — they choose
+  // their own card on their own turn.
   if (action.type === "attack" && me.active < 0) return { state, finished: false };
+  if (action.type === "attack" && foe.active < 0) return { state, finished: false };
   // Items act on YOUR active card (heal) or your side's next exchange. With
   // nobody on the field there is nothing to apply them to, and the caller would
   // otherwise burn the charge for no effect. Returning the ORIGINAL state makes
@@ -254,14 +269,12 @@ export function applyAction(
     return { state: s, finished: false };
   }
 
-  // Make sure both sides point at a living fighter. An empty field (-1) stays
-  // empty until that player deploys.
-  if (me.active >= 0 && me.fighters[me.active]?.hp <= 0) me.active = livingIndex(me);
-  if (foe.active >= 0 && foe.fighters[foe.active]?.hp <= 0) foe.active = livingIndex(foe);
-  // The defender is dragged onto the field by BEING ATTACKED — otherwise the
-  // first striker would have nothing to hit. Scoped to attacks: an item is not
-  // an attack, and using one must not commit the opponent's lead card for them.
-  if (action.type === "attack" && foe.active < 0) foe.active = livingIndex(foe);
+  // A fallen card leaves the field EMPTY rather than the next one sliding in
+  // automatically. Whoever lost a card chooses their own replacement on their
+  // own turn — having the engine pick for them was the thing that made the
+  // board feel like it was playing itself.
+  if (me.active >= 0 && me.fighters[me.active]?.hp <= 0) me.active = -1;
+  if (foe.active >= 0 && foe.fighters[foe.active]?.hp <= 0) foe.active = -1;
 
   const mine = me.fighters[me.active];
   // An item only ever touches YOUR side, so it must not require an enemy on the
@@ -324,11 +337,8 @@ export function applyAction(
 
     if (theirs.hp === 0) {
       s.log.push(`${theirs.name} fell.`);
-      const next = livingIndex(foe);
-      if (next >= 0) {
-        foe.active = next;
-        s.log.push(`${foe.username} sent out ${foe.fighters[next].name}.`);
-      }
+      // Their field empties. They pick who steps up next, on their turn.
+      foe.active = -1;
     }
   }
 

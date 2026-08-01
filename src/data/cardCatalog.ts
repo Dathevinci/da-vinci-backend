@@ -15,11 +15,12 @@
 export type CardRarity = "common" | "rare" | "epic" | "legendary" | "event";
 
 // Each motif is a DIFFERENT procedurally-drawn scene on the client. This is
-// what stops 21 cards looking like 21 recolours of one shape.
+// what stops 39 cards looking like 39 recolours of one shape.
 export type CardMotif =
   | "eye" | "wheel" | "tendril" | "peak" | "lotus" | "storm" | "gate"
   | "ember" | "moth" | "ripple" | "seed" | "scroll" | "path" | "seal"
-  | "heart" | "sea" | "dawn" | "web";
+  | "heart" | "sea" | "dawn" | "web"
+  | "leviathan" | "trench" | "blade" | "mask" | "bell" | "comet";
 
 export interface CardDef {
   id: string;
@@ -61,6 +62,42 @@ export const CARDS: Record<string, CardDef> = {
   // ── Legendary ──
   card_outergod:   { id: "card_outergod",   name: "The Outer God",      rarity: "legendary", set: "Ascension", hue: 172, motif: "tendril", flavor: "It does not want. It simply is, and that is worse." },
   card_gatekey:    { id: "card_gatekey",    name: "The Gate & The Key", rarity: "legendary", set: "Ascension", hue: 275, motif: "gate", flavor: "It is the door, the lock, and the thing on the other side." },
+
+  // ═══ SET · ABYSSAL — deep water, and what keeps its own counsel ═══════════
+  // ── Common ──
+  card_driftlight:    { id: "card_driftlight",    name: "Drift Light",            rarity: "common", set: "Abyssal", hue: 178, motif: "ember", flavor: "A single glow, drifting where nothing else bothers to shine." },
+  card_saltmask:      { id: "card_saltmask",      name: "Salt-Worn Mask",         rarity: "common", set: "Abyssal", hue: 192, motif: "mask", flavor: "The drowned left their faces on the rocks and kept swimming." },
+  card_shelfedge:     { id: "card_shelfedge",     name: "The Shelf's Edge",       rarity: "common", set: "Abyssal", hue: 212, motif: "trench", flavor: "The seafloor ends here, and then it keeps ending." },
+  card_kelpwood:      { id: "card_kelpwood",      name: "Kelpwood",               rarity: "common", set: "Abyssal", hue: 165, motif: "tendril", flavor: "A forest that sways for a wind no one has ever felt." },
+  card_coldcurrent:   { id: "card_coldcurrent",   name: "Cold Current",           rarity: "common", set: "Abyssal", hue: 200, motif: "ripple", flavor: "Something vast went by an hour ago; the water is still shaking." },
+
+  // ── Rare ──
+  card_divingbell:    { id: "card_divingbell",    name: "The Diving Bell",        rarity: "rare", set: "Abyssal", hue: 196, motif: "bell", flavor: "Down is the only direction that ever answers." },
+  card_lightlessreef: { id: "card_lightlessreef", name: "Lightless Reef",         rarity: "rare", set: "Abyssal", hue: 174, motif: "web", flavor: "It built a city out of patience and calcium." },
+
+  // ── Epic ──
+  card_fallenstar:    { id: "card_fallenstar",    name: "The Fallen Star",        rarity: "epic", set: "Abyssal", hue: 232, motif: "comet", flavor: "It came down through the water, and the water made room." },
+  card_trenchmaw:     { id: "card_trenchmaw",     name: "The Trench Maw",         rarity: "epic", set: "Abyssal", hue: 220, motif: "trench", flavor: "The charts call it a depth; the sailors call it a mouth." },
+
+  // ── Legendary ──
+  card_leviathan:     { id: "card_leviathan",     name: "The Sleeping Leviathan", rarity: "legendary", set: "Abyssal", hue: 186, motif: "leviathan", flavor: "It has not woken in an age, and the tides are only its breathing." },
+
+  // ═══ SET · RONIN — a sword, a road, and no one left to serve ══════════════
+  // ── Common ──
+  card_strawcloak:  { id: "card_strawcloak",  name: "Straw Cloak",         rarity: "common", set: "Ronin", hue: 38,  motif: "path", flavor: "He walks through the rain because the rain is on the way." },
+  card_whetstone:   { id: "card_whetstone",   name: "The Whetstone",       rarity: "common", set: "Ronin", hue: 208, motif: "blade", flavor: "Patience, ground fine enough to cut." },
+  card_clancrest:   { id: "card_clancrest",   name: "Broken Clan Crest",   rarity: "common", set: "Ronin", hue: 350, motif: "seal", flavor: "A house remembered only by the shape it left in the wax." },
+
+  // ── Rare ──
+  card_duskduel:    { id: "card_duskduel",    name: "Duel at Dusk",        rarity: "rare", set: "Ronin", hue: 22,  motif: "blade", flavor: "Two shadows agree on everything except which one walks away." },
+  card_templebell:  { id: "card_templebell",  name: "The Temple Bell",     rarity: "rare", set: "Ronin", hue: 45,  motif: "bell", flavor: "It is rung once for the dead and once for whoever is listening." },
+  card_nightcomet:  { id: "card_nightcomet",  name: "Comet Over the Pass", rarity: "rare", set: "Ronin", hue: 232, motif: "comet", flavor: "The banner-men read it as an omen; it was only a stone in a hurry." },
+
+  // ── Epic ──
+  card_onimask:     { id: "card_onimask",     name: "The Oni's Face",      rarity: "epic", set: "Ronin", hue: 352, motif: "mask", flavor: "He put it on to frighten bandits and never found a reason to take it off." },
+
+  // ── Legendary ──
+  card_lastronin:   { id: "card_lastronin",   name: "The Last Ronin",      rarity: "legendary", set: "Ronin", hue: 8,   motif: "blade", flavor: "No lord remains to serve, and still the blade is drawn at dawn." },
 
   // ── Event (limited; NOT in normal packs) ──
   card_founder:    { id: "card_founder",    name: "The Founder's Seal", rarity: "event", set: "Genesis", hue: 290, motif: "seal", flavor: "Given to those who were here at the beginning." },
@@ -147,6 +184,8 @@ export interface SetReward {
 }
 export const SET_REWARDS: Record<string, SetReward> = {
   Ascension: { set: "Ascension", ap: 3000, shards: 500, title: "Archivist of Ascension" },
+  Abyssal:   { set: "Abyssal",   ap: 3000, shards: 500, title: "Sounder of the Abyss" },
+  Ronin:     { set: "Ronin",     ap: 3000, shards: 500, title: "Sword Without a Lord" },
   Genesis:   { set: "Genesis",   ap: 1000, shards: 200, title: "Keeper of Genesis" },
 };
 

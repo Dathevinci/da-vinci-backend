@@ -4,7 +4,7 @@ import { getActorId } from "../lib/jwt";
 import { CARDS } from "../data/cardCatalog";
 import {
   DECK_SIZE, ITEMS, ItemId, DuelState, makeSide, applyAction, sideOf,
-  eloDelta, payout, MIN_STAKE, MAX_STAKE, DUEL_EXPIRY_HOURS,
+  eloDelta, payout, MIN_STAKE, MAX_STAKE, DUEL_EXPIRY_HOURS, forfeitFine,
 } from "../data/duelRules";
 
 /**
@@ -213,6 +213,26 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
       return res.status(400).json({ success: false, message: badDeck ?? `Pick exactly ${DECK_SIZE} cards.` });
     }
 
+    // A challenge sent before the deck size changed would pit their old
+    // smaller deck against the accepter's full one — an unfair fight nobody
+    // asked for. Retire it and give the challenger their stake back rather
+    // than leaving a dead challenge sitting on their points.
+    if (duel.challengerDeck.length !== DECK_SIZE) {
+      await prisma.$transaction(async (tx) => {
+        const claim = await tx.duel.updateMany({
+          where: { id, status: "PENDING" },
+          data: { status: "DECLINED", finishedAt: new Date() },
+        });
+        if (claim.count === 0) return;
+        await tx.user.update({ where: { id: duel.challengerId }, data: { arisePoints: { increment: duel.stake } } });
+        await tx.pointLog.create({ data: { userId: duel.challengerId, amount: duel.stake, reason: `duel-refund:${id}` } });
+      });
+      return res.status(410).json({
+        success: false,
+        message: `That challenge was made when decks were ${duel.challengerDeck.length} cards. It's been cancelled and ${duel.challengerName} refunded — ask them for a fresh one.`,
+      });
+    }
+
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },
       select: { cardId: true, foil: true },
@@ -285,6 +305,90 @@ export const declineDuel = async (req: Request, res: Response, next: NextFunctio
     });
 
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/duels/:id/forfeit  { userId } — walk out of a running duel.
+export const forfeitDuel = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req.body || {}) as { userId?: string };
+    if (!guard(req, res, userId)) return;
+    const id = req.params.id as string;
+
+    const duel = await prisma.duel.findUnique({ where: { id } });
+    if (!duel) return res.status(404).json({ success: false, message: "Duel not found." });
+    if (duel.challengerId !== userId && duel.opponentId !== userId) {
+      return res.status(403).json({ success: false, message: "Not your duel." });
+    }
+    if (duel.status !== "ACTIVE") {
+      return res.status(410).json({ success: false, message: "That duel isn't running." });
+    }
+
+    const iAmChallenger = duel.challengerId === userId;
+    const winnerId = iAmChallenger ? duel.opponentId : duel.challengerId;
+    const winnerName = iAmChallenger ? duel.opponentName : duel.challengerName;
+    const loserName = iAmChallenger ? duel.challengerName : duel.opponentName;
+    const { toWinner, rake } = payout(duel.stake);
+    const fine = forfeitFine(duel.stake);
+
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        // Claim the duel FIRST. If the other player's winning move landed a
+        // moment ago this fails, and nobody gets fined for a duel that had
+        // already ended.
+        const claim = await tx.duel.updateMany({
+          where: { id, status: "ACTIVE" },
+          data: { status: "FINISHED", winnerId, turnUserId: null, finishedAt: new Date() },
+        });
+        if (claim.count === 0) throw new DuelError(409, "That duel already ended.");
+
+        // The pot settles exactly as it would on a normal win.
+        await tx.user.update({ where: { id: winnerId }, data: { arisePoints: { increment: toWinner } } });
+        await tx.pointLog.create({ data: { userId: winnerId, amount: toWinner, reason: `duel-forfeit-win:${id}` } });
+
+        // The fine on top, clamped to what the quitter actually holds — a
+        // forfeit must never push someone's balance negative.
+        const quitter = await tx.user.findUnique({ where: { id: userId }, select: { arisePoints: true } });
+        const charged = Math.max(0, Math.min(fine, quitter?.arisePoints ?? 0));
+        if (charged > 0) {
+          await tx.user.update({ where: { id: userId }, data: { arisePoints: { decrement: charged } } });
+          await tx.pointLog.create({ data: { userId: userId!, amount: -charged, reason: `duel-forfeit-fine:${id}` } });
+          await tx.user.update({ where: { id: winnerId }, data: { arisePoints: { increment: charged } } });
+          await tx.pointLog.create({ data: { userId: winnerId, amount: charged, reason: `duel-forfeit-fine:${id}` } });
+        }
+
+        // A forfeit is a loss on the ladder — otherwise quitting would be a way
+        // to protect a rating.
+        const [wr, lr] = await Promise.all([
+          tx.duelRating.upsert({ where: { userId: winnerId }, create: { userId: winnerId, username: winnerName }, update: {} }),
+          tx.duelRating.upsert({ where: { userId: userId! }, create: { userId: userId!, username: loserName }, update: {} }),
+        ]);
+        await tx.duelRating.update({
+          where: { userId: winnerId },
+          data: { rating: { increment: eloDelta(wr.rating, lr.rating, true) }, wins: { increment: 1 }, streak: { increment: 1 }, username: winnerName },
+        });
+        await tx.duelRating.update({
+          where: { userId: userId! },
+          data: { rating: { increment: eloDelta(lr.rating, wr.rating, false) }, losses: { increment: 1 }, streak: 0, username: loserName },
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: winnerId, actorId: userId!, type: "duel",
+            message: `🏳️ ${loserName} forfeited your duel. You take ${(toWinner + charged).toLocaleString()} AP — ${toWinner.toLocaleString()} from the pot plus a ${charged.toLocaleString()} AP fine (${rake.toLocaleString()} burned by the house).`,
+            link: "/duels",
+          },
+        });
+
+        return { duel: await tx.duel.findUnique({ where: { id } }), charged };
+      });
+      res.json({ success: true, data: out.duel, fine: out.charged });
+    } catch (e) {
+      if (e instanceof DuelError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
   } catch (error) {
     next(error);
   }

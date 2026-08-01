@@ -12,7 +12,16 @@
 
 import { CARDS, CardRarity } from "./cardCatalog";
 
-export const DECK_SIZE = 3;
+export const DECK_SIZE = 5;
+
+// Walking out of a staked duel costs you the pot AND a fine on top, paid to the
+// player whose time you wasted. Without the fine, quitting is free the moment
+// you're losing — the stake was already gone either way — so the whole point is
+// that the fine is money you would still have if you had played it out.
+export const FORFEIT_FINE_PERCENT = 25;
+export function forfeitFine(stake: number): number {
+  return Math.ceil((stake * FORFEIT_FINE_PERCENT) / 100);
+}
 
 // Rarity is the whole stat line. This is what finally makes a Legendary pull
 // matter in play and not just in the binder.

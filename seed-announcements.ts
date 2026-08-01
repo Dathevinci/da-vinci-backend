@@ -5,6 +5,62 @@ const prisma = new PrismaClient();
 // The Dev Blog entries that should exist on the Updates page (newest first).
 const announcementsData = [
   {
+    title: "Da Vinci — Dev Blog 1.6: Your Time Is Worth More",
+    tag: "Dev Blog",
+    content:
+      "Da Vinci — Dev Blog 1.6\n\n" +
+      "We sat down and worked out how long it actually took to afford things around here. The answer was about two years. That's fixed. Also: three new profile effects, and a profile page rebuilt from scratch.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "THE BIG ONE — every hour now pays properly\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Here's the awkward truth. Between every single member on this site, there were fewer Arise Points in existence than the price of ONE top-tier effect. Exactly one person could afford a single SSS. Everyone else was grinding toward something they'd reach sometime in 2028.\n\n" +
+      "So the whole thing has been rebuilt around one idea: you get paid for your TIME.\n\n" +
+      "An anime episode used to pay 3 points. It now pays around 72 — because it's roughly 24 minutes of your life and that's what 24 minutes is worth. A novel chapter went from 2 to 36. A manhwa chapter from 2 to 18.\n\n" +
+      "An hour is an hour, whatever you spent it on. Which fixes something quietly unfair: manhwa chapters are short, so under the old flat rate they paid nearly three times better per hour than anime. The system was rewarding people for clicking through chapters rather than reading them. Not anymore.\n\n" +
+      "There's a daily ceiling of 700 points so nobody can automate their way to the top. If you hit it, that's about four hours of genuine engagement in a day, and we'd gently suggest touching some grass.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "And everything in the shop got cheaper\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Raising what you earn wasn't enough on its own, so prices came down too — most things by more than half.\n\n" +
+      "The Silent Himalayas: 25,500 → 8,500.\n" +
+      "Domain Expansion: Infinite Void: 21,200 → 7,500.\n" +
+      "Hollow Technique: Purple: 17,500 → 6,500.\n" +
+      "Wheel of Adaptation: 8,000 → 2,600.\n\n" +
+      "Every price is now set by how long it should take to earn. An SSS-grade effect is about a month of real engagement. Something mid-tier is a week or two. The entry cosmetics are an evening.\n\n" +
+      "Aspirational, but actually reachable. That was the whole point.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — three effects, and one of them looks back\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "OUTER GOD: ABYSSAL GAZE — SSS grade, currently 10% off as the featured drop. A tear rips open in reality behind your avatar, rimmed in sickly teal. Colossal appendages writhe out of it, lined with pale suckers, and some of them grow eyes that follow your cursor. Then every ten to fifteen seconds the abyss notices you: immense magenta eyes crack open in the deep, their pupils snapping to wherever your mouse is, while reality buckles and colours tear apart. Then it seals shut. It does not leave.\n\n" +
+      "THE GATE & THE KEY — Unique. Sacred geometry gone wrong. A genuine four-dimensional tesseract turns inside a counter-rotating dodecahedron of corrupted gold, surrounded by breathing iridescent spheres that each carry a single lidless eye. Every so often your mind briefly understands what it's looking at, and reality inverts.\n\n" +
+      "THE WEB-SLINGER — Extreme Rare, and this one you can play with. Six strands of spun silk shoot from your avatar to the corners of your profile, sagging under their own weight. Drag your cursor across any strand and it stretches toward you — let go and it snaps back with a proper decaying twang. You know exactly whose profile this is.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "The profile page, rebuilt\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Profiles used to be a narrow card down the left-hand side. Which was a problem, because a lot of these effects are landscapes — mountain ranges, storm fronts with rain falling through them, night skies over rivers — and we were showing them through a letterbox.\n\n" +
+      "So the profile is now a full-width channel page. Your avatar sits dead centre with the effect playing edge to edge around it, your anime, manhwa and novel collections live together under one set of tabs, and everything is wider.\n\n" +
+      "There's also a new SHOWCASE button. Press it and the effect takes over your entire screen — no card, no borders, nothing else. Some of these were built as full-screen cinema and have never once been seen that way. Try it on someone else's profile too.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "The shop got quieter and faster\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "The shop was doing something silly: every single tile in the grid was running its full animated effect at once. Dozens of them, all the time. It's been calmed down — the browsing grid uses a light preview, and the full effect plays where it belongs, in the preview and on the featured banner.\n\n" +
+      "The layout is tidier too. Smaller header, quieter section titles, less noise between you and the thing you want.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "Also fixed\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "• Profile effects no longer get confused about which avatar they belong to when two profiles are open at once.\n" +
+      "• Light novels: browse tabs for the newest source, and Top Rated goes properly deep instead of showing you the same shelf again.\n" +
+      "• A pile of crashes that only appeared once something was actually on screen.\n\n" +
+
+      "Go earn something. It won't take two years now.\n",
+  },
+  {
     title: "Da Vinci — Dev Blog 1.5.4: Quests, Zoom & Picking Up Where You Left Off",
     tag: "Dev Blog",
     content:

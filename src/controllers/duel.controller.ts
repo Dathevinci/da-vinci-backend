@@ -262,8 +262,8 @@ export const declineDuel = async (req: Request, res: Response, next: NextFunctio
 // POST /api/duels/:id/move  { userId, action: "attack" | "heal" | "shield" | "focus" }
 export const makeMove = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, action, index, cardId } = (req.body || {}) as {
-      userId?: string; action?: string; index?: number; cardId?: string;
+    const { userId, action, index, cardId, target } = (req.body || {}) as {
+      userId?: string; action?: string; index?: number; cardId?: string; target?: number;
     };
     if (!guard(req, res, userId)) return;
     const id = req.params.id as string;
@@ -279,7 +279,7 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
     let act:
       | { type: "attack"; index?: number }
       | { type: "item"; item: ItemId }
-      | { type: "support"; cardId: string };
+      | { type: "support"; cardId: string; target?: number };
 
     if (action === "attack") {
       act = { type: "attack", index: Number.isInteger(index) ? Number(index) : undefined };
@@ -294,7 +294,13 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
         select: { cardId: true },
       });
       if (!owned) return res.status(403).json({ success: false, message: `You don't own ${def.name}.` });
-      act = { type: "support", cardId: cardId! };
+      act = {
+        type: "support",
+        cardId: cardId!,
+        // Which of YOUR fighters the card was dropped on. Only heal/revive
+        // read it; the engine clamps an out-of-range value on its own.
+        target: Number.isInteger(target) ? Number(target) : undefined,
+      };
     } else {
       const item = action as ItemId;
       if (!ITEMS[item]) return res.status(400).json({ success: false, message: "Unknown action." });
@@ -302,6 +308,19 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
     }
 
     const result = applyAction(parsed, userId!, act, Math.random());
+
+    // The engine hands back the ORIGINAL state object (not the clone) whenever
+    // it refuses a move — card already played this duel, nothing wounded to
+    // heal, nobody fallen to revive, no card deployed to attack with. Reference
+    // equality is therefore an exact no-op detector. Without this the row gets
+    // rewritten identically, the turn never passes, and the client is told the
+    // move succeeded while visibly nothing happened.
+    if (result.state === parsed) {
+      return res.status(400).json({
+        success: false,
+        message: "That move would have no effect right now.",
+      });
+    }
 
     try {
       const out = await prisma.$transaction(async (tx) => {

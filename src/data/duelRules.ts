@@ -131,7 +131,9 @@ export function applyAction(
   action:
     | { type: "attack"; index?: number }
     | { type: "item"; item: ItemId }
-    | { type: "support"; cardId: string },
+    // `target` is the fighter a support card was dropped ON. Only heal and
+    // revive care; the rest are side-wide and ignore it.
+    | { type: "support"; cardId: string; target?: number },
   roll: number
 ): { state: DuelState; finished: boolean; winnerId?: string } {
   const meKey = sideOf(state, userId);
@@ -158,6 +160,85 @@ export function applyAction(
   // Nobody deployed and no card named? Can't act — the client must pick.
   if (action.type === "attack" && me.active < 0) return { state, finished: false };
 
+  // ── Playing a SUPPORT CARD ────────────────────────────────────────────────
+  // Resolved BEFORE the field is normalised below, because a support card is
+  // playable even when you have nobody on the field yet — healing the bench or
+  // raising a ward is a legitimate opening move. Previously this sat under the
+  // `if (!mine || !theirs)` guard, so playing one before deploying silently did
+  // nothing at all and the player just lost the tap.
+  //
+  // Ownership is checked by the caller (it needs the DB); the engine enforces
+  // the once-per-duel rule, so a card you own is never spent — only its use.
+  if (action.type === "support") {
+    const def = CARDS[action.cardId];
+    const eff = def?.support;
+    if (!eff) return { state, finished: false };
+    // Held in a local so the narrowing survives — `usedSupports` is optional on
+    // Side, and property narrowing across the branches below is fragile.
+    const used: string[] = me.usedSupports || (me.usedSupports = []);
+    if (used.includes(action.cardId)) return { state, finished: false };
+
+    // `target` is the card the player dropped this onto. Falling back to the
+    // active fighter keeps the old tap-to-play behaviour working.
+    const wanted = typeof action.target === "number" ? action.target : me.active;
+
+    if (eff.kind === "heal") {
+      // You can only mend the living — bringing someone back is Second Wind's job.
+      const t = me.fighters[wanted];
+      const tgt = t && t.hp > 0 ? t : me.fighters[livingIndex(me)];
+      if (!tgt) return { state, finished: false };
+      if (tgt.hp >= tgt.maxHp) {
+        // Refuse rather than burn the card's one use on nothing.
+        return { state, finished: false };
+      }
+      used.push(action.cardId);
+      const before = tgt.hp;
+      tgt.hp = Math.min(tgt.maxHp, tgt.hp + eff.power);
+      s.log.push(`${me.username} played ${def.name} — ${tgt.name} recovered ${tgt.hp - before} HP.`);
+    } else if (eff.kind === "revive") {
+      // Target must be a card that has actually fallen.
+      const t = me.fighters[wanted];
+      const tgt = t && t.hp <= 0 ? t : me.fighters.find((f) => f.hp <= 0);
+      if (!tgt) return { state, finished: false };
+      used.push(action.cardId);
+      tgt.hp = Math.max(1, Math.round((tgt.maxHp * eff.power) / 100));
+      s.log.push(`${me.username} played ${def.name} — ${tgt.name} rose again at ${tgt.hp} HP.`);
+    } else if (eff.kind === "mend") {
+      const wounded = me.fighters.some((f) => f.hp > 0 && f.hp < f.maxHp);
+      if (!wounded) return { state, finished: false };
+      used.push(action.cardId);
+      let healed = 0;
+      for (const f of me.fighters) {
+        if (f.hp > 0 && f.hp < f.maxHp) {
+          const b = f.hp;
+          f.hp = Math.min(f.maxHp, f.hp + eff.power);
+          healed += f.hp - b;
+        }
+      }
+      s.log.push(`${me.username} played ${def.name} — the whole line recovered ${healed} HP.`);
+    } else if (eff.kind === "shield") {
+      used.push(action.cardId);
+      me.shield = true;
+      s.log.push(`${me.username} played ${def.name}. The next blow will glance.`);
+    } else if (eff.kind === "block") {
+      used.push(action.cardId);
+      me.block = true;
+      s.log.push(`${me.username} played ${def.name}. The next attack will not land at all.`);
+    } else if (eff.kind === "focus") {
+      used.push(action.cardId);
+      me.focusMult = eff.power;
+      s.log.push(`${me.username} played ${def.name} — the next strike will hit far harder.`);
+    } else {
+      return { state, finished: false };
+    }
+
+    // Playing a support card passes the turn, so it costs tempo.
+    s.turn = foe.userId;
+    s.round += 1;
+    if (s.log.length > 60) s.log = s.log.slice(-60);
+    return { state: s, finished: false };
+  }
+
   // Make sure both sides point at a living fighter. An empty field (-1) stays
   // empty until that player deploys.
   if (me.active >= 0 && me.fighters[me.active]?.hp <= 0) me.active = livingIndex(me);
@@ -169,58 +250,6 @@ export function applyAction(
   const mine = me.fighters[me.active];
   const theirs = foe.fighters[foe.active];
   if (!mine || !theirs) return { state: s, finished: false };
-
-  // ── Playing a SUPPORT CARD ────────────────────────────────────────────────
-  // Ownership is checked by the caller (it needs the DB); the engine enforces
-  // the once-per-duel rule, so a card you own is never spent — only its use.
-  if (action.type === "support") {
-    const def = CARDS[action.cardId];
-    const eff = def?.support;
-    if (!eff) return { state: s, finished: false };
-    me.usedSupports = me.usedSupports || [];
-    if (me.usedSupports.includes(action.cardId)) return { state: s, finished: false };
-    me.usedSupports.push(action.cardId);
-
-    if (eff.kind === "heal") {
-      const before = mine.hp;
-      mine.hp = Math.min(mine.maxHp, mine.hp + eff.power);
-      s.log.push(`${me.username} played ${def.name} — ${mine.name} recovered ${mine.hp - before} HP.`);
-    } else if (eff.kind === "shield") {
-      me.shield = true;
-      s.log.push(`${me.username} played ${def.name}. The next blow will glance.`);
-    } else if (eff.kind === "block") {
-      me.block = true;
-      s.log.push(`${me.username} played ${def.name}. The next attack will not land at all.`);
-    } else if (eff.kind === "focus") {
-      me.focusMult = eff.power;
-      s.log.push(`${me.username} played ${def.name} — the next strike will hit far harder.`);
-    } else if (eff.kind === "mend") {
-      let healed = 0;
-      for (const f of me.fighters) {
-        if (f.hp > 0 && f.hp < f.maxHp) {
-          const b = f.hp;
-          f.hp = Math.min(f.maxHp, f.hp + eff.power);
-          healed += f.hp - b;
-        }
-      }
-      s.log.push(`${me.username} played ${def.name} — the whole line recovered ${healed} HP.`);
-    } else if (eff.kind === "revive") {
-      const fallen = me.fighters.findIndex((f) => f.hp <= 0);
-      if (fallen === -1) {
-        s.log.push(`${me.username} played ${def.name}, but nobody had fallen.`);
-      } else {
-        const f = me.fighters[fallen];
-        f.hp = Math.max(1, Math.round((f.maxHp * eff.power) / 100));
-        s.log.push(`${me.username} played ${def.name} — ${f.name} rose again at ${f.hp} HP.`);
-      }
-    }
-
-    // Playing a support card passes the turn, so it costs tempo.
-    s.turn = foe.userId;
-    s.round += 1;
-    if (s.log.length > 60) s.log = s.log.slice(-60);
-    return { state: s, finished: false };
-  }
 
   if (action.type === "item") {
     // The CALLER has already verified and consumed a charge from the user's

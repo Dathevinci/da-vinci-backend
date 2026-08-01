@@ -38,6 +38,7 @@ model User {
   purchasedFrames  String[] @default([])
 
   shards           Int      @default(0)  // dust from duplicate cards; crafts/foils/relic packs
+  duelItems        String[] @default([])  // bag of duel consumables; one entry = one charge
   claimedSets      String[] @default([])  // set names whose completion reward has been paid
   cardTitle        String?                // title earned from completing a set
   cards            UserCard[]
@@ -245,6 +246,45 @@ model UserCard {
 
   @@unique([userId, cardId])
   @@index([userId])
+}
+
+// A staked, ranked card duel. Both players ante Arise Points; the winner takes
+// the pot MINUS a rake that is burned, so competitive play is itself a sink.
+// Game state lives in `state` as JSON — the rules engine is server-side only,
+// so a client can never invent a result.
+model Duel {
+  id             String   @id @default(uuid())
+  challengerId   String
+  challengerName String
+  opponentId     String
+  opponentName   String
+  stake          Int                       // AP each side puts up
+  status         String   @default("PENDING") // PENDING | ACTIVE | FINISHED | DECLINED | EXPIRED
+  challengerDeck String[] @default([])     // card ids
+  opponentDeck   String[] @default([])
+  state          String?                   // JSON: fighters, hp, items, log
+  turnUserId     String?
+  winnerId       String?
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+  finishedAt     DateTime?
+
+  @@index([status])
+  @@index([challengerId])
+  @@index([opponentId])
+}
+
+// Ladder standing. Separate from Duel so the leaderboard is one cheap read.
+model DuelRating {
+  userId   String @id
+  username String
+  rating   Int    @default(1000)
+  wins     Int    @default(0)
+  losses   Int    @default(0)
+  streak   Int    @default(0)   // consecutive wins; resets on a loss
+  updatedAt DateTime @updatedAt
+
+  @@index([rating])
 }
 
 // The Arise Auction House. The SERVER (Lead Dev) is the seller — bids are a

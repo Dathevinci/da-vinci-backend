@@ -24,6 +24,7 @@ import kofiRoutes from "./routes/kofi.routes";
 import consoleRoutes from "./routes/console.routes";
 import auctionRoutes from "./routes/auction.routes";
 import cardRoutes from "./routes/card.routes";
+import duelRoutes from "./routes/duel.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -77,6 +78,7 @@ app.use("/api/novel-bookmarks", novelBookmarkRoutes);
 app.use("/api/kofi", kofiRoutes);
 app.use("/api/auctions", auctionRoutes);
 app.use("/api/cards", cardRoutes);
+app.use("/api/duels", duelRoutes);
 
 // Error Handler must be last
 app.use(errorHandler);

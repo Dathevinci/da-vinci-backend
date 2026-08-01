@@ -1,0 +1,213 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// DUEL RULES — the combat engine.
+//
+// Deliberately PURE: every function here takes state and returns new state, no
+// database and no randomness that isn't passed in. That means the rules can be
+// reasoned about (and later tested) in isolation, and — more importantly — the
+// engine lives ONLY on the server, so a client can never post a result.
+//
+// The design goal is a match that resolves in 6-12 turns: long enough to make a
+// choice matter, short enough to finish while you're still looking at it.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { CARDS, CardRarity } from "./cardCatalog";
+
+export const DECK_SIZE = 3;
+
+// Rarity is the whole stat line. This is what finally makes a Legendary pull
+// matter in play and not just in the binder.
+export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
+  common:    { hp: 10, atk: 3 },
+  rare:      { hp: 14, atk: 5 },
+  epic:      { hp: 20, atk: 8 },
+  legendary: { hp: 28, atk: 12 },
+  event:     { hp: 24, atk: 10 },
+};
+
+// Foil copies fight ~20% harder — a real reason to spend shards on one.
+export const FOIL_MULT = 1.2;
+
+// Support items, bought with SHARDS. Each is single-use within a duel.
+export const ITEMS = {
+  heal:   { id: "heal",   name: "Salve",      shards: 120, desc: "Restore 10 HP to your active card." },
+  shield: { id: "shield", name: "Ward",       shards: 150, desc: "Halve the next damage you take." },
+  focus:  { id: "focus",  name: "Focus",      shards: 180, desc: "Your next attack deals +75%." },
+} as const;
+export type ItemId = keyof typeof ITEMS;
+
+export interface Fighter {
+  cardId: string;
+  name: string;
+  rarity: CardRarity;
+  maxHp: number;
+  hp: number;
+  atk: number;
+  foil: boolean;
+}
+
+export interface Side {
+  userId: string;
+  username: string;
+  fighters: Fighter[];
+  active: number;          // index into fighters
+  items: Record<string, number>; // itemId -> charges remaining
+  shield: boolean;         // next incoming damage halved
+  focus: boolean;          // next outgoing attack boosted
+}
+
+export interface DuelState {
+  a: Side;   // challenger
+  b: Side;   // opponent
+  turn: string;      // userId whose move it is
+  log: string[];
+  round: number;
+}
+
+export function buildFighter(cardId: string, foil: boolean): Fighter | null {
+  const def = CARDS[cardId];
+  if (!def) return null;
+  const base = CARD_STATS[def.rarity];
+  const mult = foil ? FOIL_MULT : 1;
+  const hp = Math.round(base.hp * mult);
+  return {
+    cardId,
+    name: def.name,
+    rarity: def.rarity,
+    maxHp: hp,
+    hp,
+    atk: Math.round(base.atk * mult),
+    foil,
+  };
+}
+
+export function makeSide(
+  userId: string,
+  username: string,
+  deck: string[],
+  foils: Set<string>,
+  items: Record<string, number>
+): Side {
+  const fighters = deck
+    .map((id) => buildFighter(id, foils.has(id)))
+    .filter((f): f is Fighter => !!f);
+  return { userId, username, fighters, active: 0, items, shield: false, focus: false };
+}
+
+function livingIndex(side: Side): number {
+  return side.fighters.findIndex((f) => f.hp > 0);
+}
+
+export function sideDefeated(side: Side): boolean {
+  return side.fighters.every((f) => f.hp <= 0);
+}
+
+/** Whose side object is this userId? */
+export function sideOf(state: DuelState, userId: string): "a" | "b" | null {
+  if (state.a.userId === userId) return "a";
+  if (state.b.userId === userId) return "b";
+  return null;
+}
+
+/**
+ * Apply one action. Returns the new state plus whether the duel ended.
+ * `roll` is a 0..1 number supplied by the caller so the engine stays pure —
+ * it drives the small damage variance that stops matches feeling scripted.
+ */
+export function applyAction(
+  state: DuelState,
+  userId: string,
+  action: { type: "attack" } | { type: "item"; item: ItemId },
+  roll: number
+): { state: DuelState; finished: boolean; winnerId?: string } {
+  const meKey = sideOf(state, userId);
+  if (!meKey) return { state, finished: false };
+  if (state.turn !== userId) return { state, finished: false };
+
+  const s: DuelState = JSON.parse(JSON.stringify(state));
+  const me = meKey === "a" ? s.a : s.b;
+  const foe = meKey === "a" ? s.b : s.a;
+
+  // Make sure both sides point at a living fighter.
+  if (me.fighters[me.active]?.hp <= 0) me.active = Math.max(0, livingIndex(me));
+  if (foe.fighters[foe.active]?.hp <= 0) foe.active = Math.max(0, livingIndex(foe));
+
+  const mine = me.fighters[me.active];
+  const theirs = foe.fighters[foe.active];
+  if (!mine || !theirs) return { state: s, finished: false };
+
+  if (action.type === "item") {
+    // The CALLER has already verified and consumed a charge from the user's
+    // bag inside its transaction — the engine stays pure and just applies the
+    // effect. (Charges live on the user, not the duel, so an item bought
+    // mid-match is usable immediately and never trapped in a finished duel.)
+    if (action.item === "heal") {
+      const before = mine.hp;
+      mine.hp = Math.min(mine.maxHp, mine.hp + 10);
+      s.log.push(`${me.username} used Salve — ${mine.name} recovered ${mine.hp - before} HP.`);
+    } else if (action.item === "shield") {
+      me.shield = true;
+      s.log.push(`${me.username} raised a Ward.`);
+    } else if (action.item === "focus") {
+      me.focus = true;
+      s.log.push(`${me.username} is focusing.`);
+    }
+  } else {
+    // Damage: base attack, +/-15% variance, focus bonus, shield reduction.
+    let dmg = mine.atk * (0.85 + roll * 0.3);
+    if (me.focus) {
+      dmg *= 1.75;
+      me.focus = false;
+    }
+    if (foe.shield) {
+      dmg *= 0.5;
+      foe.shield = false;
+    }
+    const dealt = Math.max(1, Math.round(dmg));
+    theirs.hp = Math.max(0, theirs.hp - dealt);
+    s.log.push(`${mine.name} struck ${theirs.name} for ${dealt}.`);
+
+    if (theirs.hp === 0) {
+      s.log.push(`${theirs.name} fell.`);
+      const next = livingIndex(foe);
+      if (next >= 0) {
+        foe.active = next;
+        s.log.push(`${foe.username} sent out ${foe.fighters[next].name}.`);
+      }
+    }
+  }
+
+  // Win check
+  if (sideDefeated(foe)) {
+    s.log.push(`${me.username} wins the duel.`);
+    return { state: s, finished: true, winnerId: me.userId };
+  }
+
+  // Pass the turn
+  s.turn = foe.userId;
+  s.round += 1;
+  // Keep the log from growing without bound on a long match.
+  if (s.log.length > 60) s.log = s.log.slice(-60);
+  return { state: s, finished: false };
+}
+
+// ── Ranking ────────────────────────────────────────────────────────────────
+// Standard Elo. K=32 gives a visible move per match at this population size
+// without letting one lucky win rewrite someone's standing.
+export const ELO_K = 32;
+export function eloDelta(myRating: number, theirRating: number, won: boolean): number {
+  const expected = 1 / (1 + Math.pow(10, (theirRating - myRating) / 400));
+  return Math.round(ELO_K * ((won ? 1 : 0) - expected));
+}
+
+// The house takes a cut of every pot and BURNS it — competitive play is a sink,
+// not just points sloshing between the same few players.
+export const RAKE_PERCENT = 10;
+export function payout(stake: number): { pot: number; rake: number; toWinner: number } {
+  const pot = stake * 2;
+  const rake = Math.floor((pot * RAKE_PERCENT) / 100);
+  return { pot, rake, toWinner: pot - rake };
+}
+
+export const MIN_STAKE = 50;
+export const MAX_STAKE = 5000;
+export const DUEL_EXPIRY_HOURS = 24;

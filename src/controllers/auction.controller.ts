@@ -37,29 +37,38 @@ async function settleIfEnded(auction: NonNullable<AuctionRow>): Promise<void> {
   if (auction.status !== "ACTIVE" || auction.endsAt.getTime() > Date.now()) return;
 
   await prisma.$transaction(async (tx) => {
-    // Claim the settlement. If another request already flipped it, count is 0
-    // and we do nothing — the winner is granted the item exactly once.
+    const now = new Date();
+    // Claim the settlement — but ONLY if the row is still active AND STILL
+    // actually past its clock. The endsAt guard is what makes this safe against
+    // a concurrent anti-snipe extension: if a late bid pushed the deadline out
+    // between the caller's snapshot and here, the row's endsAt is now in the
+    // future, count is 0, and we correctly do NOT settle a still-live auction.
     const claim = await tx.auction.updateMany({
-      where: { id: auction.id, status: "ACTIVE" },
-      data: { status: "SETTLED", settledAt: new Date(), winnerId: auction.topBidderId },
+      where: { id: auction.id, status: "ACTIVE", endsAt: { lte: now } },
+      data: { status: "SETTLED", settledAt: now },
     });
-    if (claim.count === 0) return;
+    if (claim.count === 0) return; // already settled, or extended out from under us
 
-    // No bids → nothing to grant. The winner's points were already taken at bid
-    // time (the sink), so there is nothing to deduct here either.
-    if (!auction.topBidderId) return;
+    // Re-read the just-claimed row for the AUTHORITATIVE winner. The snapshot
+    // passed in can be stale — a bid may have changed topBidderId after it was
+    // read — so granting off the snapshot could hand the item to the wrong
+    // person and strand the real leader's escrow.
+    const settled = await tx.auction.findUnique({ where: { id: auction.id } });
+    if (!settled || !settled.topBidderId) return; // no bids → nothing to grant
 
-    const item = SHOP_CATALOG[auction.itemId];
+    await tx.auction.update({ where: { id: auction.id }, data: { winnerId: settled.topBidderId } });
+
+    const item = SHOP_CATALOG[settled.itemId];
     if (!item) return; // item pulled from the catalog after listing — just close it
     const field = PURCHASED_FIELD[item.type];
 
-    const winner = await tx.user.findUnique({ where: { id: auction.topBidderId } });
+    const winner = await tx.user.findUnique({ where: { id: settled.topBidderId } });
     if (!winner) return;
     const owned = ((winner as any)[field] as string[]) || [];
-    if (!owned.includes(auction.itemId)) {
+    if (!owned.includes(settled.itemId)) {
       await tx.user.update({
         where: { id: winner.id },
-        data: { [field]: { push: auction.itemId } },
+        data: { [field]: { push: settled.itemId } },
       });
     }
 
@@ -68,7 +77,7 @@ async function settleIfEnded(auction: NonNullable<AuctionRow>): Promise<void> {
         userId: winner.id,
         actorId: winner.id,
         type: "auction",
-        message: `🏆 You won "${auction.title}" at auction for ${auction.topBid.toLocaleString()} Arise Points! Open Shop → Owned to equip it.`,
+        message: `🏆 You won "${settled.title}" at auction for ${settled.topBid.toLocaleString()} Arise Points! Open Shop → Owned to equip it.`,
         link: "/shop",
       },
     });
@@ -139,7 +148,12 @@ export const createAuction = async (req: Request, res: Response, next: NextFunct
       minIncrement?: number;
     };
 
-    const item = itemId ? SHOP_CATALOG[itemId] : undefined;
+    // Guard itemId FIRST so TS narrows it to `string` for the rest of the
+    // handler — without this the `itemId` shorthand in create() is
+    // `string | undefined` against a required Prisma field, which fails the
+    // strict-tsc build and blocks the whole deploy.
+    if (!itemId) return res.status(400).json({ success: false, message: "That item isn't in the catalog." });
+    const item = SHOP_CATALOG[itemId];
     if (!item) return res.status(400).json({ success: false, message: "That item isn't in the catalog." });
 
     const start = Math.max(0, Math.floor(Number(startPrice) || 0));
@@ -156,7 +170,7 @@ export const createAuction = async (req: Request, res: Response, next: NextFunct
         itemType: item.type,
         // Snapshot a readable title; the catalog has no display names, so fall
         // back to the id if the client didn't send one.
-        title: (req.body?.title as string)?.trim() || itemId!,
+        title: (req.body?.title as string)?.trim() || itemId,
         startPrice: start,
         minIncrement: inc,
         endsAt,
@@ -234,9 +248,6 @@ export const placeBid = async (req: Request, res: Response, next: NextFunction) 
         if (!bidder) throw new BidError(404, "User not found.");
         const owned = ((bidder as any)[field] as string[]) || [];
         if (owned.includes(auction!.itemId)) throw new BidError(409, "You already own this item.");
-        if (bidder.arisePoints < bid) {
-          throw new BidError(402, `You need ${bid.toLocaleString()} Arise Points — you have ${bidder.arisePoints.toLocaleString()}.`);
-        }
 
         // Optimistic claim: only succeeds while the row is still what we read.
         const claim = await tx.auction.updateMany({
@@ -251,17 +262,28 @@ export const placeBid = async (req: Request, res: Response, next: NextFunction) 
         });
         if (claim.count === 0) throw new BidError(409, "Someone bid at the same moment — try again.");
 
+        // Escrow the new bid as a SINGLE atomic conditional decrement: the
+        // balance check and the deduction are one DB operation, so a user
+        // racing bids across two auctions can't pass the check twice against
+        // the same balance and overdraw negative. count===0 means insufficient.
+        const debit = await tx.user.updateMany({
+          where: { id: userId, arisePoints: { gte: bid } },
+          data: { arisePoints: { decrement: bid } },
+        });
+        if (debit.count === 0) {
+          throw new BidError(402, `You need ${bid.toLocaleString()} Arise Points — you have ${bidder.arisePoints.toLocaleString()}.`);
+        }
+        await tx.pointLog.create({ data: { userId, amount: -bid, reason: `auction-bid:${auction!.id}` } });
+        await tx.auctionBid.create({ data: { auctionId: auction!.id, userId, username: bidder.username, amount: bid } });
+
         // Refund the previous leader (logged so it can't be counted as a daily
         // content earn — economy.ts excludes reasons starting with "auction").
+        // Done AFTER the debit so a failed debit rolls back everything and never
+        // refunds the old leader without the new bid actually landing.
         if (prevBidderId && prevTop > 0) {
           await tx.user.update({ where: { id: prevBidderId }, data: { arisePoints: { increment: prevTop } } });
           await tx.pointLog.create({ data: { userId: prevBidderId, amount: prevTop, reason: `auction-refund:${auction!.id}` } });
         }
-
-        // Escrow the new bid.
-        await tx.user.update({ where: { id: userId }, data: { arisePoints: { decrement: bid } } });
-        await tx.pointLog.create({ data: { userId, amount: -bid, reason: `auction-bid:${auction!.id}` } });
-        await tx.auctionBid.create({ data: { auctionId: auction!.id, userId, username: bidder.username, amount: bid } });
       });
     } catch (e) {
       if (e instanceof BidError) return res.status(e.code).json({ success: false, message: e.message });
@@ -294,9 +316,14 @@ export const cancelAuction = async (req: Request, res: Response, next: NextFunct
         data: { status: "CANCELLED", settledAt: new Date() },
       });
       if (claim.count === 0) return;
-      if (auction.topBidderId && auction.topBid > 0) {
-        await tx.user.update({ where: { id: auction.topBidderId }, data: { arisePoints: { increment: auction.topBid } } });
-        await tx.pointLog.create({ data: { userId: auction.topBidderId, amount: auction.topBid, reason: `auction-refund:${auction.id}` } });
+      // Refund the CURRENT leader, re-read inside the tx — the snapshot above
+      // can be stale (a bid may have landed between it and the claim), and
+      // refunding the snapshot's leader would double-pay the old leader while
+      // stranding the new one's escrow.
+      const current = await tx.auction.findUnique({ where: { id } });
+      if (current?.topBidderId && current.topBid > 0) {
+        await tx.user.update({ where: { id: current.topBidderId }, data: { arisePoints: { increment: current.topBid } } });
+        await tx.pointLog.create({ data: { userId: current.topBidderId, amount: current.topBid, reason: `auction-refund:${id}` } });
       }
     });
 

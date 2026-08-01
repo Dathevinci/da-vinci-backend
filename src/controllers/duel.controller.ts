@@ -36,6 +36,36 @@ function guard(req: Request, res: Response, userId?: string): boolean {
   return true;
 }
 
+/**
+ * A deck must be exactly DECK_SIZE distinct, real, FIELDABLE cards.
+ *
+ * The support-card check is the important one. Support cards have no stat line,
+ * so makeSide/buildFighter silently drop them — a deck of three supports yields
+ * a side with ZERO fighters. Neither player can ever act, the duel never
+ * finishes, and because both stakes are escrowed on accept there is no code path
+ * that ever gives those Arise Points back. The client filters supports out of
+ * the deck picker, but the client is not a security boundary and a direct POST
+ * would strand real points.
+ *
+ * Returns a player-facing message, or null when the deck is fine.
+ */
+function deckProblem(deck: any): string | null {
+  if (!Array.isArray(deck) || deck.length !== DECK_SIZE) {
+    return `Pick exactly ${DECK_SIZE} cards.`;
+  }
+  if (new Set(deck).size !== deck.length) {
+    return `Your deck must be ${DECK_SIZE} different cards.`;
+  }
+  for (const id of deck) {
+    const def = CARDS[id];
+    if (!def) return "There's a card in that deck that doesn't exist.";
+    if (def.support) {
+      return `${def.name} is a support card — it's played during a duel, not fielded. Pick three fighters.`;
+    }
+  }
+  return null;
+}
+
 async function ratingFor(userId: string, username: string) {
   return prisma.duelRating.upsert({
     where: { userId },
@@ -103,15 +133,8 @@ export const createDuel = async (req: Request, res: Response, next: NextFunction
     if (amount < MIN_STAKE || amount > MAX_STAKE) {
       return res.status(400).json({ success: false, message: `Stake must be between ${MIN_STAKE} and ${MAX_STAKE} Arise Points.` });
     }
-    if (!Array.isArray(deck) || deck.length !== DECK_SIZE) {
-      return res.status(400).json({ success: false, message: `Pick exactly ${DECK_SIZE} cards.` });
-    }
-    if (new Set(deck).size !== deck.length) {
-      return res.status(400).json({ success: false, message: "Your deck must be three different cards." });
-    }
-    if (deck.some((id) => !CARDS[id])) {
-      return res.status(400).json({ success: false, message: "Unknown card in deck." });
-    }
+    const bad = deckProblem(deck);
+    if (bad) return res.status(400).json({ success: false, message: bad });
 
     const [me, foe] = await Promise.all([
       prisma.user.findUnique({ where: { id: userId }, select: { id: true, username: true } }),
@@ -178,9 +201,8 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     if (duel.opponentId !== userId) return res.status(403).json({ success: false, message: "This challenge isn't yours to accept." });
     if (duel.status !== "PENDING") return res.status(410).json({ success: false, message: "This challenge is no longer open." });
     if (duel.expiresAt.getTime() <= Date.now()) return res.status(410).json({ success: false, message: "This challenge expired." });
-    if (!Array.isArray(deck) || deck.length !== DECK_SIZE || new Set(deck).size !== deck.length || deck.some((c) => !CARDS[c])) {
-      return res.status(400).json({ success: false, message: `Pick exactly ${DECK_SIZE} different cards you own.` });
-    }
+    const badDeck = deckProblem(deck);
+    if (badDeck) return res.status(400).json({ success: false, message: badDeck });
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },

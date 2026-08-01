@@ -159,6 +159,11 @@ export function applyAction(
 
   // Nobody deployed and no card named? Can't act — the client must pick.
   if (action.type === "attack" && me.active < 0) return { state, finished: false };
+  // Items act on YOUR active card (heal) or your side's next exchange. With
+  // nobody on the field there is nothing to apply them to, and the caller would
+  // otherwise burn the charge for no effect. Returning the ORIGINAL state makes
+  // the controller's no-op check fire BEFORE it opens the transaction.
+  if (action.type === "item" && me.active < 0) return { state, finished: false };
 
   // ── Playing a SUPPORT CARD ────────────────────────────────────────────────
   // Resolved BEFORE the field is normalised below, because a support card is
@@ -178,28 +183,29 @@ export function applyAction(
     const used: string[] = me.usedSupports || (me.usedSupports = []);
     if (used.includes(action.cardId)) return { state, finished: false };
 
-    // `target` is the card the player dropped this onto. Falling back to the
-    // active fighter keeps the old tap-to-play behaviour working.
-    const wanted = typeof action.target === "number" ? action.target : me.active;
+    // `target` is the card the player dropped this onto. When it's absent (a
+    // tap rather than a drag) we fall back to the active fighter — but when the
+    // player AIMED, a bad aim must be refused, never quietly redirected.
+    // Silently retargeting spends the card's single use on the wrong fighter.
+    const explicit = typeof action.target === "number";
+    const wanted = explicit ? (action.target as number) : me.active;
 
     if (eff.kind === "heal") {
       // You can only mend the living — bringing someone back is Second Wind's job.
       const t = me.fighters[wanted];
-      const tgt = t && t.hp > 0 ? t : me.fighters[livingIndex(me)];
-      if (!tgt) return { state, finished: false };
-      if (tgt.hp >= tgt.maxHp) {
-        // Refuse rather than burn the card's one use on nothing.
-        return { state, finished: false };
-      }
+      const tgt = explicit ? t : (t && t.hp > 0 ? t : me.fighters[livingIndex(me)]);
+      // Refuse rather than burn the card's one use on nothing.
+      if (!tgt || tgt.hp <= 0 || tgt.hp >= tgt.maxHp) return { state, finished: false };
       used.push(action.cardId);
       const before = tgt.hp;
       tgt.hp = Math.min(tgt.maxHp, tgt.hp + eff.power);
       s.log.push(`${me.username} played ${def.name} — ${tgt.name} recovered ${tgt.hp - before} HP.`);
     } else if (eff.kind === "revive") {
-      // Target must be a card that has actually fallen.
+      // Target must be a card that has actually fallen. An aimed drop on a
+      // living card is refused, not redirected to whoever happens to be dead.
       const t = me.fighters[wanted];
-      const tgt = t && t.hp <= 0 ? t : me.fighters.find((f) => f.hp <= 0);
-      if (!tgt) return { state, finished: false };
+      const tgt = explicit ? t : me.fighters.find((f) => f.hp <= 0);
+      if (!tgt || tgt.hp > 0) return { state, finished: false };
       used.push(action.cardId);
       tgt.hp = Math.max(1, Math.round((tgt.maxHp * eff.power) / 100));
       s.log.push(`${me.username} played ${def.name} — ${tgt.name} rose again at ${tgt.hp} HP.`);
@@ -243,13 +249,19 @@ export function applyAction(
   // empty until that player deploys.
   if (me.active >= 0 && me.fighters[me.active]?.hp <= 0) me.active = livingIndex(me);
   if (foe.active >= 0 && foe.fighters[foe.active]?.hp <= 0) foe.active = livingIndex(foe);
-  // The defender is dragged onto the field by being attacked — otherwise the
-  // first striker would have nothing to hit.
-  if (foe.active < 0) foe.active = livingIndex(foe);
+  // The defender is dragged onto the field by BEING ATTACKED — otherwise the
+  // first striker would have nothing to hit. Scoped to attacks: an item is not
+  // an attack, and using one must not commit the opponent's lead card for them.
+  if (action.type === "attack" && foe.active < 0) foe.active = livingIndex(foe);
 
   const mine = me.fighters[me.active];
-  const theirs = foe.fighters[foe.active];
-  if (!mine || !theirs) return { state: s, finished: false };
+  // An item only ever touches YOUR side, so it must not require an enemy on the
+  // field. Requiring one is what let a first-turn item fall through to the bail
+  // below — which returned the CLONE, so the controller saw a "changed" state,
+  // opened the transaction and spent the charge for no effect.
+  const theirs = foe.active >= 0 ? foe.fighters[foe.active] : undefined;
+  if (!mine) return { state, finished: false };
+  if (action.type !== "item" && !theirs) return { state, finished: false };
 
   if (action.type === "item") {
     // The CALLER has already verified and consumed a charge from the user's
@@ -268,6 +280,21 @@ export function applyAction(
       s.log.push(`${me.username} is focusing.`);
     }
   } else {
+    // Unreachable after the force-deploy above, but strict tsc can't see that
+    // and `theirs` is now optional — narrow it rather than assert non-null.
+    if (!theirs) return { state, finished: false };
+    // A block negates the hit entirely and is consumed. Checked BEFORE the
+    // focus buffs are spent: attacking into a Bulwark used to burn your Focus
+    // and your War Cry for zero damage, which made the counter feel like a bug.
+    // The buff survives to be spent on the next swing instead.
+    if (foe.block) {
+      foe.block = false;
+      s.log.push(`${theirs.name} turned the blow aside completely.`);
+      s.turn = foe.userId;
+      s.round += 1;
+      if (s.log.length > 60) s.log = s.log.slice(-60);
+      return { state: s, finished: false };
+    }
     // Damage: base attack, +/-15% variance, focus bonus, shield reduction.
     let dmg = mine.atk * (0.85 + roll * 0.3);
     if (me.focus) {
@@ -277,15 +304,6 @@ export function applyAction(
     if (me.focusMult && me.focusMult > 1) {
       dmg *= me.focusMult;
       me.focusMult = undefined;
-    }
-    // A block negates the hit entirely and is consumed; a shield only halves.
-    if (foe.block) {
-      foe.block = false;
-      s.log.push(`${theirs.name} turned the blow aside completely.`);
-      s.turn = foe.userId;
-      s.round += 1;
-      if (s.log.length > 60) s.log = s.log.slice(-60);
-      return { state: s, finished: false };
     }
     if (foe.shield) {
       dmg *= 0.5;

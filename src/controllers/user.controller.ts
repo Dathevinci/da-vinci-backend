@@ -1,6 +1,13 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
-import { payout, getRole } from "../utils/economy";
+import {
+  payout,
+  getRole,
+  timeAward,
+  readMinutes,
+  remainingDailyAp,
+  DEFAULT_EP_MINUTES,
+} from "../utils/economy";
 import { sanitizeOwnUser, sanitizePublicUser, sanitizePublicUsers } from "../utils/sanitizeUser";
 import { signToken, getActorId } from "../lib/jwt";
 
@@ -521,7 +528,25 @@ export const addXpForWatching = async (req: Request, res: Response, next: NextFu
       }
     }
 
-    const { ap, xp } = payout("watch");
+    // Paid for the episode's RUNTIME. `duration` is optional and clamped inside
+    // timeAward, so an older client that sends nothing still gets a fair
+    // 24-minute default and a forged 9999 mints nothing.
+    const { duration } = (req.body || {}) as { duration?: number | string };
+    const mins = Number(duration) > 0 ? Number(duration) : DEFAULT_EP_MINUTES;
+    const award = timeAward(mins);
+    const ap = await remainingDailyAp(prisma as any, userId, award.ap);
+    const xp = award.xp;
+
+    if (ap <= 0) {
+      const current = await prisma.user.findUnique({ where: { id: userId }, select: { arisePoints: true, xp: true } });
+      return res.json({
+        success: true,
+        awarded: false,
+        capped: true,
+        message: "Daily Arise Points cap reached — come back tomorrow.",
+        data: { arisePoints: current?.arisePoints ?? 0, xp: current?.xp ?? 0 },
+      });
+    }
 
     const user = await prisma.user.update({
       where: { id: userId },
@@ -532,7 +557,7 @@ export const addXpForWatching = async (req: Request, res: Response, next: NextFu
       data: { userId, amount: ap, reason: dedupKey || "Watched an episode" }
     });
 
-    res.json({ success: true, awarded: true, data: { arisePoints: user.arisePoints, xp: user.xp } });
+    res.json({ success: true, awarded: true, earned: ap, data: { arisePoints: user.arisePoints, xp: user.xp } });
   } catch (error) {
     next(error);
   }
@@ -575,14 +600,30 @@ export const earnPoints = async (req: Request, res: Response, next: NextFunction
       return res.json({ success: true, awarded: false, data: { arisePoints: current?.arisePoints ?? 0, xp: current?.xp ?? 0 } });
     }
 
-    const { ap, xp } = payout(action as any);
+    // "read" is paid by time (novel chapters take longer than manhwa ones, and
+    // the key already says which). "track" stays a flat one-off discovery bonus.
+    const base = action === "read" ? timeAward(readMinutes(key)) : payout(action as any);
+    const ap = await remainingDailyAp(prisma as any, userId, base.ap);
+    const xp = base.xp;
+
+    if (ap <= 0) {
+      const current = await prisma.user.findUnique({ where: { id: userId }, select: { arisePoints: true, xp: true } });
+      return res.json({
+        success: true,
+        awarded: false,
+        capped: true,
+        message: "Daily Arise Points cap reached — come back tomorrow.",
+        data: { arisePoints: current?.arisePoints ?? 0, xp: current?.xp ?? 0 },
+      });
+    }
+
     const user = await prisma.user.update({
       where: { id: userId },
       data: { arisePoints: { increment: ap }, xp: { increment: xp } },
     });
     await prisma.pointLog.create({ data: { userId, amount: ap, reason } });
 
-    res.json({ success: true, awarded: true, data: { arisePoints: user.arisePoints, xp: user.xp } });
+    res.json({ success: true, awarded: true, earned: ap, data: { arisePoints: user.arisePoints, xp: user.xp } });
   } catch (error) {
     next(error);
   }

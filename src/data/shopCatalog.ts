@@ -33,29 +33,35 @@ export function priceOf(item: CatalogEntry): number {
 
 export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   // ── effects ──
-  effect_ritual: { type: "effect", price: 25000 },
-  effect_himalaya: { type: "effect", price: 25500 },
-  effect_samurai: { type: "effect", price: 12000 },
-  effect_lotus: { type: "effect", price: 12000 },
-  effect_mango: { type: "effect", price: 12500 },
-  effect_jungle: { type: "effect", price: 12500 },
-  effect_canopy: { type: "effect", price: 10000 },
-  effect_mahoraga: { type: "effect", price: 8000 },
-  effect_tempest: { type: "effect", price: 7500 },
-  effect_blackhole: { type: "effect", price: 7500 },
-  effect_void: { type: "effect", price: 21200 },
-  effect_unblinking: { type: "effect", price: 20000 },
-  effect_hollow: { type: "effect", price: 17500 },
-  // SSS launch drop — 10% off while it headlines the shop hero (12,000 → 10,800).
-  effect_outergod: { type: "effect", price: 12000, discountPercent: 10 },
-  effect_gateway: { type: "effect", price: 12000 },
-  effect_webslinger: { type: "effect", price: 12500 },
+  // ── Priced in TIME, not vibes ──────────────────────────────────────────
+  // At AP_PER_MINUTE = 3 (180 AP/hour) an engaged member earning ~8 h/week
+  // takes roughly: top SSS ~6 weeks · SSS ~4 weeks · Extreme Rare ~2.5 weeks
+  // · mid ~1.5 weeks · entry a couple of days. The old numbers were set when
+  // the economy was hypothetical — they worked out to ~2 YEARS for an SSS,
+  // and not one member could afford a single one.
+  effect_ritual: { type: "effect", price: 8500 },
+  effect_himalaya: { type: "effect", price: 8500 },
+  effect_void: { type: "effect", price: 7500 },
+  effect_unblinking: { type: "effect", price: 7000 },
+  effect_hollow: { type: "effect", price: 6500 },
+  // SSS launch drop — 10% off while it headlines the shop hero (6,000 → 5,400).
+  effect_outergod: { type: "effect", price: 6000, discountPercent: 10 },
+  effect_gateway: { type: "effect", price: 4500 },
+  effect_webslinger: { type: "effect", price: 4000 },
+  effect_mango: { type: "effect", price: 3800 },
+  effect_jungle: { type: "effect", price: 3800 },
+  effect_samurai: { type: "effect", price: 3600 },
+  effect_lotus: { type: "effect", price: 3600 },
+  effect_canopy: { type: "effect", price: 3200 },
+  effect_mahoraga: { type: "effect", price: 2600 },
+  effect_tempest: { type: "effect", price: 2400 },
+  effect_blackhole: { type: "effect", price: 2400 },
   // LIMITED DROP — vanishes from sale after the window closes (owners keep it).
-  effect_dejavu: { type: "effect", price: 15000, availableUntil: "2026-07-24T23:59:59Z" },
-  effect_evernight: { type: "effect", price: 6500 },
-  effect_fool: { type: "effect", price: 6000 },
-  effect_ascension: { type: "effect", price: 5000 },
-  effect_froggie: { type: "effect", price: 500 },
+  effect_dejavu: { type: "effect", price: 6000, availableUntil: "2026-07-24T23:59:59Z" },
+  effect_evernight: { type: "effect", price: 2200 },
+  effect_fool: { type: "effect", price: 2000 },
+  effect_ascension: { type: "effect", price: 1600 },
+  effect_froggie: { type: "effect", price: 400 },
   effect_aura: { type: "effect", price: 110 },
   effect_sparkles: { type: "effect", price: 100 },
   effect_snow: { type: "effect", price: 90 },

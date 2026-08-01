@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { getRole } from "../utils/economy";
+import { CARD_STATS, FOIL_MULT } from "../data/duelRules";
 import {
   CARDS,
   PACK_PRICE,
@@ -44,6 +45,10 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         foilCost: FOIL_COST,
         relicPackShards: RELIC_PACK_SHARDS,
         setRewards: SET_REWARDS,
+        // Combat stats ship with the catalog so the UI can show what a card
+        // DOES without duplicating the table and letting it drift.
+        cardStats: CARD_STATS,
+        foilMult: FOIL_MULT,
       },
     });
   } catch (error) {

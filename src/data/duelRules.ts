@@ -90,7 +90,10 @@ export function makeSide(
   const fighters = deck
     .map((id) => buildFighter(id, foils.has(id)))
     .filter((f): f is Fighter => !!f);
-  return { userId, username, fighters, active: 0, items, shield: false, focus: false };
+  // active = -1 means NOBODY is on the field yet. The arena opens empty and
+  // your first move is genuinely choosing who walks in, instead of the engine
+  // having silently already picked for you.
+  return { userId, username, fighters, active: -1, items, shield: false, focus: false };
 }
 
 function livingIndex(side: Side): number {
@@ -144,9 +147,16 @@ export function applyAction(
     }
   }
 
-  // Make sure both sides point at a living fighter.
-  if (me.fighters[me.active]?.hp <= 0) me.active = Math.max(0, livingIndex(me));
-  if (foe.fighters[foe.active]?.hp <= 0) foe.active = Math.max(0, livingIndex(foe));
+  // Nobody deployed and no card named? Can't act — the client must pick.
+  if (action.type === "attack" && me.active < 0) return { state, finished: false };
+
+  // Make sure both sides point at a living fighter. An empty field (-1) stays
+  // empty until that player deploys.
+  if (me.active >= 0 && me.fighters[me.active]?.hp <= 0) me.active = livingIndex(me);
+  if (foe.active >= 0 && foe.fighters[foe.active]?.hp <= 0) foe.active = livingIndex(foe);
+  // The defender is dragged onto the field by being attacked — otherwise the
+  // first striker would have nothing to hit.
+  if (foe.active < 0) foe.active = livingIndex(foe);
 
   const mine = me.fighters[me.active];
   const theirs = foe.fighters[foe.active];

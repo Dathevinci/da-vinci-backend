@@ -53,9 +53,12 @@ app.use("/api/console", consoleLimiter, consoleRoutes);
 // their own inside auth.routes.ts).
 app.use("/api", apiLimiter);
 
-// Basic health check
+// Basic health check. `features` names capabilities of THIS build — it exists
+// because a code change with no externally visible surface (like the duel
+// timeline recorder) is otherwise impossible to distinguish from the previous
+// deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({ status: "ok", features: ["duel-timeline"] });
 });
 
 // Mount routers

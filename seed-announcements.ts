@@ -5,6 +5,97 @@ const prisma = new PrismaClient();
 // The Dev Blog entries that should exist on the Updates page (newest first).
 const announcementsData = [
   {
+    title: "Da Vinci — Dev Blog 1.7: The Big One",
+    tag: "Dev Blog",
+    content:
+      "Da Vinci — Dev Blog 1.7\n\n" +
+      "This is the largest update the site has ever had. A working marketplace where you sell your own cards to other members. Duels rebuilt from the ground up. 22 new cards. A forum. A leaderboard. A new navigation bar. And a card page that finally runs like it should.\n\n" +
+      "Settle in.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "THE MARKETPLACE — sell your cards to real people\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "You can now put your cards up for sale, and other members can buy them with Arise Points.\n\n" +
+      "Got three copies of something? List two, keep one. Name your price for the lot. Someone buys it, the cards land in their collection and the points land in yours.\n\n" +
+      "One rule that matters: listing a card takes it OUT of your collection straight away, not when it sells. You can't duel with it or dust it while it's sitting on the market. Pull the listing any time and it comes right back. We built it that way on purpose — the alternative lets someone sell cards they've already destroyed, and then the buyer gets nothing.\n\n" +
+      "A 5% fee comes off every sale.\n\n" +
+      "Find it in the nav, next to the Auction House.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "DUELS — 5v5, and they finally feel like fights\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Decks are FIVE cards now, up from three.\n\n" +
+      "Sending a card in and attacking are separate moves. Before, dragging a card onto the field made it swing immediately — and your opponent's card got dragged out to meet it whether they wanted it there or not. Neither of you was choosing anything. Now you commit a fighter, they commit theirs, and only then does anyone strike.\n\n" +
+      "The arena looks like an arena. Attackers lunge, defenders recoil, and there's a flash of impact between them so you can see who hit whom. When a card falls it goes out properly — shockwave, shards, K.O. stamped across the slot. That last one was embarrassing: killing blows used to happen in complete silence.\n\n" +
+      "You can also FORFEIT now. Your opponent takes the pot and you pay a further 25% on top. Walking away should cost more than losing.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "HIBERNATION — cards sleep, they never die\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Lose a duel and the cards that fell go to sleep. Not destroyed. Never destroyed.\n\n" +
+      "A sleeping card can't be fielded until you wake it — either pay shards, or pull another copy from a pack, which wakes it free. Only the LOSING side sleeps; hibernating everything would put half of both collections under after one bad match.\n\n" +
+      "Nothing ever leaves your collection because of a duel. That was the whole design brief.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "CARD LEVELS — shards finally have a purpose forever\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Spend shards to level a card, up to 10. Every level makes it hit harder and survive longer in duels.\n\n" +
+      "Which means a common you actually invested in can beat a legendary nobody bothered with. Levelling stacks with foiling.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "22 NEW CARDS — and legendaries got much harder\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "69 cards now, up from 47.\n\n" +
+      "A whole new set: VIGIL — the long watch. Eight cards, its own completion reward, its own title. Plus five more Abyssal, five more Ronin, and five new support cards including Iron Vow and Gravebloom.\n\n" +
+      "Legendary odds are now HALF what they were. And because the legendary pool grew from 5 cards to 8, your chance at any one specific legendary is about a THIRD of what it used to be.\n\n" +
+      "Crafting still works. If luck refuses you, patience won't.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "PULL x1, x3 OR x4\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Short on points? Pull a single card for 70 AP. Three for 195. The full pack is still 250 for four. Bulk is the better rate, but a single pull is no longer a punishment.\n\n" +
+      "And the opening sequence has been rebuilt. It waits. It builds. The light bursts in the colour of your best card BEFORE you can see what it is — so you know something good landed a half-second early. Pull a legendary and it leaves the row entirely to take the whole screen.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "THE CARD PAGE, MADE FAST\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Cards you haven't found are no longer shown. Two reasons: a card you've never seen should be a surprise when it drops, and drawing forty of them was making the page crawl.\n\n" +
+      "Sets show ten cards with a See All button for the rest. Off-screen cards aren't drawn at all. The header tells you exactly how many are still undiscovered.\n\n" +
+      "Cards are bigger, the art has real depth to it now, and rarity reads as stars instead of a word.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "THE FORUM\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Community has a proper forum. Post with a title, tag it (General, Discussion, Art, Theory, News, Question, Spoiler, Meme), vote on things, reply in threads.\n\n" +
+      "Your frames, effects, roles and tags all show up next to your name — a feed is where that stuff is meant to be seen.\n\n" +
+      "The old Community Views is now GLOBAL COMMENTS: a live window onto everything being said across every anime, manhwa and novel on the site. It's read-only, and every card links back to the thing it was said about, because replies belong where the conversation is.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "LEADERBOARD\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "One board, four ways of being good here: Level, Duels, Collection, Shards. Switch between them instantly. Podium for the top three.\n\n" +
+      "Never duelled? You're not ranked last on the duel board — you're just not on it. There's a difference.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "A NEW NAVIGATION BAR\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "On desktop, the top bar is gone. In its place is a small floating island at the BOTTOM of the screen that stays out of the way until you reach for it — a glowing line along the bottom edge tells you where.\n\n" +
+      "That gave every page on the site back about 96 pixels of height. Everything sits higher now.\n\n" +
+      "Mobile is untouched. Hovering isn't a thing there.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "AND THE REST\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Profiles got a Showcase — pin three cards to your page — and a strip of your recent comments.\n\n" +
+      "The card pages, the shop, the duels page, the community and the landing page have all been rebuilt in one visual language: cut corners, star ratings, notched meters. It's meant to feel like a game menu, because that's what it is.\n\n" +
+      "The landing page has proper artwork behind it now, and the Da Vinci wordmark is a window onto it.\n\n" +
+      "Dusting duplicates actually shows you something. Support cards are a card type you collect rather than a thing you buy. Sleeping cards look asleep.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "That's 1.7. Go and sell something.\n\n" +
+      "— Dejavuh",
+  },
+  {
     title: "Da Vinci — Dev Blog 1.6: Your Time Is Worth More",
     tag: "Dev Blog",
     content:

@@ -125,7 +125,25 @@ export interface DungeonState {
   /** Run-lasting domain gifts. Ascend/monarch feed the first, adapt the second. */
   atkBonusPct?: number;
   guardPct?: number;
+  /**
+   * THE PACK — support items carried into the run, escrowed out of the
+   * player's duel bag at dispatch. The party can't use them (nobody down
+   * there has hands free); the PLAYER throws them in from topside, any time
+   * the run is live. Unused ones come home with the survivors.
+   */
+  items?: Record<string, number>;
+  /** Armed by the player between floors, spent by the next floor's opening. */
+  pendingWard?: number;    // enemy volleys halved, this many
+  pendingFocus?: boolean;  // party's first volley hits 75% harder
 }
+
+/** What can go in the pack. Mirrors the duel bag's item ids on purpose —
+ *  one bag, two battlefields. */
+export const PACK_MAX = 3;
+export const DGN_ITEMS: Record<string, { name: string }> = {
+  heal: { name: "Salve" }, shield: { name: "Ward" }, focus: { name: "Focus" },
+};
+export const SALVE_HEAL = 10; // same number the duel Salve restores
 
 const ENEMY_NAMES = [
   ["Cellar Mite", "Damp Shambler", "Mildew Knot", "Wall Weeper"],
@@ -231,6 +249,20 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     partyImmuneRounds: 0, reflectRounds: 0, enemyBleedPct: 0,
     doomRounds: -1, doomPower: 0,
   };
+
+  // ── the player's thrown-in support, armed between floors, lands here ──
+  let wardVolleys = 0;
+  let focusVolley = false;
+  if (state.pendingWard && state.pendingWard > 0) {
+    wardVolleys = state.pendingWard;
+    state.pendingWard = undefined;
+    events.push({ k: "note", text: `> the ward settles over the party — the next ${wardVolleys} enemy volleys land HALVED.` });
+  }
+  if (state.pendingFocus) {
+    focusVolley = true;
+    state.pendingFocus = undefined;
+    events.push({ k: "note", text: "> focus taken — the party's opening volley hits 75% HARDER." });
+  }
 
   const livingEnemies = () => enemies.map((e, idx) => ({ e, idx })).filter((x) => x.e.hp > 0);
   const strongest = () => livingEnemies().sort((a, b) => b.e.hp - a.e.hp)[0];
@@ -435,7 +467,7 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     }
 
     // ── party swings — always at the weakest thing standing
-    const atkMul = 1 + (state.atkBonusPct || 0) / 100;
+    const atkMul = (1 + (state.atkBonusPct || 0) / 100) * (focusVolley ? 1.75 : 1);
     for (let i = 0; i < state.party.length; i++) {
       const u = state.party[i];
       if (u.hp <= 0) continue;
@@ -451,6 +483,7 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
       events.push(hit);
       damageEnemy(target.idx, dmg);
     }
+    focusVolley = false; // one volley, exactly as sold
     if (enemies.every((e) => e.hp <= 0)) break;
 
     // ── enemies swing back, unless a domain says otherwise
@@ -471,11 +504,13 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
         let dmg = Math.max(1, Math.round(en.atk * (0.8 + rng() * 0.4)));
         if (atkDown) dmg = Math.max(1, Math.round(dmg * (1 - st.enemyAtkDownPct / 100)));
         if (state.guardPct) dmg = Math.max(1, Math.round(dmg * (1 - state.guardPct / 100)));
+        if (wardVolleys > 0) dmg = Math.max(1, Math.round(dmg * 0.5));
         target.u.hp = Math.max(0, target.u.hp - dmg);
         events.push({ k: "ehit", e, i: target.idx, dmg });
         if (st.reflectRounds > 0) damageEnemy(e, dmg);
         if (target.u.hp === 0) events.push({ k: "fall", i: target.idx });
       }
+      if (wardVolleys > 0) wardVolleys--;
       if (st.reflectRounds > 0) st.reflectRounds--;
       if (st.enemyAtkDownRounds > 0) {
         st.enemyAtkDownRounds--;

@@ -5,8 +5,21 @@ import { isLeadDevFree } from "./card.controller";
 import { CARDS } from "../data/cardCatalog";
 import {
   DUNGEONS, PARTY_MAX, INJURY_THRESHOLD, HEAL_COST_AP, reviveCost,
+  PACK_MAX, DGN_ITEMS, SALVE_HEAL,
   DungeonState, DgnUnit, makeUnit, simulateFloor, partyPower,
 } from "../data/dungeonRules";
+
+/** Unused pack items ride home with the survivors — on recall, clear AND
+ *  wipe alike: an unopened salve doesn't burn with the camp. */
+async function returnPack(tx: any, userId: string, state: DungeonState): Promise<void> {
+  const leftovers: string[] = [];
+  for (const [itemId, n] of Object.entries(state.items || {})) {
+    for (let i = 0; i < n; i++) leftovers.push(itemId);
+  }
+  if (leftovers.length) {
+    await tx.user.update({ where: { id: userId }, data: { duelItems: { push: leftovers } } });
+  }
+}
 
 /**
  * DUNGEON DISPATCH — the second game mode, alongside Card Duels.
@@ -83,12 +96,13 @@ function partyOutcomes(party: DgnUnit[]) {
 export const getStatus = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.params.userId as string;
-    const [rows, activeRun] = await Promise.all([
+    const [rows, activeRun, bagUser] = await Promise.all([
       prisma.userCard.findMany({
         where: { userId },
         select: { cardId: true, count: true, foil: true, level: true, dgnHp: true, dgnInjured: true, dgnDead: true, dgnDeaths: true },
       }),
       prisma.dungeonRun.findFirst({ where: { userId, status: "RUNNING" }, orderBy: { createdAt: "desc" } }),
+      prisma.user.findUnique({ where: { id: userId }, select: { duelItems: true } }),
     ]);
     const cards = rows
       .filter((r) => { const d = CARDS[r.cardId]; return d && !d.support; })
@@ -108,6 +122,8 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
         activeRun,
         partyMax: PARTY_MAX,
         healCost: HEAL_COST_AP,
+        bag: bagUser?.duelItems || [],
+        packMax: PACK_MAX,
       },
     });
   } catch (error) { next(error); }
@@ -116,8 +132,8 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
 // ── POST /api/dungeon  { userId, dungeon, cardIds[] } ──────────────────────
 export const dispatch = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, dungeon, cardIds } = (req.body || {}) as {
-      userId?: string; dungeon?: string; cardIds?: string[];
+    const { userId, dungeon, cardIds, items } = (req.body || {}) as {
+      userId?: string; dungeon?: string; cardIds?: string[]; items?: string[];
     };
     if (!guard(req, res, userId)) return;
     const def = dungeon ? DUNGEONS[dungeon] : undefined;
@@ -171,11 +187,89 @@ export const dispatch = async (req: Request, res: Response, next: NextFunction) 
       return res.status(409).json({ success: false, message: "A party is already in a dungeon. Recall them first." });
     }
 
-    const state: DungeonState = { dungeon: def.id, floor: 0, party, apEarned: 0, shardsEarned: 0 };
-    const run = await prisma.dungeonRun.create({
-      data: { userId: userId!, dungeon: def.id, state: JSON.stringify(state) },
+    // ── THE PACK ── up to three support items from the duel bag, escrowed
+    // out of it here so the same Salve can't be packed and dueled at once.
+    const wanted = Array.isArray(items) ? items.filter((it) => DGN_ITEMS[it]).slice(0, PACK_MAX) : [];
+    const packed: Record<string, number> = {};
+    for (const it of wanted) packed[it] = (packed[it] || 0) + 1;
+
+    try {
+      const run = await prisma.$transaction(async (tx: any) => {
+        if (wanted.length) {
+          const u = await tx.user.findUnique({ where: { id: userId }, select: { duelItems: true } });
+          const bag: string[] = [...(u?.duelItems || [])];
+          for (const it of wanted) {
+            const at = bag.indexOf(it);
+            if (at === -1) throw new DgnError(400, `You don't have enough ${DGN_ITEMS[it].name}s in the bag.`);
+            bag.splice(at, 1);
+          }
+          await tx.user.update({ where: { id: userId }, data: { duelItems: { set: bag } } });
+        }
+        const state: DungeonState = {
+          dungeon: def.id, floor: 0, party, apEarned: 0, shardsEarned: 0,
+          ...(wanted.length ? { items: packed } : {}),
+        };
+        return tx.dungeonRun.create({
+          data: { userId: userId!, dungeon: def.id, state: JSON.stringify(state) },
+        });
+      });
+      res.status(201).json({ success: true, data: { run, party, power: partyPower(party), items: packed } });
+    } catch (e) {
+      if (e instanceof DgnError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) { next(error); }
+};
+
+// ── POST /api/dungeon/:id/use-item  { userId, item } ───────────────────────
+// The player's ONLY lever besides recall: throw a packed support item down
+// to the party, any time the run is live. A salve lands NOW on whoever is
+// worst off; a ward or focus is armed and spent by the NEXT floor's opening.
+// Status-guarded write, so racing a floor resolution can't duplicate a use.
+export const useItem = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, item } = (req.body || {}) as { userId?: string; item?: string };
+    if (!guard(req, res, userId)) return;
+    const id = req.params.id as string;
+    const def = item ? DGN_ITEMS[item] : undefined;
+    if (!def) return res.status(400).json({ success: false, message: "Unknown item." });
+
+    const run = await prisma.dungeonRun.findUnique({ where: { id } });
+    if (!run) return res.status(404).json({ success: false, message: "Run not found." });
+    if (run.userId !== userId) return res.status(403).json({ success: false, message: "Not your run." });
+    if (run.status !== "RUNNING") return res.status(410).json({ success: false, message: "That run is over." });
+
+    const state: DungeonState = JSON.parse(run.state);
+    const have = state.items?.[item!] || 0;
+    if (have <= 0) return res.status(400).json({ success: false, message: `No ${def.name} left in the pack.` });
+
+    let note = "";
+    if (item === "heal") {
+      const living = state.party.filter((u) => u.hp > 0);
+      if (!living.length) return res.status(400).json({ success: false, message: "Nobody left to heal." });
+      const worst = living.sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
+      const healed = Math.min(worst.maxHp - worst.hp, SALVE_HEAL);
+      if (healed <= 0) return res.status(400).json({ success: false, message: "Nobody is hurt right now." });
+      worst.hp += healed;
+      note = `> a salve reaches ${worst.name} — +${healed} HP.`;
+    } else if (item === "shield") {
+      if (state.pendingWard) return res.status(400).json({ success: false, message: "A ward is already held over them." });
+      state.pendingWard = 2;
+      note = "> a ward is armed — it will hold at the next floor.";
+    } else if (item === "focus") {
+      if (state.pendingFocus) return res.status(400).json({ success: false, message: "Focus is already taken." });
+      state.pendingFocus = true;
+      note = "> focus is armed — the next opening volley will hit 75% harder.";
+    }
+    state.items![item!] = have - 1;
+
+    const claim = await prisma.dungeonRun.updateMany({
+      where: { id, status: "RUNNING" },
+      data: { state: JSON.stringify(state) },
     });
-    res.status(201).json({ success: true, data: { run, party, power: partyPower(party) } });
+    if (claim.count === 0) return res.status(409).json({ success: false, message: "The run just ended." });
+
+    res.json({ success: true, data: { party: state.party, items: state.items, note } });
   } catch (error) { next(error); }
 };
 
@@ -213,6 +307,7 @@ export const advance = async (req: Request, res: Response, next: NextFunction) =
           });
           if (claim.count === 0) throw new DgnError(409, "That floor already resolved.");
           await writeBackParty(tx, userId!, state.party);
+          await returnPack(tx, userId!, state);
           return { done: true as const, result: {
             status: "WIPED", floors: state.floor, ap: 0, shards: 0,
             lostAp: state.apEarned, lostShards: state.shardsEarned,
@@ -230,6 +325,7 @@ export const advance = async (req: Request, res: Response, next: NextFunction) =
           });
           if (claim.count === 0) throw new DgnError(409, "That floor already resolved.");
           await writeBackParty(tx, userId!, state.party);
+          await returnPack(tx, userId!, state);
           await tx.user.update({
             where: { id: userId },
             data: { arisePoints: { increment: state.apEarned }, shards: { increment: state.shardsEarned } },
@@ -291,6 +387,7 @@ export const recall = async (req: Request, res: Response, next: NextFunction) =>
         });
         if (claim.count === 0) throw new DgnError(409, "That run already ended.");
         await writeBackParty(tx, userId!, state.party);
+        await returnPack(tx, userId!, state);
         if (state.apEarned > 0 || state.shardsEarned > 0) {
           await tx.user.update({
             where: { id: userId },

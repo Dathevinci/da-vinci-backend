@@ -384,6 +384,62 @@ export const SKILLS: Record<string, SkillDef> = {
     name: "It Has Always Been Coming", kind: "burst", base: 160, step: 28,
     text: (p) => `Deal ${p}% ATK, and again to the next card sent in.`,
   },
+
+  // ── EPIC ── weaker numbers and cheaper training than the legendaries above.
+  // Thirteen cards carry one, so these are the tier players actually build
+  // around; a legendary skill has to stay visibly better than a maxed epic.
+  card_voidgaze: {
+    name: "Long Look", kind: "burst", base: 110, step: 16,
+    text: (p) => `Deal ${p}% ATK to whoever is standing opposite.`,
+  },
+  card_ninehands: {
+    name: "Nine Turns", kind: "guard", base: 18, step: 4,
+    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+  },
+  card_crimsonsea: {
+    name: "Red Tide", kind: "drain", base: 95, step: 15,
+    text: (p) => `Deal ${p}% ATK and take back half of it as health.`,
+  },
+  card_unblinking: {
+    name: "It Noticed You", kind: "execute", base: 20, step: 4,
+    text: (p) => `Finish any card already below ${p}% health outright.`,
+  },
+  card_fallenstar: {
+    name: "Long Fall", kind: "burst", base: 125, step: 20,
+    text: (p) => `Deal ${p}% ATK to whoever is standing opposite.`,
+  },
+  card_trenchmaw: {
+    name: "Swallow Whole", kind: "drain", base: 100, step: 16,
+    text: (p) => `Deal ${p}% ATK and take back half of it as health.`,
+  },
+  card_onimask: {
+    name: "Wear the Face", kind: "burst", base: 130, step: 21,
+    text: (p) => `Deal ${p}% ATK. The face does the rest.`,
+  },
+  card_blackreach: {
+    name: "No Bottom", kind: "guard", base: 20, step: 4,
+    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+  },
+  card_lastretainer: {
+    name: "Hold the Gate", kind: "guard", base: 22, step: 5,
+    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+  },
+  card_lampofhours: {
+    name: "Burn as Needed", kind: "rally", base: 22, step: 5,
+    text: (p) => `Restore ${p}% of max health to your whole line.`,
+  },
+  card_communion: {
+    name: "Nobody Says Why", kind: "rally", base: 25, step: 5,
+    text: (p) => `Restore ${p}% of max health to your whole line.`,
+  },
+  card_ironvow: {
+    name: "Spoken Once", kind: "guard", base: 25, step: 5,
+    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+  },
+  card_gravebloom: {
+    name: "Where Something Ended", kind: "rally", base: 20, step: 5,
+    text: (p) => `Restore ${p}% of max health to your whole line.`,
+  },
 };
 
 export function skillFor(cardId: string): SkillDef | null {
@@ -399,11 +455,16 @@ export function skillPower(def: SkillDef, level: number): number {
 /**
  * Shards to take a skill from `level` to `level + 1`.
  *
- * Deliberately steeper per step than upgradeCost() and capped five levels
- * lower: there are only eight of these in the game, and a maxed skill should
- * be something other players notice rather than something everyone has.
+ * Priced by RARITY, not flat. An epic skill is the common case — thirteen
+ * cards carry one — so charging legendary rates would make the whole tier
+ * ornamental. A legendary skill stays expensive because there are eight of
+ * them and a mastered one should be something other players notice.
+ *
+ * Still steeper per step than upgradeCost() at both tiers, and capped five
+ * levels lower, so a skill is a project rather than an afternoon of dusting.
  */
-export function skillUpgradeCost(level: number): number {
+export function skillUpgradeCost(level: number, rarity: CardRarity = "legendary"): number {
+  const base: Partial<Record<CardRarity, number>> = { epic: 200, legendary: 500 };
   const l = Math.max(1, Math.floor(level || 1));
-  return Math.round(500 * Math.pow(1.6, l - 1));
+  return Math.round((base[rarity] ?? 200) * Math.pow(1.6, l - 1));
 }

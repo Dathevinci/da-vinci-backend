@@ -87,7 +87,7 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
                 level: i + 1,
                 power: skillPower(s, i + 1),
                 text: s.text(skillPower(s, i + 1)),
-                cost: i + 1 >= MAX_SKILL_LEVEL ? null : skillUpgradeCost(i + 1),
+                cost: i + 1 >= MAX_SKILL_LEVEL ? null : skillUpgradeCost(i + 1, CARDS[id]?.rarity ?? "legendary"),
               })),
             },
           ])
@@ -619,7 +619,7 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
     if (level >= MAX_SKILL_LEVEL) {
       return res.status(400).json({ success: false, message: `${skill.name} is already mastered.` });
     }
-    const cost = skillUpgradeCost(level);
+    const cost = skillUpgradeCost(level, def.rarity);
 
     try {
       const out = await prisma.$transaction(async (tx) => {
@@ -645,7 +645,7 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
           skillName: skill.name,
           power: skillPower(skill, out.skillLevel),
           text: skill.text(skillPower(skill, out.skillLevel)),
-          nextCost: out.skillLevel >= MAX_SKILL_LEVEL ? null : skillUpgradeCost(out.skillLevel),
+          nextCost: out.skillLevel >= MAX_SKILL_LEVEL ? null : skillUpgradeCost(out.skillLevel, def.rarity),
         },
       });
     } catch (e) {

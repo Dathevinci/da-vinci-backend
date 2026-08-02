@@ -45,6 +45,11 @@ model User {
   // their own inventory and their own equipped slot.
   purchasedArenaEffects String[] @default([])
   activeArenaEffect     String?
+  // Arena Cache pity. Counts DUPLICATES since the last new effect; the chest id
+  // is stored alongside so pity banked on one chest can't be cashed on a
+  // different, richer one later.
+  arenaChestPity        Int      @default(0)
+  arenaChestPityChest   String   @default("")
   cardTitle        String?                // title earned from completing a set
   cards            UserCard[]
   cardListings     CardListing[] @relation("CardListings")
@@ -513,4 +518,26 @@ model Donation {
   matchedUsername String? // denormalized for the public "recent supporters" feed
   apGranted     Int      @default(0)
   createdAt     DateTime @default(now())
+}
+
+// One row per Arena Cache opening, claimed BEFORE any money moves.
+//
+// This exists purely to make the endpoint idempotent: the client mints a rollId
+// per button press and reuses it across retries, so a replayed request hits the
+// unique index, rolls the whole transaction back, and returns the ORIGINAL
+// result instead of charging again. It could not live on PointLog — adding a
+// unique there would fail against the thousands of existing duplicate
+// "card-pack:x4" rows.
+model ArenaChestOpen {
+  id        String   @id @default(uuid())
+  userId    String
+  rollId    String   // client-minted, one per button press
+  chestId   String
+  effectId  String
+  isNew     Boolean  @default(false)
+  refund    Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, rollId])
+  @@index([userId])
 }

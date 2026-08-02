@@ -22,6 +22,8 @@ import {
   rollPack,
   rollRelicPack,
 } from "../data/cardCatalog";
+import { ARENA_CHESTS, DUPE_REFUND, chestPool, chestAvailable, rollArenaChest } from "../data/arenaChest";
+import { arenaEffect } from "../data/arenaEffects";
 
 /**
  * ARISE CARDS — collectible packs, dusting and crafting.
@@ -199,6 +201,185 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
       res.json({ success: true, data: { pulls, arisePoints: result.arisePoints } });
     } catch (e) {
       if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/cards/arena-chest   body { userId, chestId, rollId }
+ *
+ * Open an Arena Cache: one roll, one arena effect, new or duplicate.
+ *
+ * Nothing about the outcome comes from the request — not the grade, not the
+ * item, not the price. `rollId` is minted by the client once per button press
+ * and reused across retries, which is what makes this idempotent: a replay hits
+ * the unique index on ArenaChestOpen, unwinds the whole transaction, and
+ * returns the ORIGINAL result rather than charging a second time.
+ *
+ * THE DATABASE DECIDES NEW VS DUPLICATE. Reading purchasedArenaEffects into JS,
+ * computing !owned.includes(rolled) and then writing leaves a window where two
+ * concurrent chests both call the same roll "new", both charge as new, and both
+ * push — giving a 7-entry array on a 6-item catalog, at which point "you own
+ * everything" is permanently true by corruption. The conditional updateMany in
+ * step 4 is the dedupe, the classification and the corruption guard at once.
+ *
+ * Lives in this file rather than beside the shop purchases so it can reuse
+ * ownerGuard, isStaffFree and CardError, and so it sits next to openPack, whose
+ * atomic-debit shape it copies. (The shop's purchaseItem still does read-then-
+ * write; do not copy the nearest neighbour.)
+ */
+export const openArenaChest = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, chestId, rollId } = (req.body || {}) as {
+      userId?: string; chestId?: string; rollId?: string;
+    };
+    if (!ownerGuard(req, res, userId)) return;
+
+    const chest = chestId ? ARENA_CHESTS[chestId] : undefined;
+    if (!chest) return res.status(400).json({ success: false, message: "That chest doesn't exist." });
+    if (!chestAvailable(chest)) {
+      return res.status(410).json({ success: false, message: `The ${chest.name} is no longer available.` });
+    }
+    // Bounded before it reaches a unique index.
+    if (typeof rollId !== "string" || rollId.length < 8 || rollId.length > 64) {
+      return res.status(400).json({ success: false, message: "Missing or malformed rollId." });
+    }
+
+    const pre = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { purchasedArenaEffects: true, arenaChestPity: true, arenaChestPityChest: true },
+    });
+    if (!pre) return res.status(404).json({ success: false, message: "User not found." });
+
+    // Selling a box that can only ever pay back duplicate compensation is a
+    // trap, so it is refused at the endpoint rather than merely greyed out.
+    const pool = chestPool(chest);
+    const COMPLETE = `Every arena is already yours — the ${chest.name} has nothing left to give you.`;
+    if (pool.every((fx) => pre.purchasedArenaEffects.includes(fx.id))) {
+      return res.status(409).json({ success: false, message: COMPLETE });
+    }
+
+    // Pity banked on a DIFFERENT chest doesn't count — otherwise you could
+    // stack ten cheap dupes and cash the guarantee on a richer vault later.
+    const pityBefore = pre.arenaChestPityChest === chest.id ? pre.arenaChestPity : 0;
+    const rolled = rollArenaChest(chest, pre.purchasedArenaEffects, pityBefore); // pure — no I/O
+    const free = await isStaffFree(userId!);
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        // 1. Claim the opening BEFORE any money moves. A duplicate rollId
+        //    throws P2002 here and the whole transaction unwinds untouched.
+        await tx.arenaChestOpen.create({
+          data: { userId: userId!, rollId, chestId: chest.id, effectId: rolled.effect.id },
+        });
+
+        // 2. Re-read inside the transaction — the collection may have completed
+        //    since the pre-check, and pity may have moved.
+        const fresh = await tx.user.findUnique({
+          where: { id: userId },
+          select: { purchasedArenaEffects: true, arenaChestPity: true, arenaChestPityChest: true },
+        });
+        if (!fresh) throw new CardError(404, "User not found.");
+        if (pool.every((fx) => fresh.purchasedArenaEffects.includes(fx.id))) {
+          throw new CardError(409, COMPLETE);
+        }
+
+        // 3. Atomic AP debit: check + deduct in one op.
+        if (!free) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, arisePoints: { gte: chest.price } },
+            data: { arisePoints: { decrement: chest.price } },
+          });
+          if (debit.count === 0) {
+            throw new CardError(402, `The ${chest.name} costs ${chest.price.toLocaleString()} Arise Points — you don't have enough.`);
+          }
+          await tx.pointLog.create({
+            data: { userId: userId!, amount: -chest.price, reason: `arena-chest:${chest.id}` },
+          });
+        }
+
+        // 4. The grant IS the new-vs-duplicate decision. See the header.
+        const grant = await tx.user.updateMany({
+          where: { id: userId, NOT: { purchasedArenaEffects: { has: rolled.effect.id } } },
+          data: { purchasedArenaEffects: { push: rolled.effect.id } },
+        });
+        const isNew = grant.count === 1;
+
+        // 5. Duplicates pay back. Staff open free, so they must also refund
+        //    nothing — otherwise an admin mints AP by clicking into dupes.
+        const refund = isNew || free ? 0 : DUPE_REFUND[rolled.effect.grade] ?? 0;
+        if (refund > 0) {
+          await tx.user.update({ where: { id: userId }, data: { arisePoints: { increment: refund } } });
+          await tx.pointLog.create({
+            data: { userId: userId!, amount: refund, reason: `arena-chest-dupe:${rolled.effect.id}` },
+          });
+        }
+
+        // 6. Pity resets on a new effect, otherwise climbs. Guarded on the
+        //    value we just read so two concurrent chests can't both bump it.
+        const nextPity = isNew ? 0 : pityBefore + 1;
+        const bump = await tx.user.updateMany({
+          where: { id: userId, arenaChestPity: fresh.arenaChestPity },
+          data: { arenaChestPity: nextPity, arenaChestPityChest: chest.id },
+        });
+        if (bump.count === 0) throw new CardError(409, "That chest is already opening — try again in a moment.");
+
+        await tx.arenaChestOpen.update({
+          where: { userId_rollId: { userId: userId!, rollId } },
+          data: { isNew, refund },
+        });
+
+        const after = await tx.user.findUnique({
+          where: { id: userId },
+          select: { arisePoints: true, purchasedArenaEffects: true },
+        });
+        return {
+          duplicate: !isNew,
+          refund,
+          pity: nextPity,
+          arisePoints: after?.arisePoints ?? 0,
+          purchasedArenaEffects: after?.purchasedArenaEffects ?? [],
+          replayed: false,
+        };
+      });
+
+      return res.json({
+        success: true,
+        data: { chestId: chest.id, effect: rolled.effect, pityHit: rolled.pityHit, ...result },
+      });
+    } catch (e: any) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+
+      // REPLAY: the same rollId already opened. Hand back what it gave the
+      // first time, with the CURRENT balance, and charge nothing.
+      if (e?.code === "P2002") {
+        const prior = await prisma.arenaChestOpen.findUnique({
+          where: { userId_rollId: { userId: userId!, rollId } },
+        });
+        const me = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { arisePoints: true, purchasedArenaEffects: true, arenaChestPity: true },
+        });
+        // Looked up in the full catalog, not this chest's pool — the stored
+        // open may have come from a different chest entirely.
+        const fx = prior ? arenaEffect(prior.effectId) : null;
+        if (prior && fx && me) {
+          return res.json({
+            success: true,
+            data: {
+              chestId: prior.chestId, effect: fx,
+              duplicate: !prior.isNew, refund: prior.refund,
+              pity: me.arenaChestPity, pityHit: false,
+              arisePoints: me.arisePoints,
+              purchasedArenaEffects: me.purchasedArenaEffects,
+              replayed: true,
+            },
+          });
+        }
+      }
       throw e;
     }
   } catch (error) {

@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   getCatalog, getCollection, getCollectors, openPack, dustCard, craftCard,
   foilCard, openRelicPack, claimSet, getLadder, setShowcase, wakeCard, upgradeCard,
+  openArenaChest,
 } from "../controllers/card.controller";
 
 const router = Router();
@@ -19,5 +20,9 @@ router.get("/ladder", getLadder);
 router.put("/showcase", setShowcase);
 router.post("/wake", wakeCard);
 router.post("/upgrade", upgradeCard);
+// An arena cosmetic on the cards route on purpose: user.routes.ts has a root
+// "/:id" that swallows any static POST declared below it, and this handler
+// needs card.controller's ownerGuard / isStaffFree / CardError anyway.
+router.post("/arena-chest", openArenaChest);
 
 export default router;

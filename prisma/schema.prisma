@@ -249,6 +249,9 @@ model UserCard {
   // Fell in a duel you LOST. The card is never deleted — it sleeps, and comes
   // back either by spending shards or by pulling another copy from a pack.
   hibernating Boolean @default(false)
+  // Shard-bought power. Levels raise ATK and HP in duels, so a common you
+  // actually invested in can outfight a legendary nobody touched.
+  level     Int      @default(1)
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

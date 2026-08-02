@@ -10,6 +10,9 @@ import {
   DUST_VALUE,
   CRAFT_COST,
   WAKE_COST,
+  MAX_CARD_LEVEL,
+  upgradeCost,
+  levelMult,
   FOIL_COST,
   RELIC_PACK_SHARDS,
   SET_REWARDS,
@@ -44,6 +47,12 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         dustValue: DUST_VALUE,
         craftCost: CRAFT_COST,
         wakeCost: WAKE_COST,
+        maxCardLevel: MAX_CARD_LEVEL,
+        // Base cost per rarity; the client raises it by 1.35^(level-1) to match
+        // upgradeCost() exactly, so the price shown is the price charged.
+        upgradeBase: { common: 30, rare: 70, epic: 160, legendary: 380, event: 300 },
+        upgradeGrowth: 1.35,
+        levelStep: 0.07,
         foilCost: FOIL_COST,
         relicPackShards: RELIC_PACK_SHARDS,
         setRewards: SET_REWARDS,
@@ -124,7 +133,7 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
   try {
     const userId = req.params.userId as string;
     const [owned, user] = await Promise.all([
-      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true } }),
+      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
     ]);
     res.json({
@@ -521,6 +530,77 @@ export const wakeCard = async (req: Request, res: Response, next: NextFunction) 
       }
       if (e?.message === "AWAKE") {
         return res.status(400).json({ success: false, message: `${def.name} is already awake.` });
+      }
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/cards/upgrade  { userId, cardId } ───────────────────────────
+// Spend shards to raise a card's level. Levels multiply ATK and HP in duels,
+// so this is the sink that keeps shards meaningful once you own the set.
+export const upgradeCard = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardId } = (req.body || {}) as { userId?: string; cardId?: string };
+    if (!userId || !cardId) return res.status(400).json({ success: false, message: "Missing userId or cardId." });
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only upgrade your own cards." });
+    }
+    const def = CARDS[cardId];
+    if (!def) return res.status(404).json({ success: false, message: "No such card." });
+
+    const row = await prisma.userCard.findUnique({
+      where: { userId_cardId: { userId, cardId } },
+      select: { level: true, hibernating: true },
+    });
+    if (!row) return res.status(404).json({ success: false, message: "You don't own that card." });
+    if (row.hibernating) {
+      return res.status(400).json({ success: false, message: `${def.name} is asleep. Wake it first.` });
+    }
+
+    const level = row.level || 1;
+    if (level >= MAX_CARD_LEVEL) {
+      return res.status(400).json({ success: false, message: `${def.name} is already at max level.` });
+    }
+    const cost = upgradeCost(def.rarity, level);
+
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        // One conditional decrement makes the affordability check and the spend
+        // a single operation — two fast clicks can't both pass.
+        const paid = await tx.user.updateMany({
+          where: { id: userId, shards: { gte: cost } },
+          data: { shards: { decrement: cost } },
+        });
+        if (paid.count === 0) throw new Error("POOR");
+        // Guarded on the level we priced, so a double submit can't buy two
+        // levels for the price of the cheaper one.
+        const bumped = await tx.userCard.updateMany({
+          where: { userId, cardId, level },
+          data: { level: { increment: 1 } },
+        });
+        if (bumped.count === 0) throw new Error("RACE");
+        const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
+        return { shards: u?.shards ?? 0, level: level + 1 };
+      });
+      res.json({
+        success: true,
+        data: {
+          ...out,
+          cardId,
+          spent: cost,
+          nextCost: out.level >= MAX_CARD_LEVEL ? null : upgradeCost(def.rarity, out.level),
+        },
+      });
+    } catch (e: any) {
+      if (e?.message === "POOR") {
+        return res.status(402).json({ success: false, message: `Levelling ${def.name} costs ${cost} shards.` });
+      }
+      if (e?.message === "RACE") {
+        return res.status(409).json({ success: false, message: "That upgrade already went through." });
       }
       throw e;
     }

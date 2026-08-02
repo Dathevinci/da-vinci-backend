@@ -155,6 +155,36 @@ export const CRAFT_COST: Record<CardRarity, number> = {
 };
 
 /**
+ * CARD LEVELS — shard-bought power.
+ *
+ * Levels exist so shards keep mattering after you own everything, and so a
+ * common you actually invested in can outfight a legendary nobody touched.
+ * +7% per level compounds to roughly +80% at cap, which is enough to matter
+ * without making an un-levelled card unplayable.
+ */
+export const MAX_CARD_LEVEL = 10;
+export const LEVEL_STEP = 0.07;
+
+/** Multiplier applied to a card's base ATK and HP. Level 1 is exactly base. */
+export function levelMult(level: number): number {
+  const l = Math.max(1, Math.min(MAX_CARD_LEVEL, Math.floor(level || 1)));
+  return 1 + (l - 1) * LEVEL_STEP;
+}
+
+/**
+ * Shards to go from `level` to `level + 1`. Rarer cards cost more per step and
+ * every step costs more than the last, so levelling a legendary to cap is a
+ * genuine project rather than an afternoon of dusting.
+ */
+export function upgradeCost(rarity: CardRarity, level: number): number {
+  const base: Record<CardRarity, number> = {
+    common: 30, rare: 70, epic: 160, legendary: 380, event: 300,
+  };
+  const l = Math.max(1, Math.floor(level || 1));
+  return Math.round((base[rarity] ?? 30) * Math.pow(1.35, l - 1));
+}
+
+/**
  * Waking a hibernating card. Deliberately well under CRAFT_COST: the card is
  * already yours, so this is a fee for losing with it, not a second purchase.
  * Pulling another copy from a pack wakes it for free, which keeps packs

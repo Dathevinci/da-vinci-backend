@@ -10,7 +10,7 @@
 // choice matter, short enough to finish while you're still looking at it.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { CARDS, CardRarity } from "./cardCatalog";
+import { CARDS, CardRarity, levelMult } from "./cardCatalog";
 
 export const DECK_SIZE = 5;
 
@@ -52,6 +52,7 @@ export interface Fighter {
   hp: number;
   atk: number;
   foil: boolean;
+  level?: number;
 }
 
 export interface Side {
@@ -75,13 +76,16 @@ export interface DuelState {
   round: number;
 }
 
-export function buildFighter(cardId: string, foil: boolean): Fighter | null {
+export function buildFighter(cardId: string, foil: boolean, level = 1): Fighter | null {
   const def = CARDS[cardId];
   // Support cards are played, never fielded — they have no stat line, so
   // letting one into a deck would field a fighter with undefined HP.
   if (!def || def.support) return null;
   const base = CARD_STATS[def.rarity];
-  const mult = foil ? FOIL_MULT : 1;
+  // Foil and level stack. Levels are shard-bought, so they have to show up
+  // HERE — a level that only changed a number on the card page would be a
+  // currency sink that sells nothing.
+  const mult = (foil ? FOIL_MULT : 1) * levelMult(level);
   const hp = Math.round(base.hp * mult);
   return {
     cardId,
@@ -91,6 +95,7 @@ export function buildFighter(cardId: string, foil: boolean): Fighter | null {
     hp,
     atk: Math.round(base.atk * mult),
     foil,
+    level,
   };
 }
 
@@ -99,10 +104,13 @@ export function makeSide(
   username: string,
   deck: string[],
   foils: Set<string>,
-  items: Record<string, number>
+  items: Record<string, number>,
+  // cardId -> level. Absent means level 1, so an old duel or a caller that
+  // doesn't know about levels still builds exactly the fighters it used to.
+  levels: Record<string, number> = {}
 ): Side {
   const fighters = deck
-    .map((id) => buildFighter(id, foils.has(id)))
+    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1))
     .filter((f): f is Fighter => !!f);
   // active = -1 means NOBODY is on the field yet. The arena opens empty and
   // your first move is genuinely choosing who walks in, instead of the engine

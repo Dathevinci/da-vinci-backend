@@ -245,7 +245,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },
-      select: { cardId: true, foil: true, hibernating: true },
+      select: { cardId: true, foil: true, hibernating: true, level: true },
     });
     if (ownedRows.filter((r) => deck.includes(r.cardId)).length !== deck.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that deck." });
@@ -259,16 +259,23 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
         message: `${dozing.join(", ")} ${dozing.length === 1 ? "is" : "are"} hibernating. Wake ${dozing.length === 1 ? "it" : "them"} with shards, or pull another copy.`,
       });
     }
-    const challengerFoils = await prisma.userCard.findMany({
-      where: { userId: duel.challengerId, cardId: { in: duel.challengerDeck }, foil: true },
-      select: { cardId: true },
+    // Levels are read for BOTH sides, not just foils. A level is shard-bought
+    // power; if it were only applied to one side — or dropped here — the
+    // upgrade would be a number on a card page that never reached a fight.
+    const challengerRows = await prisma.userCard.findMany({
+      where: { userId: duel.challengerId, cardId: { in: duel.challengerDeck } },
+      select: { cardId: true, foil: true, level: true },
     });
+    const challengerLevels: Record<string, number> = {};
+    for (const r of challengerRows) challengerLevels[r.cardId] = r.level || 1;
+    const myLevels: Record<string, number> = {};
+    for (const r of ownedRows) myLevels[r.cardId] = r.level || 1;
 
     const stateObj: DuelState = {
       a: makeSide(duel.challengerId, duel.challengerName, duel.challengerDeck,
-        new Set(challengerFoils.map((f) => f.cardId)), {}),
+        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels),
       b: makeSide(duel.opponentId, duel.opponentName, deck,
-        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}),
+        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels),
       turn: duel.challengerId, // challenger moves first
       log: [`${duel.opponentName} accepted the challenge.`],
       round: 1,

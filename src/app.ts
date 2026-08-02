@@ -26,6 +26,7 @@ import auctionRoutes from "./routes/auction.routes";
 import cardRoutes from "./routes/card.routes";
 import duelRoutes from "./routes/duel.routes";
 import marketRoutes from "./routes/market.routes";
+import dungeonRoutes from "./routes/dungeon.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -58,7 +59,7 @@ app.use("/api", apiLimiter);
 // timeline recorder) is otherwise impossible to distinguish from the previous
 // deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards"] });
+  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "dungeon-dispatch"] });
 });
 
 // Mount routers
@@ -84,6 +85,7 @@ app.use("/api/auctions", auctionRoutes);
 app.use("/api/cards", cardRoutes);
 app.use("/api/duels", duelRoutes);
 app.use("/api/market", marketRoutes);
+app.use("/api/dungeon", dungeonRoutes);
 
 // Error Handler must be last
 app.use(errorHandler);

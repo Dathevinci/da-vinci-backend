@@ -299,12 +299,39 @@ model UserCard {
   // than having the choice made for them. Meaningless on non-legendaries,
   // which have no skill in the catalog.
   skillLevel Int     @default(1)
+  // ── Dungeon Dispatch condition ── deliberately separate from `hibernating`
+  // (the duel sleep): a card asleep from a lost duel can still raid, and a
+  // card dead in a dungeon can still duel. Two modes, two bodies.
+  dgnHp      Int?    // current dungeon HP carried between runs; null = full
+  dgnInjured Boolean @default(false) // came home under 40% — fights at 70% max HP until healed
+  dgnDead    Boolean @default(false) // fell in a dungeon; revived with Arise Points, never deleted
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, cardId])
   @@index([userId])
+}
+
+// A Dungeon Dispatch run. The party auto-raids SERVER-SIDE, one floor per
+// /advance request — the client renders events, it never invents outcomes.
+// Recall banks the earnings; a wipe forfeits everything unbanked (the deaths
+// still count — the dungeon keeps what it takes either way). Follows the
+// Duel pattern: plain-string userId, no relation, status as a documented
+// string.
+model DungeonRun {
+  id           String    @id @default(uuid())
+  userId       String
+  dungeon      String    // id in DUNGEONS (dungeonRules.ts)
+  floor        Int       @default(0)  // floors CLEARED so far
+  status       String    @default("RUNNING") // RUNNING | RECALLED | WIPED | CLEARED
+  state        String    // JSON DungeonState: party hp/atk, unbanked earnings
+  apEarned     Int       @default(0)  // mirror of state for cheap reads
+  shardsEarned Int       @default(0)
+  createdAt    DateTime  @default(now())
+  finishedAt   DateTime?
+
+  @@index([userId, status])
 }
 
 // One physical COPY of a legendary card. UserCard.count stays the source of

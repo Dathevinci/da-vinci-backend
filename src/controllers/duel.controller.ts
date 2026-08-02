@@ -23,6 +23,21 @@ import {
  * intent ("attack", "use heal"), never a result.
  */
 
+/**
+ * One health-over-time point per RESOLVED action. The log can't power a
+ * post-match graph — it is capped at 60 lines, so a long fight's opening
+ * would be invented — but this is appended by the same code that persists
+ * the state, so it is exactly as authoritative. Capped generously: a duel
+ * physically can't outlive ~200 meaningful actions.
+ */
+function recordTimeline(s: DuelState): void {
+  const sum = (side: { fighters: { hp: number }[] }) =>
+    side.fighters.reduce((n, f) => n + Math.max(0, f.hp), 0);
+  const t = (s.timeline ||= []);
+  t.push({ a: sum(s.a), b: sum(s.b) });
+  if (t.length > 240) s.timeline = t.slice(-240);
+}
+
 function guard(req: Request, res: Response, userId?: string): boolean {
   if (!userId) {
     res.status(400).json({ success: false, message: "Missing userId." });
@@ -287,6 +302,9 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
       log: [`${duel.opponentName} accepted the challenge.`],
       round: 1,
     };
+    // First timeline point: both lines at full health. Every resolved move
+    // appends another — see recordTimeline.
+    recordTimeline(stateObj);
 
     try {
       const updated = await prisma.$transaction(async (tx) => {
@@ -519,6 +537,10 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
       }
       return res.status(400).json({ success: false, message: why });
     }
+
+    // The move resolved — record the health point it produced. Done before
+    // the serialize below so the write and the timeline can never disagree.
+    recordTimeline(result.state);
 
     try {
       const out = await prisma.$transaction(async (tx) => {

@@ -108,6 +108,12 @@ export interface DuelState {
   turn: string;      // userId whose move it is
   log: string[];
   round: number;
+  /** Health-over-time: total HP per side, appended once per RESOLVED action
+   *  by the controller. This exists because the log is capped at 60 lines —
+   *  a post-match graph derived from it would lie about long fights, and
+   *  this game does not show reconstructed numbers. Optional so every state
+   *  serialized before the field existed still parses. */
+  timeline?: { a: number; b: number }[];
 }
 
 export function buildFighter(cardId: string, foil: boolean, level = 1, skillLevel = 1): Fighter | null {

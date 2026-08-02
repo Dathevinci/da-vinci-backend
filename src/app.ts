@@ -59,7 +59,7 @@ app.use("/api", apiLimiter);
 // timeline recorder) is otherwise impossible to distinguish from the previous
 // deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "dungeon-dispatch", "dungeon-domains", "revive-scaling", "dungeon-pack"] });
+  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "dungeon-dispatch", "dungeon-domains", "revive-scaling", "dungeon-supports"] });
 });
 
 // Mount routers

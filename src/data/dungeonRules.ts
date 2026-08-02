@@ -126,24 +126,20 @@ export interface DungeonState {
   atkBonusPct?: number;
   guardPct?: number;
   /**
-   * THE PACK — support items carried into the run, escrowed out of the
-   * player's duel bag at dispatch. The party can't use them (nobody down
-   * there has hands free); the PLAYER throws them in from topside, any time
-   * the run is live. Unused ones come home with the survivors.
+   * THE PACK — up to three of the player's own SUPPORT CARDS, chosen at
+   * dispatch. Same cards, same effects as the duel arena, one use each per
+   * run — and the PLAYER plays them from topside, any time the run is
+   * live. Nothing is consumed; a support card is knowledge, not a potion.
    */
-  items?: Record<string, number>;
+  supports?: { id: string; used: boolean }[];
   /** Armed by the player between floors, spent by the next floor's opening. */
-  pendingWard?: number;    // enemy volleys halved, this many
-  pendingFocus?: boolean;  // party's first volley hits 75% harder
+  pendingWard?: number;     // enemy volleys halved, this many
+  pendingFocus?: boolean;   // party's opening volley boosted…
+  focusPower?: number;      // …by this multiplier (the card's own power)
+  pendingBlock?: boolean;   // the next enemy volley is negated outright
 }
 
-/** What can go in the pack. Mirrors the duel bag's item ids on purpose —
- *  one bag, two battlefields. */
 export const PACK_MAX = 3;
-export const DGN_ITEMS: Record<string, { name: string }> = {
-  heal: { name: "Salve" }, shield: { name: "Ward" }, focus: { name: "Focus" },
-};
-export const SALVE_HEAL = 10; // same number the duel Salve restores
 
 const ENEMY_NAMES = [
   ["Cellar Mite", "Damp Shambler", "Mildew Knot", "Wall Weeper"],
@@ -250,9 +246,11 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     doomRounds: -1, doomPower: 0,
   };
 
-  // ── the player's thrown-in support, armed between floors, lands here ──
+  // ── the player's played supports, armed between floors, land here ──
   let wardVolleys = 0;
   let focusVolley = false;
+  let focusMult = 1.75;
+  let blockVolley = false;
   if (state.pendingWard && state.pendingWard > 0) {
     wardVolleys = state.pendingWard;
     state.pendingWard = undefined;
@@ -260,8 +258,15 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
   }
   if (state.pendingFocus) {
     focusVolley = true;
+    focusMult = state.focusPower && state.focusPower > 1 ? state.focusPower : 1.75;
     state.pendingFocus = undefined;
-    events.push({ k: "note", text: "> focus taken — the party's opening volley hits 75% HARDER." });
+    state.focusPower = undefined;
+    events.push({ k: "note", text: `> the war cry carries down — the opening volley hits ${Math.round((focusMult - 1) * 100)}% HARDER.` });
+  }
+  if (state.pendingBlock) {
+    blockVolley = true;
+    state.pendingBlock = undefined;
+    events.push({ k: "note", text: "> a bulwark stands with them — the first enemy volley will NOT land." });
   }
 
   const livingEnemies = () => enemies.map((e, idx) => ({ e, idx })).filter((x) => x.e.hp > 0);
@@ -467,7 +472,7 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     }
 
     // ── party swings — always at the weakest thing standing
-    const atkMul = (1 + (state.atkBonusPct || 0) / 100) * (focusVolley ? 1.75 : 1);
+    const atkMul = (1 + (state.atkBonusPct || 0) / 100) * (focusVolley ? focusMult : 1);
     for (let i = 0; i < state.party.length; i++) {
       const u = state.party[i];
       if (u.hp <= 0) continue;
@@ -487,7 +492,10 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     if (enemies.every((e) => e.hp <= 0)) break;
 
     // ── enemies swing back, unless a domain says otherwise
-    if (st.enemyFrozenRounds > 0) {
+    if (blockVolley) {
+      blockVolley = false;
+      events.push({ k: "note", text: "> the bulwark takes the whole volley. nothing gets through." });
+    } else if (st.enemyFrozenRounds > 0) {
       st.enemyFrozenRounds--;
       events.push({ k: "note", text: "> the chains hold. nothing moves." });
     } else if (st.partyImmuneRounds > 0) {

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {
-  getStatus, dispatch, advance, recall, healCard, reviveCard, useItem,
+  getStatus, dispatch, advance, recall, healCard, reviveCard, useSupport,
 } from "../controllers/dungeon.controller";
 
 const router = Router();
@@ -12,6 +12,6 @@ router.post("/revive", reviveCard);
 router.post("/", dispatch);
 router.post("/:id/advance", advance);
 router.post("/:id/recall", recall);
-router.post("/:id/use-item", useItem);
+router.post("/:id/use-support", useSupport);
 
 export default router;

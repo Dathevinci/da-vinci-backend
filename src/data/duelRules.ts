@@ -315,9 +315,18 @@ export function applyAction(
       return { state, finished: false };
     }
 
-    // Playing a support card passes the turn, so it costs tempo.
-    s.turn = foe.userId;
-    s.round += 1;
+    /**
+     * Playing a support KEEPS your turn.
+     *
+     * It used to pass, which made every support a trade: heal for 12 and hand
+     * the opponent a free swing worth more than the heal. Rationally you never
+     * played one, so three cards you had to collect and choose between sat
+     * unused all match.
+     *
+     * The cost is already the card itself — one use each, three per duel, and
+     * they do not come back. That is the real limit; spending the turn on top
+     * of it just priced them out of the game.
+     */
     if (s.log.length > 60) s.log = s.log.slice(-60);
     return { state: s, finished: false };
   }

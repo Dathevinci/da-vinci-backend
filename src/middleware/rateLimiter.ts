@@ -2,7 +2,12 @@ import rateLimit from "express-rate-limit";
 
 export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 300, // per IP per window across the whole API
+  // 1500, not 300. A live duel polls its own board every 2s (30 req/min) and
+  // two players on one household IP double that before anyone opens a second
+  // tab — 300 per 15 minutes locked people out mid-match with "Too many
+  // requests". This is a runaway-loop backstop, not access control: every
+  // handler does its own auth, so a generous ceiling costs nothing.
+  max: 1500,
   message: {
     success: false,
     message: "Too many requests from this IP, please try again after 15 minutes",

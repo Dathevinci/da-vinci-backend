@@ -336,7 +336,9 @@ export function cardsInSet(set: string): string[] {
  * have already been rewritten once.
  * ═══════════════════════════════════════════════════════════════════════════ */
 
-export type SkillKind = "burst" | "drain" | "guard" | "rally" | "execute";
+export type SkillKind =
+  | "burst" | "drain" | "guard" | "rally" | "execute"
+  | "pierce" | "cleave" | "venom" | "stagger" | "bulwark" | "mendself" | "sap" | "empower";
 
 export interface SkillDef {
   name: string;
@@ -352,31 +354,30 @@ export interface SkillDef {
 export const MAX_SKILL_LEVEL = 5;
 
 export const SKILLS: Record<string, SkillDef> = {
-  // EPIC ONLY. Legendaries carry a DOMAIN instead — defined below. The two
-  // share no kinds at all, deliberately: when a legendary skill was just an
-  // epic skill with bigger numbers, the top tier read as a bigger epic rather
-  // than as a different kind of thing.
-  // ── EPIC ── weaker numbers and cheaper training than the legendaries above.
-  // Thirteen cards carry one, so these are the tier players actually build
-  // around; a legendary skill has to stay visibly better than a maxed epic.
+  // EPIC ONLY — legendaries carry a DOMAIN instead.
+  //
+  // THIRTEEN CARDS, THIRTEEN VERBS. The first pass gave four of these "guard"
+  // and three of them "rally", so half the tier was the same move at a
+  // different number and picking between them was picking a colour. Every one
+  // below now does something no other card in the game does.
   card_voidgaze: {
-    name: "Long Look", kind: "burst", base: 110, step: 16,
-    text: (p) => `Deal ${p}% ATK to whoever is standing opposite.`,
+    name: "Seen Through", kind: "pierce", base: 105, step: 15,
+    text: (p) => `Deal ${p}% ATK that ignores wards, guards and shields entirely.`,
   },
   card_ninehands: {
-    name: "Nine Turns", kind: "guard", base: 18, step: 4,
-    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+    name: "Nine Hands", kind: "cleave", base: 85, step: 13,
+    text: (p) => `Deal ${p}% ATK to the card opposite AND half that to the next one behind it.`,
   },
   card_crimsonsea: {
-    name: "Red Tide", kind: "drain", base: 95, step: 15,
-    text: (p) => `Deal ${p}% ATK and take back half of it as health.`,
+    name: "The Far Bank", kind: "venom", base: 8, step: 2,
+    text: (p) => `The card opposite loses ${p}% of its max health at the end of each of your turns.`,
   },
   card_unblinking: {
     name: "It Noticed You", kind: "execute", base: 20, step: 4,
     text: (p) => `Finish any card already below ${p}% health outright.`,
   },
   card_fallenstar: {
-    name: "Long Fall", kind: "burst", base: 125, step: 20,
+    name: "Long Fall", kind: "burst", base: 130, step: 20,
     text: (p) => `Deal ${p}% ATK to whoever is standing opposite.`,
   },
   card_trenchmaw: {
@@ -384,32 +385,32 @@ export const SKILLS: Record<string, SkillDef> = {
     text: (p) => `Deal ${p}% ATK and take back half of it as health.`,
   },
   card_onimask: {
-    name: "Wear the Face", kind: "burst", base: 130, step: 21,
-    text: (p) => `Deal ${p}% ATK. The face does the rest.`,
+    name: "Ninety-Nine Faces", kind: "stagger", base: 50, step: 10,
+    text: (p) => `The other side's next attack lands ${p}% weaker.`,
   },
   card_blackreach: {
     name: "No Bottom", kind: "guard", base: 20, step: 4,
     text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
   },
   card_lastretainer: {
-    name: "Hold the Gate", kind: "guard", base: 22, step: 5,
-    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+    name: "Hold the Gate", kind: "bulwark", base: 1, step: 1,
+    text: (p) => `The next ${p} attack${p === 1 ? "" : "s"} against you do not land at all.`,
   },
   card_lampofhours: {
-    name: "Burn as Needed", kind: "rally", base: 22, step: 5,
-    text: (p) => `Restore ${p}% of max health to your whole line.`,
+    name: "Burn as Needed", kind: "mendself", base: 45, step: 12,
+    text: (p) => `This card alone recovers ${p}% of its max health.`,
   },
   card_communion: {
-    name: "Nobody Says Why", kind: "rally", base: 25, step: 5,
+    name: "Nobody Says Why", kind: "rally", base: 22, step: 5,
     text: (p) => `Restore ${p}% of max health to your whole line.`,
   },
   card_ironvow: {
-    name: "Spoken Once", kind: "guard", base: 25, step: 5,
-    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+    name: "Spoken Once", kind: "sap", base: 20, step: 5,
+    text: (p) => `The other side hits ${p}% weaker for the rest of the duel.`,
   },
   card_gravebloom: {
-    name: "Where Something Ended", kind: "rally", base: 20, step: 5,
-    text: (p) => `Restore ${p}% of max health to your whole line.`,
+    name: "Where Something Ended", kind: "empower", base: 25, step: 8,
+    text: (p) => `This card's attack rises ${p}% permanently. It keeps it if it falls and returns.`,
   },
 };
 

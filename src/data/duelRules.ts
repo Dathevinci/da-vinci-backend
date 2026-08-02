@@ -27,14 +27,22 @@ export function forfeitFine(stake: number): number {
   return Math.ceil((stake * FORFEIT_FINE_PERCENT) / 100);
 }
 
-// Rarity is the whole stat line. This is what finally makes a Legendary pull
-// matter in play and not just in the binder.
+// Rarity is a REAL edge, not a decided outcome.
+//
+// The old curve ran 10/3 to 28/12, so a legendary killed a common in 4 swings
+// while the common needed 10 to answer — a 2.5x gap on top of a 4x gap, which
+// is not a fight, it is a queue. Compressed to roughly 2:1 overall: a
+// legendary still wins the even matchup comfortably, but a common that gets a
+// hit in is doing real work rather than politely waiting.
+//
+// Foil (x1.2) and levels (up to x1.63) stack on top, so an INVESTED card still
+// pulls far ahead. That gap is earned rather than drawn from a pack.
 export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
-  common:    { hp: 10, atk: 3 },
-  rare:      { hp: 14, atk: 5 },
-  epic:      { hp: 20, atk: 8 },
-  legendary: { hp: 28, atk: 12 },
-  event:     { hp: 24, atk: 10 },
+  common:    { hp: 18, atk: 7 },
+  rare:      { hp: 20, atk: 8 },
+  epic:      { hp: 23, atk: 9 },
+  legendary: { hp: 26, atk: 10 },
+  event:     { hp: 24, atk: 9 },
 };
 
 // Foil copies fight ~20% harder — a real reason to spend shards on one.
@@ -79,6 +87,10 @@ export interface Side {
   nullifyTurns?: number;     // incoming damage ignored entirely, counts down
   atkBonus?: number;         // percent added to this side's attacks, lasting
   sealTurns?: number;        // this side cannot play supports, counts down
+  bulwarks?: number;         // incoming attacks that will not land, counts down
+  weaken?: number;           // percent off this side's NEXT attack, one shot
+  /** Bleed on this side's active card, ticking at the end of the enemy turn. */
+  bleed?: { pct: number; from: string };
   /** A doom that lands on this side in `turns`, for `power` percent of ATK. */
   doom?: { turns: number; power: number; from: string };
 }
@@ -338,9 +350,8 @@ export function applyAction(
       const k = ability.def.kind;
 
       // Anything that needs someone to hit is refused rather than wasted.
-      if ((k === "burst" || k === "drain" || k === "execute") && !target) {
-        return { state, finished: false };
-      }
+      const needsTarget = ["burst", "drain", "execute", "pierce", "cleave", "venom", "stagger"];
+      if (needsTarget.includes(k) && !target) return { state, finished: false };
 
       if (k === "burst") {
         const dealt = Math.max(1, Math.round(self.atk * (p / 100)));
@@ -376,6 +387,51 @@ export function applyAction(
         }
         if (healed === 0) return { state, finished: false };
         s.log.push(`${self.name} used ${ability.def.name} — the line recovered ${healed} HP.`);
+      } else if (k === "pierce") {
+        // Ignores every defence on purpose — that IS the skill, so it is
+        // resolved here rather than going through the attack maths.
+        const dealt = Math.max(1, Math.round(self.atk * (p / 100)));
+        target!.hp = Math.max(0, target!.hp - dealt);
+        s.log.push(`${self.name} used ${ability.def.name} — ${dealt} straight through every guard.`);
+      } else if (k === "cleave") {
+        const dealt = Math.max(1, Math.round(self.atk * (p / 100)));
+        target!.hp = Math.max(0, target!.hp - dealt);
+        // The next LIVING card behind the one in front, not simply index+1 —
+        // the bench is rarely in tidy order by the time this matters.
+        const behind = foe.fighters.find((f, i) => i !== foe.active && f.hp > 0);
+        if (behind) {
+          const splash = Math.max(1, Math.round(dealt / 2));
+          behind.hp = Math.max(0, behind.hp - splash);
+          s.log.push(`${self.name} used ${ability.def.name} — ${dealt} to ${target!.name}, ${splash} to ${behind.name} behind it.`);
+        } else {
+          s.log.push(`${self.name} used ${ability.def.name} — ${dealt} to ${target!.name}.`);
+        }
+      } else if (k === "venom") {
+        foe.bleed = { pct: p, from: ability.def.name };
+        s.log.push(`${self.name} used ${ability.def.name} — it will not stop bleeding.`);
+      } else if (k === "stagger") {
+        foe.weaken = Math.min(90, (foe.weaken || 0) + p);
+        s.log.push(`${self.name} used ${ability.def.name} — the next blow against you lands ${foe.weaken}% weaker.`);
+      } else if (k === "bulwark") {
+        me.bulwarks = (me.bulwarks || 0) + Math.max(1, p);
+        s.log.push(`${self.name} used ${ability.def.name} — the next ${me.bulwarks} attack(s) will not land.`);
+      } else if (k === "mendself") {
+        if (self.hp >= self.maxHp) return { state, finished: false };
+        const before = self.hp;
+        self.hp = Math.min(self.maxHp, self.hp + Math.round((self.maxHp * p) / 100));
+        s.log.push(`${self.name} used ${ability.def.name} — recovered ${self.hp - before} HP.`);
+      } else if (k === "sap") {
+        // Stored as a NEGATIVE attack bonus on them, so it runs through the
+        // same multiplier the ascend domain uses. Floored so it can never
+        // invert an attack into healing.
+        foe.atkBonus = Math.max(-80, (foe.atkBonus || 0) - p);
+        s.log.push(`${self.name} used ${ability.def.name} — ${foe.username} now strikes ${Math.abs(foe.atkBonus)}% weaker.`);
+      } else if (k === "empower") {
+        // Written onto the FIGHTER, so it survives the card falling and being
+        // revived — which is what the card text promises.
+        const gain = Math.max(1, Math.round((self.atk * p) / 100));
+        self.atk += gain;
+        s.log.push(`${self.name} used ${ability.def.name} — its attack rose to ${self.atk}, permanently.`);
       } else {
         return { state, finished: false };
       }
@@ -492,6 +548,16 @@ export function applyAction(
     // focus buffs are spent: attacking into a Bulwark used to burn your Focus
     // and your War Cry for zero damage, which made the counter feel like a bug.
     // The buff survives to be spent on the next swing instead.
+    // Bulwark absorbs whole attacks and stacks; checked alongside block for
+    // the same reason — the attacker's buffs must survive being turned aside.
+    if (foe.bulwarks && foe.bulwarks > 0) {
+      foe.bulwarks -= 1;
+      s.log.push(`${theirs.name} did not let the blow land. ${foe.bulwarks} left.`);
+      s.turn = foe.userId;
+      s.round += 1;
+      if (s.log.length > 60) s.log = s.log.slice(-60);
+      return { state: s, finished: false };
+    }
     if (foe.block) {
       foe.block = false;
       s.log.push(`${theirs.name} turned the blow aside completely.`);
@@ -505,6 +571,8 @@ export function applyAction(
     // Ascend is a lasting, side-wide multiplier, so it applies before the
     // one-shot buffs rather than competing with them.
     if (me.atkBonus) dmg *= 1 + me.atkBonus / 100;
+    // One-shot weakening from an enemy stagger, spent whether it kills or not.
+    if (me.weaken) { dmg *= 1 - Math.min(90, me.weaken) / 100; me.weaken = undefined; }
     if (me.focus) {
       dmg *= 1.75;
       me.focus = false;
@@ -546,6 +614,17 @@ export function applyAction(
    * two of THEIRS rather than two half-turns. The doom is resolved here too:
    * it landing is the point, so nothing in the branch above can cancel it.
    */
+  // Bleed ticks on the side that was poisoned, at the end of the poisoner's
+  // turn, so "each of your turns" in the card text is literally what happens.
+  if (foe.bleed) {
+    const v = foe.active >= 0 ? foe.fighters[foe.active] : undefined;
+    if (v && v.hp > 0) {
+      const t = Math.max(1, Math.round((v.maxHp * foe.bleed.pct) / 100));
+      v.hp = Math.max(0, v.hp - t);
+      s.log.push(`${v.name} lost ${t} to ${foe.bleed.from}.`);
+      if (v.hp === 0) { s.log.push(`${v.name} fell.`); foe.active = -1; }
+    }
+  }
   if (me.sealTurns && me.sealTurns > 0) {
     me.sealTurns -= 1;
     if (me.sealTurns === 0) s.log.push(`${me.username} can play supports again.`);

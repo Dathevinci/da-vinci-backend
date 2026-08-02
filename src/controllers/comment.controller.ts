@@ -32,6 +32,21 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     if (search) where.content = { contains: search, mode: 'insensitive' };
     if (mediaOnly) where.mediaUrl = { not: null };
 
+    // ── FORUM ──────────────────────────────────────────────────────────────
+    // `forum=true` means standalone posts: the ones not attached to any anime,
+    // manhwa or novel. Without this the community feed would also pull every
+    // episode and chapter comment on the site, which is a different thing
+    // entirely and would bury the forum in reading chatter.
+    const forum = req.query.forum === 'true';
+    const tag = req.query.tag as string | undefined;
+    if (forum) {
+      where.animeId = null;
+      where.mangaId = null;
+      where.chapterId = null;
+      where.novelId = null;
+    }
+    if (tag && tag !== 'All') where.tag = tag;
+
     // To keep threads intact, paginate only root comments unless searching/filtering
     if (!search && !mediaOnly) {
        where.parentId = null;
@@ -157,9 +172,12 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+/** The only topics a post may carry. Anything else is stored as untagged. */
+export const FORUM_TAGS = ["General", "Discussion", "Art", "Theory", "News", "Question", "Spoiler", "Meme"];
+
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl } = req.body;
+    const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl, title, tag } = req.body;
 
     /**
      * A post needs an author and SOMETHING to show — text or media, not
@@ -190,6 +208,11 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
         novelTitle: novelTitle || null,
         parentId: parentId ? parentId : null,
         mediaUrl: mediaUrl || null,
+        // Trimmed and capped here, not just in the composer — the client is not
+        // the length check, and a 30-char field is the only thing keeping a
+        // headline from becoming a second body.
+        title: typeof title === "string" && title.trim() ? title.trim().slice(0, 30) : null,
+        tag: FORUM_TAGS.includes(tag) ? tag : null,
       },
       /**
        * Must mirror getComments' shape exactly. The client prepends this object
@@ -514,3 +537,28 @@ export const togglePinComment = async (req: Request, res: Response, next: NextFu
 };
 
 
+
+// ── GET /api/comments/topics ──────────────────────────────────────────────
+// Post counts per topic for the forum sidebar. A groupBy is one query; the
+// alternative is fetching every post just to count them client-side, which
+// gets worse with every post ever written.
+export const getForumTopics = async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    const base = { animeId: null, mangaId: null, chapterId: null, novelId: null, parentId: null };
+    const [rows, total] = await Promise.all([
+      prisma.comment.groupBy({ by: ["tag"], where: base, _count: { _all: true } }),
+      prisma.comment.count({ where: base }),
+    ]);
+    const counts: Record<string, number> = {};
+    for (const r of rows) if (r.tag) counts[r.tag] = r._count._all;
+    res.json({
+      success: true,
+      data: {
+        total,
+        topics: FORUM_TAGS.map((t) => ({ tag: t, count: counts[t] || 0 })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

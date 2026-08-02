@@ -119,6 +119,11 @@ model Comment {
 
   parentId  String?  // Optional: references another comment
   mediaUrl  String?  // Optional: attached image/GIF URL
+  // Forum fields. A comment with NO anime/manga/novel id and no parent is a
+  // standalone forum post; these give it a headline and a topic. Both nullable
+  // so every existing comment stays exactly as it is.
+  title     String?  // forum post headline, max 30 chars
+  tag       String?  // General | Discussion | Art | Theory | News | Question | Spoiler | Meme
   content   String
   isPinned  Boolean  @default(false)
   blessed   Boolean  @default(false) // an admin/lead-dev granted this comment a Divine Blessing

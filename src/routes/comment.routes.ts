@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { getComments, createComment, deleteComment, voteComment, editComment, togglePinComment, tipComment, blessComment } from "../controllers/comment.controller";
+import { getComments, createComment, deleteComment, voteComment, editComment, togglePinComment, tipComment, blessComment, getForumTopics } from "../controllers/comment.controller";
 
 const router = Router();
 
+router.get("/topics", getForumTopics);
 router.get("/", getComments);
 router.post("/", createComment);
 router.delete("/:id", deleteComment);

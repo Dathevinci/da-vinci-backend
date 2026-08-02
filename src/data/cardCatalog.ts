@@ -167,6 +167,15 @@ export const CARDS: Record<string, CardDef> = {
   card_grin:        { id: "card_grin",        name: "The Grin in the Dark",    rarity: "legendary", set: "Requiem", hue: 280, motif: "mask",  flavor: "You do not find it. It notices you." },
   card_drownedgate: { id: "card_drownedgate", name: "The Drowned Gate",        rarity: "legendary", set: "Requiem", hue: 220, motif: "gate",  flavor: "The shrine went under mid-prayer, and the water finished it." },
 
+  // ── Requiem, second movement — seven more chases, same rules ──
+  card_awakening:   { id: "card_awakening",   name: "What Woke Up",            rarity: "legendary", set: "Requiem", hue: 225, motif: "dawn",  flavor: "The lightning did not strike him. It answered." },
+  card_shattered:   { id: "card_shattered",   name: "The Shattered Oath",      rarity: "legendary", set: "Requiem", hue: 275, motif: "blade", flavor: "Every promise breaks the same way: all at once." },
+  card_unchained:   { id: "card_unchained",   name: "The Unchained",           rarity: "legendary", set: "Requiem", hue: 330, motif: "path",  flavor: "They measured the shackles for someone who agreed to wear them." },
+  card_vessel:      { id: "card_vessel",      name: "The Willing Vessel",      rarity: "legendary", set: "Requiem", hue: 0,   motif: "mask",  flavor: "It knocked. He answered. Neither will say who invited whom." },
+  card_wheel:       { id: "card_wheel",       name: "The Turning Wheel",       rarity: "legendary", set: "Requiem", hue: 12,  motif: "seal",  flavor: "Whatever you bring, bring it once. It learns." },
+  card_ashgarden:   { id: "card_ashgarden",   name: "The Ash Garden",          rarity: "legendary", set: "Requiem", hue: 30,  motif: "ember", flavor: "The shrine burned for three days. He tended nothing else." },
+  card_floodwalker: { id: "card_floodwalker", name: "He Who Walks the Flood",  rarity: "legendary", set: "Requiem", hue: 358, motif: "sea",   flavor: "The tide came in red, and did not go out again." },
+
   // ── Event (limited; NOT in normal packs) ──
   card_founder:    { id: "card_founder",    name: "The Founder's Seal", rarity: "event", set: "Genesis", hue: 290, motif: "seal", flavor: "Given to those who were here at the beginning." },
 };
@@ -504,7 +513,14 @@ export type DomainKind =
   | "chains"        // the enemy simply cannot attack for a span
   | "monarch"       // your fallen lend their strength to the living
   | "terror"        // the thing standing opposite loses its nerve, and its health
-  | "abyss";        // for a span, damage dealt to you comes back on the dealer
+  | "abyss"         // for a span, damage dealt to you comes back on the dealer
+  | "tempest"       // three strikes in one breath on whoever stands opposite
+  | "shatter"       // breaks every protection the other side holds, then hits
+  | "unchained"     // sheds every affliction on your side; the links lash back
+  | "vessel"        // takes a piece of the enemy's strength, permanently
+  | "adapt"         // lasting guard — your side sheds part of every blow
+  | "wildfire"      // burns the whole enemy line, and the fire stays
+  | "floodtide";    // drowns the card opposite and feeds your whole line
 
 export interface DomainDef {
   name: string;
@@ -578,6 +594,36 @@ export const DOMAINS: Record<string, DomainDef> = {
   card_drownedgate: {
     name: "The Water Remembers", kind: "abyss", base: 2, step: 1,
     text: (p) => `For the enemy's next ${p} attack${p === 1 ? "" : "s"}, half of what they deal comes straight back on them.`,
+  },
+
+  // ── The second movement ──
+  card_awakening: {
+    name: "The Hour It Woke", kind: "tempest", base: 40, step: 12,
+    text: (p) => `Three strikes in one breath, each at ${p}% ATK, on whoever stands opposite.`,
+  },
+  card_shattered: {
+    name: "Everything Breaks", kind: "shatter", base: 60, step: 20,
+    text: (p) => `Shatter every ward, block and bulwark the other side holds — then strike for ${p}% ATK.`,
+  },
+  card_unchained: {
+    name: "The Chains Come Off", kind: "unchained", base: 70, step: 25,
+    text: (p) => `Shed every bleed, chain, seal and doom on your side. The broken links lash for ${p}% ATK.`,
+  },
+  card_vessel: {
+    name: "Make Room", kind: "vessel", base: 25, step: 10,
+    text: (p) => `Take ${p}% of the enemy active card's ATK. Yours now, permanently.`,
+  },
+  card_wheel: {
+    name: "It Adapts", kind: "adapt", base: 15, step: 7,
+    text: (p) => `Your side sheds ${p}% of every incoming blow for the rest of the duel.`,
+  },
+  card_ashgarden: {
+    name: "The Garden Alight", kind: "wildfire", base: 30, step: 10,
+    text: (p) => `Every enemy card burns for ${p}% ATK at once — and the one standing keeps burning.`,
+  },
+  card_floodwalker: {
+    name: "The Tide Comes In", kind: "floodtide", base: 65, step: 20,
+    text: (p) => `The flood takes ${p}% ATK from the card opposite and feeds every card you have.`,
   },
 };
 

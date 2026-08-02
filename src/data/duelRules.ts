@@ -559,6 +559,65 @@ export function applyAction(
       } else if (k === "abyss") {
         me.reflectTurns = (me.reflectTurns || 0) + p;
         s.log.push(`The water remembers — for ${me.reflectTurns} attack${me.reflectTurns === 1 ? "" : "s"}, what lands on ${me.username} comes back on the dealer.`);
+      } else if (k === "tempest") {
+        if (!target) { s.log.pop(); return { state, finished: false }; }
+        // Three strikes as ONE resolution — a single number in the log, not
+        // three lines, because the whole point is one breath.
+        const total = Math.max(3, Math.round(self.atk * (p / 100)) * 3);
+        target.hp = Math.max(0, target.hp - total);
+        s.log.push(`Three strikes in one breath — ${target.name} took ${total}.`);
+      } else if (k === "shatter") {
+        const had = (foe.shield ? 1 : 0) + (foe.block ? 1 : 0) + (foe.bulwarks || 0) + ((foe.guardPct || 0) > 0 ? 1 : 0);
+        foe.shield = false; foe.block = false; foe.bulwarks = 0; foe.guardPct = 0;
+        if (!target) { s.log.pop(); return { state, finished: false }; }
+        const hit = Math.max(1, Math.round(self.atk * (p / 100)));
+        target.hp = Math.max(0, target.hp - hit);
+        s.log.push(had > 0
+          ? `Every protection ${foe.username} held shattered at once — and ${target.name} took ${hit}.`
+          : `${target.name} took ${hit}. There was nothing left to break first.`);
+      } else if (k === "unchained") {
+        const afflicted = !!(me.bleed || me.chainTurns || me.sealTurns || me.doom || me.atkDown || me.weaken);
+        me.bleed = undefined; me.chainTurns = 0; me.sealTurns = 0;
+        me.doom = undefined; me.atkDown = undefined; me.weaken = 0;
+        if (!target) { s.log.pop(); return { state, finished: false }; }
+        const lash = Math.max(1, Math.round(self.atk * (p / 100)));
+        target.hp = Math.max(0, target.hp - lash);
+        s.log.push(afflicted
+          ? `${me.username} shed every chain on them — and the broken links lashed ${target.name} for ${lash}.`
+          : `The chains swung free — ${target.name} took ${lash}.`);
+      } else if (k === "vessel") {
+        if (!target) { s.log.pop(); return { state, finished: false }; }
+        // Written on the FIGHTERS, like empower: it survives falls, revives,
+        // everything. Floored so a card is never stripped to nothing.
+        const steal = Math.max(1, Math.round((target.atk * p) / 100));
+        target.atk = Math.max(1, target.atk - steal);
+        self.atk += steal;
+        s.log.push(`${self.name} took ${steal} ATK out of ${target.name}'s hands. It is not giving it back.`);
+      } else if (k === "adapt") {
+        // Additive with the guard skill, capped — two turtles stack, but the
+        // wall never passes 60% or attacks would stop mattering at all.
+        me.guardPct = Math.min(60, (me.guardPct || 0) + p);
+        s.log.push(`${me.username}'s side adapts — ${me.guardPct}% of every blow is shed, for the rest of the duel.`);
+      } else if (k === "wildfire") {
+        const living = foe.fighters.filter((f) => f.hp > 0);
+        if (living.length === 0) { s.log.pop(); return { state, finished: false }; }
+        const each = Math.max(1, Math.round(self.atk * (p / 100)));
+        for (const f of living) f.hp = Math.max(0, f.hp - each);
+        // The fire stays: a standing bleed, never downgrading one already
+        // burning hotter (the bloodmoon lesson).
+        foe.bleed = { pct: Math.max(foe.bleed?.pct ?? 0, 6), from: ability.def.name };
+        s.log.push(`The garden went up — every card opposite took ${each}, and the fire stayed.`);
+      } else if (k === "floodtide") {
+        if (!target) { s.log.pop(); return { state, finished: false }; }
+        // Heals what was actually TAKEN, split across your living line — the
+        // carrion rule: the tide can only carry what was there.
+        const surge = Math.max(1, Math.round(self.atk * (p / 100)));
+        const taken = Math.min(surge, target.hp);
+        target.hp = Math.max(0, target.hp - surge);
+        const mineLiving = me.fighters.filter((f) => f.hp > 0);
+        const share = Math.max(1, Math.round(taken / Math.max(1, mineLiving.length)));
+        for (const f of mineLiving) f.hp = Math.min(f.maxHp, f.hp + share);
+        s.log.push(`The tide took ${taken} from ${target.name} and fed the line ${share} each.`);
       } else {
         s.log.pop();
         return { state, finished: false };

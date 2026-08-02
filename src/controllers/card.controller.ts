@@ -697,6 +697,91 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+/**
+ * POST /api/cards/attune   body { userId, cardId }
+ *
+ * Spend a DUPLICATE copy to advance that card's skill or domain one rank,
+ * paying no shards at all.
+ *
+ * This is the answer to what extra copies are for. Dusting was the only thing
+ * to do with them, which meant every duplicate of a card you actually play was
+ * worth the same as a duplicate of one you don't — a flat rate that quietly
+ * punished pulling the card you were chasing. Now a spare copy of something
+ * you fight with feeds the thing that makes it worth fighting with, and dust
+ * remains the right answer for everything else.
+ *
+ * Deliberately NOT a shortcut past the ceiling: the rank cap still applies, so
+ * this changes what a duplicate is worth, never how strong a card can get.
+ */
+export const attuneCard = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardId } = (req.body || {}) as { userId?: string; cardId?: string };
+    if (!ownerGuard(req, res, userId)) return;
+    if (!cardId) return res.status(400).json({ success: false, message: "Missing cardId." });
+
+    const def = CARDS[cardId];
+    if (!def) return res.status(404).json({ success: false, message: "No such card." });
+    const ability = abilityFor(cardId);
+    if (!ability) {
+      return res.status(400).json({ success: false, message: `${def.name} has no ability to advance.` });
+    }
+
+    const row = await prisma.userCard.findUnique({
+      where: { userId_cardId: { userId: userId!, cardId } },
+      select: { count: true, skillLevel: true, hibernating: true },
+    });
+    if (!row) return res.status(404).json({ success: false, message: "You don't own that card." });
+    if (row.hibernating) {
+      return res.status(400).json({ success: false, message: `${def.name} is asleep. Wake it first.` });
+    }
+    if (row.count < 2) {
+      return res.status(400).json({ success: false, message: `You need a spare copy of ${def.name} to attune it.` });
+    }
+    const level = row.skillLevel || 1;
+    if (level >= ability.max) {
+      return res.status(400).json({ success: false, message: `${ability.def.name} is already at its ceiling.` });
+    }
+
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        // Both guards are conditional and in one op each, so two fast clicks
+        // can't consume one copy twice or buy two ranks off a single spare.
+        const spent = await tx.userCard.updateMany({
+          where: { userId, cardId, count: { gte: 2 }, skillLevel: level },
+          data: { count: { decrement: 1 }, skillLevel: { increment: 1 } },
+        });
+        if (spent.count === 0) throw new CardError(409, "That copy is already being attuned — try again in a moment.");
+        const after = await tx.userCard.findUnique({
+          where: { userId_cardId: { userId: userId!, cardId } },
+          select: { count: true, skillLevel: true },
+        });
+        return { count: after?.count ?? 0, skillLevel: after?.skillLevel ?? level + 1 };
+      });
+
+      const power = ability.type === "domain"
+        ? domainPower(ability.def, out.skillLevel)
+        : skillPower(ability.def, out.skillLevel);
+
+      res.json({
+        success: true,
+        data: {
+          ...out,
+          cardId,
+          abilityType: ability.type,
+          skillName: ability.def.name,
+          power,
+          text: ability.def.text(power),
+        },
+      });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const upgradeCard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, cardId } = (req.body || {}) as { userId?: string; cardId?: string };

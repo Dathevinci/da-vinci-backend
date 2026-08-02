@@ -10,7 +10,7 @@
 // choice matter, short enough to finish while you're still looking at it.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { CARDS, CardRarity, levelMult } from "./cardCatalog";
+import { CARDS, CardRarity, levelMult, abilityFor, skillPower, domainPower } from "./cardCatalog";
 
 export const DECK_SIZE = 5;
 
@@ -57,6 +57,8 @@ export interface Fighter {
   atk: number;
   foil: boolean;
   level?: number;
+  /** Rank of this copy's skill or domain. Absent means rank 1. */
+  skillLevel?: number;
 }
 
 export interface Side {
@@ -70,6 +72,15 @@ export interface Side {
   block?: boolean;         // next incoming attack negated outright
   focusMult?: number;      // multiplier from a support card's focus effect
   usedSupports?: string[]; // support card ids already played THIS duel
+
+  // ── ABILITY STATE ── set by skills and domains, read by the damage maths.
+  usedAbilities?: string[];  // cardIds whose skill/domain has already fired
+  guardPct?: number;         // percent shed from every incoming blow, lasting
+  nullifyTurns?: number;     // incoming damage ignored entirely, counts down
+  atkBonus?: number;         // percent added to this side's attacks, lasting
+  sealTurns?: number;        // this side cannot play supports, counts down
+  /** A doom that lands on this side in `turns`, for `power` percent of ATK. */
+  doom?: { turns: number; power: number; from: string };
 }
 
 export interface DuelState {
@@ -80,7 +91,7 @@ export interface DuelState {
   round: number;
 }
 
-export function buildFighter(cardId: string, foil: boolean, level = 1): Fighter | null {
+export function buildFighter(cardId: string, foil: boolean, level = 1, skillLevel = 1): Fighter | null {
   const def = CARDS[cardId];
   // Support cards are played, never fielded — they have no stat line, so
   // letting one into a deck would field a fighter with undefined HP.
@@ -100,6 +111,7 @@ export function buildFighter(cardId: string, foil: boolean, level = 1): Fighter 
     atk: Math.round(base.atk * mult),
     foil,
     level,
+    skillLevel,
   };
 }
 
@@ -111,15 +123,18 @@ export function makeSide(
   items: Record<string, number>,
   // cardId -> level. Absent means level 1, so an old duel or a caller that
   // doesn't know about levels still builds exactly the fighters it used to.
-  levels: Record<string, number> = {}
+  levels: Record<string, number> = {},
+  // cardId -> skill/domain rank. Same contract as `levels`: absent means 1,
+  // so an in-flight duel from before abilities existed still builds.
+  skillLevels: Record<string, number> = {}
 ): Side {
   const fighters = deck
-    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1))
+    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1, skillLevels[id] || 1))
     .filter((f): f is Fighter => !!f);
   // active = -1 means NOBODY is on the field yet. The arena opens empty and
   // your first move is genuinely choosing who walks in, instead of the engine
   // having silently already picked for you.
-  return { userId, username, fighters, active: -1, items, shield: false, focus: false, usedSupports: [] };
+  return { userId, username, fighters, active: -1, items, shield: false, focus: false, usedSupports: [], usedAbilities: [] };
 }
 
 function livingIndex(side: Side): number {
@@ -161,7 +176,10 @@ export function applyAction(
     | { type: "item"; item: ItemId }
     // `target` is the fighter a support card was dropped ON. Only heal and
     // revive care; the rest are side-wide and ignore it.
-    | { type: "support"; cardId: string; target?: number },
+    | { type: "support"; cardId: string; target?: number }
+    // The card on the field uses its own skill or domain. Once per duel per
+    // card, and it costs the turn like everything else.
+    | { type: "ability" },
   roll: number
 ): { state: DuelState; finished: boolean; winnerId?: string } {
   const meKey = sideOf(state, userId);
@@ -216,6 +234,8 @@ export function applyAction(
     if (!eff) return { state, finished: false };
     // Held in a local so the narrowing survives — `usedSupports` is optional on
     // Side, and property narrowing across the branches below is fragile.
+    // Sealed by an enemy domain — the card is not spent, the play is refused.
+    if (me.sealTurns && me.sealTurns > 0) return { state, finished: false };
     const used: string[] = me.usedSupports || (me.usedSupports = []);
     if (used.includes(action.cardId)) return { state, finished: false };
     /**
@@ -290,6 +310,148 @@ export function applyAction(
     return { state: s, finished: false };
   }
 
+  /* ── ABILITY ── the card on the field uses its skill or its domain ───────
+   *
+   * Once per duel PER CARD, tracked on the side rather than the fighter so it
+   * survives the card falling and being revived — a domain that could be
+   * re-cast by dying and coming back would be the whole game.
+   *
+   * Skills touch numbers; domains rewrite a rule. That split is why they are
+   * resolved in two blocks here rather than one table of multipliers.
+   */
+  if (action.type === "ability") {
+    if (me.active < 0) return { state, finished: false };
+    const self = me.fighters[me.active];
+    if (!self || self.hp <= 0) return { state, finished: false };
+
+    const fired: string[] = me.usedAbilities || (me.usedAbilities = []);
+    if (fired.includes(self.cardId)) return { state, finished: false };
+
+    const ability = abilityFor(self.cardId);
+    if (!ability) return { state, finished: false };
+
+    const rank = self.skillLevel || 1;
+    const target = foe.active >= 0 ? foe.fighters[foe.active] : undefined;
+
+    if (ability.type === "skill") {
+      const p = skillPower(ability.def, rank);
+      const k = ability.def.kind;
+
+      // Anything that needs someone to hit is refused rather than wasted.
+      if ((k === "burst" || k === "drain" || k === "execute") && !target) {
+        return { state, finished: false };
+      }
+
+      if (k === "burst") {
+        const dealt = Math.max(1, Math.round(self.atk * (p / 100)));
+        target!.hp = Math.max(0, target!.hp - dealt);
+        s.log.push(`${self.name} used ${ability.def.name} — ${dealt} to ${target!.name}.`);
+      } else if (k === "drain") {
+        const dealt = Math.max(1, Math.round(self.atk * (p / 100)));
+        target!.hp = Math.max(0, target!.hp - dealt);
+        const back = Math.round(dealt / 2);
+        self.hp = Math.min(self.maxHp, self.hp + back);
+        s.log.push(`${self.name} used ${ability.def.name} — ${dealt} to ${target!.name}, ${back} back.`);
+      } else if (k === "execute") {
+        // A threshold finisher, not a nuke: it only ever converts a nearly-won
+        // exchange, so it can't steal a fight from full health.
+        if (target!.hp > (target!.maxHp * p) / 100) {
+          s.log.push(`${self.name} reached for ${ability.def.name}, but ${target!.name} was still standing too well.`);
+        } else {
+          target!.hp = 0;
+          s.log.push(`${self.name} used ${ability.def.name} — ${target!.name} was finished outright.`);
+        }
+      } else if (k === "guard") {
+        // Stacks additively but is capped: 100% shed would be unkillable.
+        me.guardPct = Math.min(75, (me.guardPct || 0) + p);
+        s.log.push(`${self.name} used ${ability.def.name} — this side now sheds ${me.guardPct}% of every blow.`);
+      } else if (k === "rally") {
+        let healed = 0;
+        for (const f of me.fighters) {
+          if (f.hp > 0 && f.hp < f.maxHp) {
+            const b = f.hp;
+            f.hp = Math.min(f.maxHp, f.hp + Math.round((f.maxHp * p) / 100));
+            healed += f.hp - b;
+          }
+        }
+        if (healed === 0) return { state, finished: false };
+        s.log.push(`${self.name} used ${ability.def.name} — the line recovered ${healed} HP.`);
+      } else {
+        return { state, finished: false };
+      }
+    } else {
+      const p = domainPower(ability.def, rank);
+      const k = ability.def.kind;
+      s.log.push(`▲ ${me.username} expanded a domain — ${ability.def.name}.`);
+
+      if (k === "revival") {
+        const fallen = me.fighters.filter((f) => f.hp <= 0);
+        if (fallen.length === 0) {
+          // Refuse rather than burn the once-per-duel use on nothing.
+          s.log.pop();
+          return { state, finished: false };
+        }
+        for (const f of fallen) f.hp = Math.max(1, Math.round((f.maxHp * p) / 100));
+        s.log.push(`${fallen.length} fallen card${fallen.length === 1 ? "" : "s"} stood back up.`);
+      } else if (k === "massacre") {
+        const living = foe.fighters.filter((f) => f.hp > 0);
+        if (living.length === 0) { s.log.pop(); return { state, finished: false }; }
+        const each = Math.max(1, Math.round(self.atk * (p / 100)));
+        for (const f of living) f.hp = Math.max(0, f.hp - each);
+        s.log.push(`Every card opposite took ${each}.`);
+      } else if (k === "nullify") {
+        me.nullifyTurns = (me.nullifyTurns || 0) + p;
+        s.log.push(`Nothing will reach ${me.username} for ${me.nullifyTurns} turns.`);
+      } else if (k === "siphon") {
+        const living = foe.fighters.filter((f) => f.hp > 0);
+        if (living.length === 0) { s.log.pop(); return { state, finished: false }; }
+        let taken = 0;
+        for (const f of living) {
+          const t = Math.max(1, Math.round((f.hp * p) / 100));
+          f.hp = Math.max(0, f.hp - t);
+          taken += t;
+        }
+        self.hp = Math.min(self.maxHp, self.hp + taken);
+        s.log.push(`${taken} HP drained out of the other line and into ${self.name}.`);
+      } else if (k === "ascend") {
+        me.atkBonus = (me.atkBonus || 0) + p;
+        s.log.push(`${me.username}'s whole line strikes ${me.atkBonus}% harder for the rest of the duel.`);
+      } else if (k === "judgement") {
+        const living = foe.fighters.filter((f) => f.hp > 0).sort((a, b) => a.hp - b.hp);
+        if (living.length === 0) { s.log.pop(); return { state, finished: false }; }
+        const felled = living.slice(0, Math.max(1, p));
+        for (const f of felled) f.hp = 0;
+        s.log.push(`${felled.map((f) => f.name).join(", ")} fell where they stood.`);
+      } else if (k === "seal") {
+        foe.sealTurns = (foe.sealTurns || 0) + p;
+        s.log.push(`${foe.username} cannot play a support for ${foe.sealTurns} turns.`);
+      } else if (k === "inevitability") {
+        // Lands in three turns no matter what. Stored on the SIDE it will hit.
+        foe.doom = { turns: 3, power: p, from: self.name };
+        s.log.push(`Something is coming for ${foe.username}. Three turns.`);
+      } else {
+        s.log.pop();
+        return { state, finished: false };
+      }
+    }
+
+    fired.push(self.cardId);
+    s.turn = foe.userId;
+    s.round += 1;
+
+    // A domain can empty a whole line, so the duel may be over right here.
+    const foeDown = foe.fighters.every((f) => f.hp <= 0);
+    const meDown = me.fighters.every((f) => f.hp <= 0);
+    if (foe.active >= 0 && foe.fighters[foe.active]?.hp <= 0) foe.active = -1;
+    if (s.log.length > 60) s.log = s.log.slice(-60);
+    if (foeDown || meDown) {
+      const winnerId = foeDown ? me.userId : foe.userId;
+      s.log.push(`${foeDown ? me.username : foe.username} won the duel.`);
+      return { state: s, finished: true, winnerId };
+    }
+    return { state: s, finished: false };
+  }
+
   // A fallen card leaves the field EMPTY rather than the next one sliding in
   // automatically. Whoever lost a card chooses their own replacement on their
   // own turn — having the engine pick for them was the thing that made the
@@ -340,6 +502,9 @@ export function applyAction(
     }
     // Damage: base attack, +/-15% variance, focus bonus, shield reduction.
     let dmg = mine.atk * (0.85 + roll * 0.3);
+    // Ascend is a lasting, side-wide multiplier, so it applies before the
+    // one-shot buffs rather than competing with them.
+    if (me.atkBonus) dmg *= 1 + me.atkBonus / 100;
     if (me.focus) {
       dmg *= 1.75;
       me.focus = false;
@@ -352,6 +517,19 @@ export function applyAction(
       dmg *= 0.5;
       foe.shield = false;
     }
+    // A lasting guard, on top of any one-shot ward. Capped at 75% where it is
+    // set, so this can never reach zero.
+    if (foe.guardPct) dmg *= 1 - foe.guardPct / 100;
+    // Nullify beats everything, including the Math.max(1) floor below: the
+    // domain says nothing reaches you, so nothing does.
+    if (foe.nullifyTurns && foe.nullifyTurns > 0) {
+      foe.nullifyTurns -= 1;
+      s.log.push(`The blow found nothing to land on. ${foe.nullifyTurns} turns remain.`);
+      s.turn = foe.userId;
+      s.round += 1;
+      if (s.log.length > 60) s.log = s.log.slice(-60);
+      return { state: s, finished: false };
+    }
     const dealt = Math.max(1, Math.round(dmg));
     theirs.hp = Math.max(0, theirs.hp - dealt);
     s.log.push(`${mine.name} struck ${theirs.name} for ${dealt}.`);
@@ -363,10 +541,42 @@ export function applyAction(
     }
   }
 
-  // Win check
+  /* ── LASTING EFFECTS TICK ──────────────────────────────────────────────
+   * Counted down at the END of the acting player's turn, so "two turns" means
+   * two of THEIRS rather than two half-turns. The doom is resolved here too:
+   * it landing is the point, so nothing in the branch above can cancel it.
+   */
+  if (me.sealTurns && me.sealTurns > 0) {
+    me.sealTurns -= 1;
+    if (me.sealTurns === 0) s.log.push(`${me.username} can play supports again.`);
+  }
+  for (const side of [me, foe]) {
+    if (!side.doom) continue;
+    side.doom.turns -= 1;
+    if (side.doom.turns > 0) continue;
+    const victim = side.active >= 0 ? side.fighters[side.active] : side.fighters.find((f) => f.hp > 0);
+    if (victim) {
+      // Reads off the doom's stored power, not the caster's current ATK — the
+      // card that set it may be dead by now, and it lands regardless.
+      const hit = Math.max(1, Math.round((victim.maxHp * side.doom.power) / 100));
+      victim.hp = Math.max(0, victim.hp - hit);
+      s.log.push(`It arrived. ${victim.name} took ${hit} from ${side.doom.from}.`);
+      if (victim.hp === 0) {
+        s.log.push(`${victim.name} fell.`);
+        if (side.active >= 0 && side.fighters[side.active]?.hp <= 0) side.active = -1;
+      }
+    }
+    side.doom = undefined;
+  }
+
+  // Win check — after the tick, because a doom can end the duel.
   if (sideDefeated(foe)) {
     s.log.push(`${me.username} wins the duel.`);
     return { state: s, finished: true, winnerId: me.userId };
+  }
+  if (sideDefeated(me)) {
+    s.log.push(`${foe.username} wins the duel.`);
+    return { state: s, finished: true, winnerId: foe.userId };
   }
 
   // Pass the turn

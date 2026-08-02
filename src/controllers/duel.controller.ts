@@ -245,7 +245,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },
-      select: { cardId: true, foil: true, hibernating: true, level: true },
+      select: { cardId: true, foil: true, hibernating: true, level: true, skillLevel: true },
     });
     if (ownedRows.filter((r) => deck.includes(r.cardId)).length !== deck.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that deck." });
@@ -264,18 +264,25 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     // upgrade would be a number on a card page that never reached a fight.
     const challengerRows = await prisma.userCard.findMany({
       where: { userId: duel.challengerId, cardId: { in: duel.challengerDeck } },
-      select: { cardId: true, foil: true, level: true },
+      select: { cardId: true, foil: true, level: true, skillLevel: true },
     });
     const challengerLevels: Record<string, number> = {};
     for (const r of challengerRows) challengerLevels[r.cardId] = r.level || 1;
     const myLevels: Record<string, number> = {};
     for (const r of ownedRows) myLevels[r.cardId] = r.level || 1;
+    // Ability ranks travel with the fighter for the same reason levels do: a
+    // rank that only changed a number on the card page would be a shard sink
+    // that never reached a fight.
+    const challengerSkills: Record<string, number> = {};
+    for (const r of challengerRows) challengerSkills[r.cardId] = (r as any).skillLevel || 1;
+    const mySkills: Record<string, number> = {};
+    for (const r of ownedRows) mySkills[r.cardId] = (r as any).skillLevel || 1;
 
     const stateObj: DuelState = {
       a: makeSide(duel.challengerId, duel.challengerName, duel.challengerDeck,
-        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels),
+        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels, challengerSkills),
       b: makeSide(duel.opponentId, duel.opponentName, deck,
-        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels),
+        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels, mySkills),
       turn: duel.challengerId, // challenger moves first
       log: [`${duel.opponentName} accepted the challenge.`],
       round: 1,
@@ -444,7 +451,8 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
       | { type: "deploy"; index: number }
       | { type: "attack"; index?: number }
       | { type: "item"; item: ItemId }
-      | { type: "support"; cardId: string; target?: number };
+      | { type: "support"; cardId: string; target?: number }
+      | { type: "ability" };
 
     if (action === "deploy") {
       if (!Number.isInteger(index)) {
@@ -471,6 +479,11 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
         // read it; the engine clamps an out-of-range value on its own.
         target: Number.isInteger(target) ? Number(target) : undefined,
       };
+    } else if (action === "ability") {
+      // No payload at all: WHICH ability fires is decided by whichever card is
+      // on the field, which the engine already knows. Taking a cardId here
+      // would let a hand-rolled request fire a card sitting on the bench.
+      act = { type: "ability" };
     } else {
       const item = action as ItemId;
       if (!ITEMS[item]) return res.status(400).json({ success: false, message: "Unknown action." });

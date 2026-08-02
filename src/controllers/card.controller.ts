@@ -7,6 +7,8 @@ import {
   CARDS,
   PACK_PRICE,
   PACK_SIZE,
+  PULL_SIZES,
+  PULL_PRICES,
   DUST_VALUE,
   CRAFT_COST,
   WAKE_COST,
@@ -44,6 +46,8 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         cards: Object.values(CARDS),
         packPrice: PACK_PRICE,
         packSize: PACK_SIZE,
+        pullSizes: PULL_SIZES,
+        pullPrices: PULL_PRICES,
         dustValue: DUST_VALUE,
         craftCost: CRAFT_COST,
         wakeCost: WAKE_COST,
@@ -153,10 +157,18 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
 // POST /api/cards/open-pack  body { userId }
 export const openPack = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId } = (req.body || {}) as { userId?: string };
+    const { userId, count } = (req.body || {}) as { userId?: string; count?: number };
     if (!ownerGuard(req, res, userId)) return;
 
-    const pulls = rollPack(PACK_SIZE); // roll BEFORE the tx — pure, no I/O
+    /**
+     * Pull size is chosen by the player. Only these three exist — a free-form
+     * count would let a client ask for a hundred cards, and the PRICE has to
+     * come from this table rather than from the request for the same reason.
+     */
+    const size = PULL_SIZES.includes(Number(count)) ? Number(count) : PACK_SIZE;
+    const price = PULL_PRICES[size] ?? PACK_PRICE;
+
+    const pulls = rollPack(size); // roll BEFORE the tx — pure, no I/O
     const free = await isStaffFree(userId!);
 
     try {
@@ -164,11 +176,11 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
         // Atomic AP debit: check + deduct in one op. count 0 = couldn't afford.
         if (!free) {
           const debit = await tx.user.updateMany({
-            where: { id: userId, arisePoints: { gte: PACK_PRICE } },
-            data: { arisePoints: { decrement: PACK_PRICE } },
+            where: { id: userId, arisePoints: { gte: price } },
+            data: { arisePoints: { decrement: price } },
           });
-          if (debit.count === 0) throw new CardError(402, `A pack costs ${PACK_PRICE.toLocaleString()} Arise Points — you don't have enough.`);
-          await tx.pointLog.create({ data: { userId: userId!, amount: -PACK_PRICE, reason: "card-pack" } });
+          if (debit.count === 0) throw new CardError(402, `That pull costs ${price.toLocaleString()} Arise Points — you don't have enough.`);
+          await tx.pointLog.create({ data: { userId: userId!, amount: -price, reason: `card-pack:x${size}` } });
         }
 
         // Grant each pull — upsert the per-card count so dupes stack.

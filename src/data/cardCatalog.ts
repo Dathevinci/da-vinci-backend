@@ -155,6 +155,22 @@ export const CRAFT_COST: Record<CardRarity, number> = {
 };
 
 /**
+ * PULL SIZES. A single is priced slightly above the per-card rate and the
+ * bigger pulls slightly below, so buying in bulk is the better deal without
+ * making a single pull feel like a punishment for being short on points.
+ *
+ * The list is closed on purpose: the size AND the price are both read from
+ * here rather than from the request, so a hand-rolled call can't ask for a
+ * hundred cards or name its own price.
+ */
+export const PULL_SIZES = [1, 3, PACK_SIZE];
+export const PULL_PRICES: Record<number, number> = {
+  1: 70,
+  3: 195,
+  [PACK_SIZE]: PACK_PRICE,
+};
+
+/**
  * CARD LEVELS — shard-bought power.
  *
  * Levels exist so shards keep mattering after you own everything, and so a

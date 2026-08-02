@@ -303,8 +303,9 @@ model UserCard {
   // (the duel sleep): a card asleep from a lost duel can still raid, and a
   // card dead in a dungeon can still duel. Two modes, two bodies.
   dgnHp      Int?    // current dungeon HP carried between runs; null = full
-  dgnInjured Boolean @default(false) // came home under 40% — fights at 70% max HP until healed
+  dgnInjured Boolean @default(false) // came home under 40% — BLOCKS dispatch until healed
   dgnDead    Boolean @default(false) // fell in a dungeon; revived with Arise Points, never deleted
+  dgnDeaths  Int     @default(0)     // lifetime death count — each one makes the NEXT revival dearer
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

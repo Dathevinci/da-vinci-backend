@@ -4,7 +4,7 @@ import { getActorId } from "../lib/jwt";
 import { isLeadDevFree } from "./card.controller";
 import { CARDS } from "../data/cardCatalog";
 import {
-  DUNGEONS, PARTY_MAX, INJURY_THRESHOLD, HEAL_COST_AP, REVIVE_COST_AP,
+  DUNGEONS, PARTY_MAX, INJURY_THRESHOLD, HEAL_COST_AP, reviveCost,
   DungeonState, DgnUnit, makeUnit, simulateFloor, partyPower,
 } from "../data/dungeonRules";
 
@@ -50,7 +50,7 @@ async function writeBackParty(tx: any, userId: string, party: DgnUnit[]): Promis
     if (u.hp <= 0) {
       await tx.userCard.updateMany({
         where: { userId, cardId: u.cardId },
-        data: { dgnDead: true, dgnHp: 0 },
+        data: { dgnDead: true, dgnHp: 0, dgnDeaths: { increment: 1 } },
       });
     } else {
       const injuredNow = u.hp < u.maxHp * INJURY_THRESHOLD;
@@ -86,7 +86,7 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
     const [rows, activeRun] = await Promise.all([
       prisma.userCard.findMany({
         where: { userId },
-        select: { cardId: true, count: true, foil: true, level: true, dgnHp: true, dgnInjured: true, dgnDead: true },
+        select: { cardId: true, count: true, foil: true, level: true, dgnHp: true, dgnInjured: true, dgnDead: true, dgnDeaths: true },
       }),
       prisma.dungeonRun.findFirst({ where: { userId, status: "RUNNING" }, orderBy: { createdAt: "desc" } }),
     ]);
@@ -95,6 +95,10 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
       .map((r) => ({
         cardId: r.cardId, count: r.count, foil: r.foil, level: r.level,
         dgnHp: r.dgnHp, dgnInjured: r.dgnInjured, dgnDead: r.dgnDead,
+        dgnDeaths: r.dgnDeaths,
+        // Priced PER CARD now: rarity base × how many times this exact card
+        // has already died. The client shows the number; this is the truth.
+        reviveCost: reviveCost(CARDS[r.cardId]?.rarity || "epic", r.dgnDeaths),
       }));
     res.json({
       success: true,
@@ -104,7 +108,6 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
         activeRun,
         partyMax: PARTY_MAX,
         healCost: HEAL_COST_AP,
-        reviveCost: REVIVE_COST_AP,
       },
     });
   } catch (error) { next(error); }
@@ -142,6 +145,16 @@ export const dispatch = async (req: Request, res: Response, next: NextFunction) 
       return res.status(400).json({
         success: false,
         message: `${dead.map((r) => CARDS[r.cardId]?.name || r.cardId).join(", ")} ${dead.length === 1 ? "is" : "are"} dead. Revive first.`,
+      });
+    }
+    // The spec's rule, adopted: an INJURY blocks the next dispatch. The card
+    // can still duel (that arena heals), but the dungeon door is shut until
+    // someone pays the infirmary or the injury is healed.
+    const hurt = rows.filter((r) => r.dgnInjured);
+    if (hurt.length) {
+      return res.status(400).json({
+        success: false,
+        message: `${hurt.map((r) => CARDS[r.cardId]?.name || r.cardId).join(", ")} ${hurt.length === 1 ? "is" : "are"} injured — heal before dispatching again.`,
       });
     }
 
@@ -349,16 +362,19 @@ export const reviveCard = async (req: Request, res: Response, next: NextFunction
     const unit = makeUnit(cardId!, row.level, row.foil, null, true);
     if (!unit) return res.status(400).json({ success: false, message: "That card can't raid at all." });
     const halfHp = Math.max(1, Math.round(unit.maxHp * 0.5));
+    // dgnDeaths was already incremented when it fell, so "prior deaths" for
+    // pricing THIS revival is deaths - 1: the first death pays the base.
+    const price = reviveCost(CARDS[cardId!]?.rarity || "epic", Math.max(0, (row.dgnDeaths ?? 1) - 1));
     const free = await isLeadDevFree(userId!);
     try {
       await prisma.$transaction(async (tx: any) => {
         if (!free) {
           const debit = await tx.user.updateMany({
-            where: { id: userId, arisePoints: { gte: REVIVE_COST_AP } },
-            data: { arisePoints: { decrement: REVIVE_COST_AP } },
+            where: { id: userId, arisePoints: { gte: price } },
+            data: { arisePoints: { decrement: price } },
           });
-          if (debit.count === 0) throw new DgnError(402, `A revival costs ${REVIVE_COST_AP} AP.`);
-          await tx.pointLog.create({ data: { userId: userId!, amount: -REVIVE_COST_AP, reason: `dungeon-revive:${cardId}` } });
+          if (debit.count === 0) throw new DgnError(402, `This revival costs ${price} AP.`);
+          await tx.pointLog.create({ data: { userId: userId!, amount: -price, reason: `dungeon-revive:${cardId}` } });
         }
         // Guarded on still-dead so a double-tap can't pay twice.
         const raised = await tx.userCard.updateMany({

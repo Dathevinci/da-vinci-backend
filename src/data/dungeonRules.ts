@@ -28,7 +28,21 @@ export const PARTY_MAX = 4;
 export const INJURY_THRESHOLD = 0.4;  // hp under this fraction of max on return
 export const INJURY_MAX_HP_MULT = 0.7;
 export const HEAL_COST_AP = 80;       // per card: full HP + injury cleared
-export const REVIVE_COST_AP = 500;    // per card: back from the dead at half HP
+
+/**
+ * Revival pricing — the spec's spine: rarity sets the base, and every death
+ * a SPECIFIC card has already suffered makes its next one dearer. A ★4 on
+ * its third death should genuinely hurt to bring back.
+ */
+export const REVIVE_BASE_AP: Record<string, number> = {
+  common: 150, rare: 250, epic: 400, legendary: 700, event: 500,
+};
+export function reviveCost(rarity: string, priorDeaths: number): number {
+  const base = REVIVE_BASE_AP[rarity] ?? 400;
+  return Math.round(base * (1 + 0.5 * Math.max(0, priorDeaths)));
+}
+/** @deprecated flat price kept so older clients render SOMETHING sane. */
+export const REVIVE_COST_AP = 500;
 export const MAX_FLOOR_ROUNDS = 40;   // a fight that stalls this long is a stand-off; treat as cleared
 export const DOMAIN_HP_TRIGGER = 0.4; // a legendary under this fraction expands in desperation
 

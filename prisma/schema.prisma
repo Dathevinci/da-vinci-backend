@@ -280,6 +280,8 @@ model CardListing {
 // A collectible card a user owns, with how many copies. `count > 1` = dupes,
 // which can be dusted into shards. Unique per (user, card) so counts live on
 // one row that upserts on every pull.
+// NOTE: skillLevel below is on UserCard — a skill belongs to YOUR copy of a
+// legendary, not to the card in the abstract, exactly like level does.
 model UserCard {
   id        String   @id @default(uuid())
   userId    String
@@ -292,6 +294,12 @@ model UserCard {
   // Shard-bought power. Levels raise ATK and HP in duels, so a common you
   // actually invested in can outfight a legendary nobody touched.
   level     Int      @default(1)
+  // Legendary skills level on their OWN shard track, separate from `level`.
+  // A card level raises ATK and HP; a skill level raises the one thing that
+  // card uniquely does, so a player chooses which to sink shards into rather
+  // than having the choice made for them. Meaningless on non-legendaries,
+  // which have no skill in the catalog.
+  skillLevel Int     @default(1)
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

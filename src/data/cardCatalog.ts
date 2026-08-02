@@ -319,3 +319,91 @@ export const SET_REWARDS: Record<string, SetReward> = {
 export function cardsInSet(set: string): string[] {
   return Object.values(CARDS).filter((c) => c.set === set).map((c) => c.id);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * LEGENDARY SKILLS
+ *
+ * Only legendaries carry one. That is the point: a skill is the reason a
+ * legendary is worth chasing beyond a bigger stat line, and giving every card
+ * one would make the word meaningless.
+ *
+ * Skills level SEPARATELY from the card, on their own shard track. A card
+ * level raises ATK and HP; a skill level raises the one thing that card
+ * uniquely does. Keeping the two apart means a player can choose what to sink
+ * shards into rather than having the decision made for them.
+ *
+ * Keyed by card id, never by name — the names above are editable copy and
+ * have already been rewritten once.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+export type SkillKind = "burst" | "drain" | "guard" | "rally" | "execute";
+
+export interface SkillDef {
+  name: string;
+  kind: SkillKind;
+  /** Effect strength at skill level 1, as a percent. */
+  base: number;
+  /** Added to `base` per level beyond the first. */
+  step: number;
+  /** One line, written so the number reads as the subject. */
+  text: (power: number) => string;
+}
+
+export const MAX_SKILL_LEVEL = 5;
+
+export const SKILLS: Record<string, SkillDef> = {
+  card_outergod: {
+    name: "Abyssal Gaze", kind: "drain", base: 140, step: 25,
+    text: (p) => `Deal ${p}% ATK and take back half of it as health.`,
+  },
+  card_gatekey: {
+    name: "Open the Way", kind: "execute", base: 30, step: 6,
+    text: (p) => `Finish any card already below ${p}% health outright.`,
+  },
+  card_leviathan: {
+    name: "Ten Fathoms", kind: "guard", base: 35, step: 7,
+    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
+  },
+  card_hollowtide: {
+    name: "The Sea Exhales", kind: "burst", base: 180, step: 30,
+    text: (p) => `Deal ${p}% ATK to whoever is standing opposite.`,
+  },
+  card_lastronin: {
+    name: "No Lord Remains", kind: "burst", base: 200, step: 35,
+    text: (p) => `Deal ${p}% ATK. Costs your turn, and it is worth it.`,
+  },
+  card_swordsaint: {
+    name: "Drawn at Dawn", kind: "execute", base: 35, step: 7,
+    text: (p) => `Finish any card already below ${p}% health outright.`,
+  },
+  card_secondwind: {
+    name: "Argue Well Enough", kind: "rally", base: 40, step: 9,
+    text: (p) => `Restore ${p}% of max health to your whole line.`,
+  },
+  card_longmorrow: {
+    name: "It Has Always Been Coming", kind: "burst", base: 160, step: 28,
+    text: (p) => `Deal ${p}% ATK, and again to the next card sent in.`,
+  },
+};
+
+export function skillFor(cardId: string): SkillDef | null {
+  return SKILLS[cardId] ?? null;
+}
+
+/** The skill's number at a given level. Level 1 is exactly `base`. */
+export function skillPower(def: SkillDef, level: number): number {
+  const l = Math.max(1, Math.min(MAX_SKILL_LEVEL, Math.floor(level || 1)));
+  return def.base + (l - 1) * def.step;
+}
+
+/**
+ * Shards to take a skill from `level` to `level + 1`.
+ *
+ * Deliberately steeper per step than upgradeCost() and capped five levels
+ * lower: there are only eight of these in the game, and a maxed skill should
+ * be something other players notice rather than something everyone has.
+ */
+export function skillUpgradeCost(level: number): number {
+  const l = Math.max(1, Math.floor(level || 1));
+  return Math.round(500 * Math.pow(1.6, l - 1));
+}

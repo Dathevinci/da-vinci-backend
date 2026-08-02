@@ -21,6 +21,11 @@ import {
   cardsInSet,
   rollPack,
   rollRelicPack,
+  SKILLS,
+  MAX_SKILL_LEVEL,
+  skillFor,
+  skillPower,
+  skillUpgradeCost,
 } from "../data/cardCatalog";
 import { ARENA_CHESTS, DUPE_REFUND, chestPool, chestAvailable, rollArenaChest } from "../data/arenaChest";
 import { arenaEffect } from "../data/arenaEffects";
@@ -66,6 +71,29 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         // DOES without duplicating the table and letting it drift.
         cardStats: CARD_STATS,
         foilMult: FOIL_MULT,
+        maxSkillLevel: MAX_SKILL_LEVEL,
+        /**
+         * Legendary skills, with every level precomputed. The copy lives in a
+         * function on the server, so shipping the ladder rather than the
+         * parameters is what stops the client growing its own second copy of
+         * the wording that then drifts. Eight skills by five levels is a
+         * trivial payload for a catalog fetched once.
+         */
+        skills: Object.fromEntries(
+          Object.entries(SKILLS).map(([id, s]) => [
+            id,
+            {
+              name: s.name,
+              kind: s.kind,
+              levels: Array.from({ length: MAX_SKILL_LEVEL }, (_, i) => ({
+                level: i + 1,
+                power: skillPower(s, i + 1),
+                text: s.text(skillPower(s, i + 1)),
+                cost: i + 1 >= MAX_SKILL_LEVEL ? null : skillUpgradeCost(i + 1),
+              })),
+            },
+          ])
+        ),
       },
     });
   } catch (error) {
@@ -139,7 +167,7 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
   try {
     const userId = req.params.userId as string;
     const [owned, user] = await Promise.all([
-      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true } }),
+      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
     ]);
     res.json({
@@ -734,6 +762,81 @@ export const wakeCard = async (req: Request, res: Response, next: NextFunction) 
 // ── POST /api/cards/upgrade  { userId, cardId } ───────────────────────────
 // Spend shards to raise a card's level. Levels multiply ATK and HP in duels,
 // so this is the sink that keeps shards meaningful once you own the set.
+/**
+ * POST /api/cards/upgrade-skill   body { userId, cardId }
+ *
+ * Level a LEGENDARY's skill with shards. Separate track from upgradeCard():
+ * that raises ATK and HP, this raises the one thing the card uniquely does.
+ *
+ * Same money shape as every other spend in this file — a conditional
+ * decrement so the affordability check and the spend are one operation, and a
+ * level-guarded bump so two fast clicks can't buy two levels for the price of
+ * the cheaper one.
+ */
+export const upgradeSkill = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardId } = (req.body || {}) as { userId?: string; cardId?: string };
+    if (!ownerGuard(req, res, userId)) return;
+    if (!cardId) return res.status(400).json({ success: false, message: "Missing cardId." });
+
+    const def = CARDS[cardId];
+    if (!def) return res.status(404).json({ success: false, message: "No such card." });
+    const skill = skillFor(cardId);
+    if (!skill) {
+      return res.status(400).json({ success: false, message: `${def.name} has no skill to train.` });
+    }
+
+    const row = await prisma.userCard.findUnique({
+      where: { userId_cardId: { userId: userId!, cardId } },
+      select: { skillLevel: true, hibernating: true },
+    });
+    if (!row) return res.status(404).json({ success: false, message: "You don't own that card." });
+    if (row.hibernating) {
+      return res.status(400).json({ success: false, message: `${def.name} is asleep. Wake it first.` });
+    }
+
+    const level = row.skillLevel || 1;
+    if (level >= MAX_SKILL_LEVEL) {
+      return res.status(400).json({ success: false, message: `${skill.name} is already mastered.` });
+    }
+    const cost = skillUpgradeCost(level);
+
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        const paid = await tx.user.updateMany({
+          where: { id: userId, shards: { gte: cost } },
+          data: { shards: { decrement: cost } },
+        });
+        if (paid.count === 0) throw new CardError(402, `Training ${skill.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        const bumped = await tx.userCard.updateMany({
+          where: { userId, cardId, skillLevel: level },
+          data: { skillLevel: { increment: 1 } },
+        });
+        if (bumped.count === 0) throw new CardError(409, "That skill is already training — try again in a moment.");
+        const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
+        return { shards: u?.shards ?? 0, skillLevel: level + 1 };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          ...out,
+          cardId,
+          skillName: skill.name,
+          power: skillPower(skill, out.skillLevel),
+          text: skill.text(skillPower(skill, out.skillLevel)),
+          nextCost: out.skillLevel >= MAX_SKILL_LEVEL ? null : skillUpgradeCost(out.skillLevel),
+        },
+      });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const upgradeCard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, cardId } = (req.body || {}) as { userId?: string; cardId?: string };

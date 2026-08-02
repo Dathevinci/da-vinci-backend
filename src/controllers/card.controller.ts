@@ -9,6 +9,7 @@ import {
   PACK_SIZE,
   DUST_VALUE,
   CRAFT_COST,
+  WAKE_COST,
   FOIL_COST,
   RELIC_PACK_SHARDS,
   SET_REWARDS,
@@ -42,6 +43,7 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         packSize: PACK_SIZE,
         dustValue: DUST_VALUE,
         craftCost: CRAFT_COST,
+        wakeCost: WAKE_COST,
         foilCost: FOIL_COST,
         relicPackShards: RELIC_PACK_SHARDS,
         setRewards: SET_REWARDS,
@@ -122,7 +124,7 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
   try {
     const userId = req.params.userId as string;
     const [owned, user] = await Promise.all([
-      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true } }),
+      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
     ]);
     res.json({
@@ -165,7 +167,7 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
           await tx.userCard.upsert({
             where: { userId_cardId: { userId: userId!, cardId } },
             create: { userId: userId!, cardId, count: 1 },
-            update: { count: { increment: 1 } },
+            update: { count: { increment: 1 }, hibernating: false },
           });
         }
 
@@ -241,7 +243,7 @@ export const craftCard = async (req: Request, res: Response, next: NextFunction)
         await tx.userCard.upsert({
           where: { userId_cardId: { userId: userId!, cardId: cardId! } },
           create: { userId: userId!, cardId: cardId!, count: 1 },
-          update: { count: { increment: 1 } },
+          update: { count: { increment: 1 }, hibernating: false },
         });
         const user = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
         return { shards: user?.shards ?? 0 };
@@ -316,7 +318,7 @@ export const openRelicPack = async (req: Request, res: Response, next: NextFunct
           await tx.userCard.upsert({
             where: { userId_cardId: { userId: userId!, cardId } },
             create: { userId: userId!, cardId, count: 1 },
-            update: { count: { increment: 1 } },
+            update: { count: { increment: 1 }, hibernating: false },
           });
         }
         const user = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
@@ -466,6 +468,62 @@ export const setShowcase = async (req: Request, res: Response, next: NextFunctio
     }
     await prisma.user.update({ where: { id: userId }, data: { showcaseCards: { set: unique } } });
     res.json({ success: true, data: { showcaseCards: unique } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/cards/wake  { userId, cardId } ──────────────────────────────
+// Bring a hibernating card back with shards. A hibernating card is never
+// deleted — losing with it puts it to sleep, and this is the fee to wake it.
+export const wakeCard = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardId } = (req.body || {}) as { userId?: string; cardId?: string };
+    if (!userId || !cardId) return res.status(400).json({ success: false, message: "Missing userId or cardId." });
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only wake your own cards." });
+    }
+    const def = CARDS[cardId];
+    if (!def) return res.status(404).json({ success: false, message: "No such card." });
+
+    const row = await prisma.userCard.findUnique({
+      where: { userId_cardId: { userId, cardId } },
+      select: { hibernating: true },
+    });
+    if (!row) return res.status(404).json({ success: false, message: "You don't own that card." });
+    if (!row.hibernating) return res.status(400).json({ success: false, message: `${def.name} is already awake.` });
+
+    const cost = WAKE_COST[def.rarity] ?? 0;
+
+    try {
+      const shards = await prisma.$transaction(async (tx) => {
+        // Conditional decrement makes the check and the spend a single atomic
+        // operation — two rapid clicks can't both pass an "enough shards" test.
+        const paid = await tx.user.updateMany({
+          where: { id: userId, shards: { gte: cost } },
+          data: { shards: { decrement: cost } },
+        });
+        if (paid.count === 0) throw new Error("POOR");
+        // Guarded on it still being asleep, so a double submit can't charge twice.
+        const woke = await tx.userCard.updateMany({
+          where: { userId, cardId, hibernating: true },
+          data: { hibernating: false },
+        });
+        if (woke.count === 0) throw new Error("AWAKE");
+        const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
+        return u?.shards ?? 0;
+      });
+      res.json({ success: true, data: { shards, cardId, cost } });
+    } catch (e: any) {
+      if (e?.message === "POOR") {
+        return res.status(402).json({ success: false, message: `Waking ${def.name} costs ${cost} shards.` });
+      }
+      if (e?.message === "AWAKE") {
+        return res.status(400).json({ success: false, message: `${def.name} is already awake.` });
+      }
+      throw e;
+    }
   } catch (error) {
     next(error);
   }

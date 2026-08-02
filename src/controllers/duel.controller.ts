@@ -154,9 +154,19 @@ export const createDuel = async (req: Request, res: Response, next: NextFunction
     if (foe.id === me.id) return res.status(400).json({ success: false, message: "You can't duel yourself." });
 
     // You must actually own the cards you're fielding.
-    const owned = await prisma.userCard.findMany({ where: { userId, cardId: { in: deck } }, select: { cardId: true } });
+    const owned = await prisma.userCard.findMany({
+      where: { userId, cardId: { in: deck } },
+      select: { cardId: true, hibernating: true },
+    });
     if (owned.length !== deck.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that deck." });
+    }
+    const asleep = owned.filter((c) => c.hibernating).map((c) => CARDS[c.cardId]?.name || c.cardId);
+    if (asleep.length) {
+      return res.status(400).json({
+        success: false,
+        message: `${asleep.join(", ")} ${asleep.length === 1 ? "is" : "are"} hibernating. Wake ${asleep.length === 1 ? "it" : "them"} with shards, or pull another copy.`,
+      });
     }
 
     try {
@@ -235,10 +245,19 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },
-      select: { cardId: true, foil: true },
+      select: { cardId: true, foil: true, hibernating: true },
     });
     if (ownedRows.filter((r) => deck.includes(r.cardId)).length !== deck.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that deck." });
+    }
+    const dozing = ownedRows
+      .filter((r) => deck.includes(r.cardId) && r.hibernating)
+      .map((r) => CARDS[r.cardId]?.name || r.cardId);
+    if (dozing.length) {
+      return res.status(400).json({
+        success: false,
+        message: `${dozing.join(", ")} ${dozing.length === 1 ? "is" : "are"} hibernating. Wake ${dozing.length === 1 ? "it" : "them"} with shards, or pull another copy.`,
+      });
     }
     const challengerFoils = await prisma.userCard.findMany({
       where: { userId: duel.challengerId, cardId: { in: duel.challengerDeck }, foil: true },
@@ -502,6 +521,21 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
 
         if (result.finished && result.winnerId) {
           const loserId = result.winnerId === duel.challengerId ? duel.opponentId : duel.challengerId;
+
+          // Cards that fell on the LOSING side go to sleep. Only the loser's:
+          // hibernating every fallen card would put most of both collections
+          // under after a single 5v5, which turns one bad match into an
+          // evening of shard payments. Nothing is deleted — the row stays and
+          // the card comes back with shards or another copy from a pack.
+          const loserSide = result.state.a.userId === loserId ? result.state.a : result.state.b;
+          const fallen = loserSide.fighters.filter((f) => f.hp <= 0).map((f) => f.cardId);
+          if (fallen.length) {
+            await tx.userCard.updateMany({
+              where: { userId: loserId, cardId: { in: fallen } },
+              data: { hibernating: true },
+            });
+          }
+
           const winnerName = result.winnerId === duel.challengerId ? duel.challengerName : duel.opponentName;
           const loserName = result.winnerId === duel.challengerId ? duel.opponentName : duel.challengerName;
           const { toWinner, rake } = payout(duel.stake);

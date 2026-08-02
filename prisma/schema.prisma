@@ -241,6 +241,9 @@ model UserCard {
   cardId    String   // id in the server-side card catalog (cardCatalog.ts)
   count     Int      @default(1)
   foil      Boolean  @default(false) // shard-bought prestige variant
+  // Fell in a duel you LOST. The card is never deleted — it sleeps, and comes
+  // back either by spending shards or by pulling another copy from a pack.
+  hibernating Boolean @default(false)
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -154,6 +154,16 @@ export const CRAFT_COST: Record<CardRarity, number> = {
   common: 40, rare: 120, epic: 340, legendary: 1000, event: 0, // event can't be crafted
 };
 
+/**
+ * Waking a hibernating card. Deliberately well under CRAFT_COST: the card is
+ * already yours, so this is a fee for losing with it, not a second purchase.
+ * Pulling another copy from a pack wakes it for free, which keeps packs
+ * relevant to veterans who already own most of the set.
+ */
+export const WAKE_COST: Record<CardRarity, number> = {
+  common: 15, rare: 45, epic: 120, legendary: 340, event: 200,
+};
+
 // Roll one pack → a list of card ids. Uses Math.random (fine on the server).
 export function rollPack(size = PACK_SIZE): string[] {
   const byRarity: Record<string, CardDef[]> = {};

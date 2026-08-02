@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
   getCatalog, getCollection, getCollectors, openPack, dustCard, craftCard,
-  foilCard, openRelicPack, claimSet, getLadder, setShowcase,
+  foilCard, openRelicPack, claimSet, getLadder, setShowcase, wakeCard,
 } from "../controllers/card.controller";
 
 const router = Router();
@@ -17,5 +17,6 @@ router.post("/relic-pack", openRelicPack);
 router.post("/claim-set", claimSet);
 router.get("/ladder", getLadder);
 router.put("/showcase", setShowcase);
+router.post("/wake", wakeCard);
 
 export default router;

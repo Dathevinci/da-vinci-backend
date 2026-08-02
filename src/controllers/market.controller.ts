@@ -23,7 +23,13 @@ import { CARDS } from "../data/cardCatalog";
 
 const MIN_PRICE = 10;
 const MAX_PRICE = 1_000_000;
-/** Burned on every sale. A market with no sink is an inflation pump. */
+/**
+ * Taken from every sale and paid to the lead dev as house revenue.
+ *
+ * Note this is NOT a sink — those points stay in circulation, they just change
+ * hands. The duel rake and the shop still burn, so the economy keeps its
+ * deflationary pressure elsewhere.
+ */
 const MARKET_FEE_PERCENT = 5;
 
 export function marketFee(price: number) {
@@ -48,6 +54,25 @@ class MarketError extends Error {
   constructor(public code: number, message: string) {
     super(message);
   }
+}
+
+/**
+ * Who collects the market fee.
+ *
+ * Found by the ROLE COLUMN, never by username. Usernames are changeable here,
+ * and keying revenue off a display name means the fee follows whoever happens
+ * to hold that name rather than the actual account.
+ *
+ * Returns null if there is no lead dev, in which case the fee is simply burned
+ * — better a missing payout than one sent to an arbitrary account.
+ */
+async function feeCollectorId(tx: any): Promise<string | null> {
+  const lead = await tx.user.findFirst({
+    where: { role: "LEAD_DEV" },
+    select: { id: true },
+    orderBy: { createdAt: "asc" },
+  });
+  return lead?.id ?? null;
 }
 
 // ── GET /api/market ────────────────────────────────────────────────────────
@@ -195,9 +220,18 @@ export const buyListing = async (req: Request, res: Response, next: NextFunction
         }
         await tx.pointLog.create({ data: { userId: userId!, amount: -listing.price, reason: `market-buy:${id}` } });
 
-        // Seller is paid the price minus the burned fee.
+        // Seller is paid the price minus the house fee.
         await tx.user.update({ where: { id: listing.sellerId }, data: { arisePoints: { increment: toSeller } } });
         await tx.pointLog.create({ data: { userId: listing.sellerId, amount: toSeller, reason: `market-sell:${id}` } });
+
+        // The fee goes to the lead dev. Skipped when the collector is the
+        // seller or the buyer — paying yourself your own fee would let the
+        // lead dev sell to themselves at no cost and log phantom revenue.
+        const collector = await feeCollectorId(tx);
+        if (fee > 0 && collector && collector !== listing.sellerId && collector !== userId) {
+          await tx.user.update({ where: { id: collector }, data: { arisePoints: { increment: fee } } });
+          await tx.pointLog.create({ data: { userId: collector, amount: fee, reason: `market-fee:${id}` } });
+        }
 
         /**
          * The cards land in the buyer's collection.
@@ -235,7 +269,7 @@ export const buyListing = async (req: Request, res: Response, next: NextFunction
             userId: listing.sellerId,
             actorId: userId!,
             type: "market",
-            message: `💰 ${buyer.username} bought your ${def?.name || "card"} ×${listing.qty} for ${listing.price.toLocaleString()} AP (${fee.toLocaleString()} burned as fee).`,
+            message: `💰 ${buyer.username} bought your ${def?.name || "card"} ×${listing.qty} for ${listing.price.toLocaleString()} AP. You received ${toSeller.toLocaleString()} after the ${fee.toLocaleString()} AP market fee.`,
             link: "/marketplace",
           },
         });

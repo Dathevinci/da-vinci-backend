@@ -10,6 +10,7 @@ import {
   BUNDLE_DISCOUNT,
   type CatalogEntry,
 } from "../data/shopCatalog";
+import { ARENA_EFFECTS } from "../data/arenaEffects";
 import { getActorId } from "../lib/jwt";
 
 /**
@@ -257,11 +258,17 @@ export const purchaseItem = async (req: Request, res: Response, next: NextFuncti
       return res.status(403).json({ success: false, message: "You can only buy with your own Arise Points." });
     }
 
-    const item = SHOP_CATALOG[itemId];
+    // Arena effects live in their own catalog and their own inventory column,
+    // but the money, ownership and staff rules are identical — so they ride
+    // the same endpoint rather than a parallel one that could drift from it.
+    const arena = ARENA_EFFECTS[itemId];
+    const item: CatalogEntry | undefined = arena
+      ? { type: "effect", price: arena.price }
+      : SHOP_CATALOG[itemId];
     if (!item) {
       return res.status(400).json({ success: false, message: "That item isn't for sale." });
     }
-    const field = PURCHASED_FIELD[item.type];
+    const field = arena ? "purchasedArenaEffects" : PURCHASED_FIELD[item.type];
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ success: false, message: "User not found." });

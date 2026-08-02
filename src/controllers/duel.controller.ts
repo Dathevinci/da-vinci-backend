@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { CARDS } from "../data/cardCatalog";
+import { resolveArena } from "../data/arenaEffects";
 import {
   DECK_SIZE, ITEMS, ItemId, DuelState, makeSide, applyAction, sideOf,
   eloDelta, payout, MIN_STAKE, MAX_STAKE, DUEL_EXPIRY_HOURS, forfeitFine, SUPPORTS_PER_DUEL,
@@ -124,8 +125,8 @@ export const getDuel = async (req: Request, res: Response, next: NextFunction) =
 // invitation is always funded — nobody accepts a duel the other side can't pay.
 export const createDuel = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, opponentUsername, stake, deck } = (req.body || {}) as {
-      userId?: string; opponentUsername?: string; stake?: number; deck?: string[];
+    const { userId, opponentUsername, stake, deck, useArena } = (req.body || {}) as {
+      userId?: string; opponentUsername?: string; stake?: number; deck?: string[]; useArena?: boolean;
     };
     if (!guard(req, res, userId)) return;
 
@@ -183,6 +184,7 @@ export const createDuel = async (req: Request, res: Response, next: NextFunction
             challengerId: me.id, challengerName: me.username,
             opponentId: foe.id, opponentName: foe.username,
             stake: amount, challengerDeck: deck,
+            challengerArena: !!useArena,
             expiresAt: new Date(Date.now() + DUEL_EXPIRY_HOURS * 3600 * 1000),
           },
         });
@@ -208,7 +210,7 @@ export const createDuel = async (req: Request, res: Response, next: NextFunction
 // POST /api/duels/:id/accept  { userId, deck[] }
 export const acceptDuel = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, deck } = (req.body || {}) as { userId?: string; deck?: string[] };
+    const { userId, deck, useArena } = (req.body || {}) as { userId?: string; deck?: string[]; useArena?: boolean };
     if (!guard(req, res, userId)) return;
     const id = req.params.id as string;
 
@@ -271,6 +273,26 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     const myLevels: Record<string, number> = {};
     for (const r of ownedRows) myLevels[r.cardId] = r.level || 1;
 
+    /**
+     * The board both players will fight on.
+     *
+     * Only set when BOTH sides opted in — an arena effect changes the screen
+     * for the two of them, so one person can't impose it on the other. When
+     * both bring one, resolveArena picks the RARER: defaulting to the
+     * challenger's would quietly make the opponent's purchase worthless.
+     *
+     * Equipped effects are read from the users, never from the request, so a
+     * hand-rolled call can't play under an effect it doesn't own.
+     */
+    const [challengerRow, meRow] = await Promise.all([
+      prisma.user.findUnique({ where: { id: duel.challengerId }, select: { activeArenaEffect: true } }),
+      prisma.user.findUnique({ where: { id: userId! }, select: { activeArenaEffect: true } }),
+    ]);
+    const chosenArena = resolveArena(
+      duel.challengerArena, challengerRow?.activeArenaEffect,
+      !!useArena, meRow?.activeArenaEffect
+    );
+
     const stateObj: DuelState = {
       a: makeSide(duel.challengerId, duel.challengerName, duel.challengerDeck,
         new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels),
@@ -293,7 +315,12 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
         // Guarded on PENDING so a double-accept can't double-charge.
         const claim = await tx.duel.updateMany({
           where: { id, status: "PENDING" },
-          data: { status: "ACTIVE", opponentDeck: deck, state: JSON.stringify(stateObj), turnUserId: duel.challengerId },
+          data: {
+            status: "ACTIVE", opponentDeck: deck,
+            state: JSON.stringify(stateObj), turnUserId: duel.challengerId,
+            opponentArena: !!useArena,
+            arenaEffect: chosenArena,
+          },
         });
         if (claim.count === 0) throw new DuelError(410, "This challenge is no longer open.");
         return tx.duel.findUnique({ where: { id } });

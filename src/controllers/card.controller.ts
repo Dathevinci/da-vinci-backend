@@ -23,7 +23,11 @@ import {
   rollRelicPack,
   SKILLS,
   MAX_SKILL_LEVEL,
-  skillFor,
+  abilityFor,
+  DOMAINS,
+  MAX_DOMAIN_LEVEL,
+  domainPower,
+  domainUpgradeCost,
   skillPower,
   skillUpgradeCost,
 } from "../data/cardCatalog";
@@ -70,6 +74,27 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         cardStats: CARD_STATS,
         foilMult: FOIL_MULT,
         maxSkillLevel: MAX_SKILL_LEVEL,
+        maxDomainLevel: MAX_DOMAIN_LEVEL,
+        /**
+         * Legendary DOMAIN EXPANSIONS. A separate map from skills, with kinds
+         * that share nothing with them — a legendary is meant to be a
+         * different kind of card, not an epic with bigger numbers.
+         */
+        domains: Object.fromEntries(
+          Object.entries(DOMAINS).map(([id, d]) => [
+            id,
+            {
+              name: d.name,
+              kind: d.kind,
+              levels: Array.from({ length: MAX_DOMAIN_LEVEL }, (_, i) => ({
+                level: i + 1,
+                power: domainPower(d, i + 1),
+                text: d.text(domainPower(d, i + 1)),
+                cost: i + 1 >= MAX_DOMAIN_LEVEL ? null : domainUpgradeCost(i + 1),
+              })),
+            },
+          ])
+        ),
         /**
          * Legendary skills, with every level precomputed. The copy lives in a
          * function on the server, so shipping the ladder rather than the
@@ -601,9 +626,9 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
 
     const def = CARDS[cardId];
     if (!def) return res.status(404).json({ success: false, message: "No such card." });
-    const skill = skillFor(cardId);
+    const skill = abilityFor(cardId);
     if (!skill) {
-      return res.status(400).json({ success: false, message: `${def.name} has no skill to train.` });
+      return res.status(400).json({ success: false, message: `${def.name} has no ability to advance.` });
     }
 
     const row = await prisma.userCard.findUnique({
@@ -616,10 +641,14 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
     }
 
     const level = row.skillLevel || 1;
-    if (level >= MAX_SKILL_LEVEL) {
-      return res.status(400).json({ success: false, message: `${skill.name} is already mastered.` });
+    if (level >= skill.max) {
+      return res.status(400).json({ success: false, message: `${skill.def.name} is already at its ceiling.` });
     }
-    const cost = skillUpgradeCost(level, def.rarity);
+    // A domain is a different order of investment from a skill, so it prices
+    // on its own curve rather than the rarity-keyed skill one.
+    const cost = skill.type === "domain"
+      ? domainUpgradeCost(level)
+      : skillUpgradeCost(level, def.rarity);
 
     try {
       const out = await prisma.$transaction(async (tx) => {
@@ -627,12 +656,12 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
           where: { id: userId, shards: { gte: cost } },
           data: { shards: { decrement: cost } },
         });
-        if (paid.count === 0) throw new CardError(402, `Training ${skill.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        if (paid.count === 0) throw new CardError(402, `${skill.type === "domain" ? "Deepening" : "Training"} ${skill.def.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
         const bumped = await tx.userCard.updateMany({
           where: { userId, cardId, skillLevel: level },
           data: { skillLevel: { increment: 1 } },
         });
-        if (bumped.count === 0) throw new CardError(409, "That skill is already training — try again in a moment.");
+        if (bumped.count === 0) throw new CardError(409, "That ability is already advancing — try again in a moment.");
         const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
         return { shards: u?.shards ?? 0, skillLevel: level + 1 };
       });
@@ -642,10 +671,21 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
         data: {
           ...out,
           cardId,
-          skillName: skill.name,
-          power: skillPower(skill, out.skillLevel),
-          text: skill.text(skillPower(skill, out.skillLevel)),
-          nextCost: out.skillLevel >= MAX_SKILL_LEVEL ? null : skillUpgradeCost(out.skillLevel, def.rarity),
+          abilityType: skill.type,
+          skillName: skill.def.name,
+          power: skill.type === "domain"
+            ? domainPower(skill.def, out.skillLevel)
+            : skillPower(skill.def, out.skillLevel),
+          text: skill.def.text(
+            skill.type === "domain"
+              ? domainPower(skill.def, out.skillLevel)
+              : skillPower(skill.def, out.skillLevel)
+          ),
+          nextCost: out.skillLevel >= skill.max
+            ? null
+            : skill.type === "domain"
+              ? domainUpgradeCost(out.skillLevel)
+              : skillUpgradeCost(out.skillLevel, def.rarity),
         },
       });
     } catch (e) {

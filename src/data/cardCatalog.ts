@@ -352,39 +352,10 @@ export interface SkillDef {
 export const MAX_SKILL_LEVEL = 5;
 
 export const SKILLS: Record<string, SkillDef> = {
-  card_outergod: {
-    name: "Abyssal Gaze", kind: "drain", base: 140, step: 25,
-    text: (p) => `Deal ${p}% ATK and take back half of it as health.`,
-  },
-  card_gatekey: {
-    name: "Open the Way", kind: "execute", base: 30, step: 6,
-    text: (p) => `Finish any card already below ${p}% health outright.`,
-  },
-  card_leviathan: {
-    name: "Ten Fathoms", kind: "guard", base: 35, step: 7,
-    text: (p) => `Shed ${p}% of every blow for the rest of the duel.`,
-  },
-  card_hollowtide: {
-    name: "The Sea Exhales", kind: "burst", base: 180, step: 30,
-    text: (p) => `Deal ${p}% ATK to whoever is standing opposite.`,
-  },
-  card_lastronin: {
-    name: "No Lord Remains", kind: "burst", base: 200, step: 35,
-    text: (p) => `Deal ${p}% ATK. Costs your turn, and it is worth it.`,
-  },
-  card_swordsaint: {
-    name: "Drawn at Dawn", kind: "execute", base: 35, step: 7,
-    text: (p) => `Finish any card already below ${p}% health outright.`,
-  },
-  card_secondwind: {
-    name: "Argue Well Enough", kind: "rally", base: 40, step: 9,
-    text: (p) => `Restore ${p}% of max health to your whole line.`,
-  },
-  card_longmorrow: {
-    name: "It Has Always Been Coming", kind: "burst", base: 160, step: 28,
-    text: (p) => `Deal ${p}% ATK, and again to the next card sent in.`,
-  },
-
+  // EPIC ONLY. Legendaries carry a DOMAIN instead — defined below. The two
+  // share no kinds at all, deliberately: when a legendary skill was just an
+  // epic skill with bigger numbers, the top tier read as a bigger epic rather
+  // than as a different kind of thing.
   // ── EPIC ── weaker numbers and cheaper training than the legendaries above.
   // Thirteen cards carry one, so these are the tier players actually build
   // around; a legendary skill has to stay visibly better than a maxed epic.
@@ -467,4 +438,109 @@ export function skillUpgradeCost(level: number, rarity: CardRarity = "legendary"
   const base: Partial<Record<CardRarity, number>> = { epic: 200, legendary: 500 };
   const l = Math.max(1, Math.floor(level || 1));
   return Math.round((base[rarity] ?? 200) * Math.pow(1.6, l - 1));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * DOMAIN EXPANSIONS — legendaries only.
+ *
+ * A skill does a thing. A domain changes the terms of the fight, and it is
+ * the reason a legendary is a different KIND of card rather than an epic with
+ * bigger numbers — which is exactly what went wrong the first time, when both
+ * tiers drew from the same five verbs and a legendary just executed at a
+ * higher threshold than an epic did.
+ *
+ * So the kinds below are DISJOINT from SkillKind. No overlap, on purpose.
+ * Nothing here is a percentage of ATK; every one of them rewrites a rule.
+ *
+ * One per duel, and unmissable when it lands.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+export type DomainKind =
+  | "revival"       // your fallen cards stand back up
+  | "massacre"      // strikes the WHOLE enemy line at once
+  | "nullify"       // nothing reaches you for a span
+  | "siphon"        // drains the whole enemy line into your own
+  | "ascend"        // your line keeps the power, permanently
+  | "judgement"     // fells the weakest thing standing, no roll
+  | "seal"          // the other side loses its supports
+  | "inevitability"; // a doom that lands later no matter what happens
+
+export interface DomainDef {
+  name: string;
+  kind: DomainKind;
+  base: number;
+  step: number;
+  text: (power: number) => string;
+}
+
+export const MAX_DOMAIN_LEVEL = 3;
+
+export const DOMAINS: Record<string, DomainDef> = {
+  card_gatekey: {
+    name: "The Door Stands Open", kind: "revival", base: 40, step: 20,
+    text: (p) => `Every card you have lost stands back up at ${p}% health.`,
+  },
+  card_outergod: {
+    name: "The Indifferent Vast", kind: "massacre", base: 70, step: 25,
+    text: (p) => `Strike every card the other side has for ${p}% ATK at once.`,
+  },
+  card_leviathan: {
+    name: "It Has Not Woken", kind: "nullify", base: 2, step: 1,
+    text: (p) => `Nothing reaches you at all for ${p} turn${p === 1 ? "" : "s"}.`,
+  },
+  card_hollowtide: {
+    name: "The Coastline Ends", kind: "siphon", base: 35, step: 15,
+    text: (p) => `Take ${p}% of the health of every enemy card and keep it.`,
+  },
+  card_lastronin: {
+    name: "No Lord To Serve", kind: "ascend", base: 30, step: 12,
+    text: (p) => `Your whole line gains ${p}% ATK for the rest of the duel.`,
+  },
+  card_swordsaint: {
+    name: "Ended By Breakfast", kind: "judgement", base: 1, step: 1,
+    text: (p) => `Fell the ${p} weakest card${p === 1 ? "" : "s"} still standing. No roll.`,
+  },
+  card_secondwind: {
+    name: "Only The Resting", kind: "seal", base: 2, step: 1,
+    text: (p) => `The other side cannot play a support for ${p} turn${p === 1 ? "" : "s"}.`,
+  },
+  card_longmorrow: {
+    name: "It Has Always Been Coming", kind: "inevitability", base: 200, step: 80,
+    text: (p) => `In three turns, ${p}% ATK lands on whoever is standing. Nothing stops it.`,
+  },
+};
+
+export function domainFor(cardId: string): DomainDef | null {
+  return DOMAINS[cardId] ?? null;
+}
+
+export function domainPower(def: DomainDef, level: number): number {
+  const l = Math.max(1, Math.min(MAX_DOMAIN_LEVEL, Math.floor(level || 1)));
+  return def.base + (l - 1) * def.step;
+}
+
+/**
+ * Domains cap at three ranks rather than five, and each one costs more than a
+ * maxed epic skill. Eight cards in the game have one; it should read as a
+ * different order of investment, not a longer version of the same one.
+ */
+export function domainUpgradeCost(level: number): number {
+  const l = Math.max(1, Math.floor(level || 1));
+  return Math.round(1200 * Math.pow(1.8, l - 1));
+}
+
+/**
+ * The one ability a card has, whichever kind it is. Every caller wants this
+ * rather than the two maps — a card can never carry both, so branching on
+ * rarity at each call site would be the same check written eight times.
+ */
+export function abilityFor(cardId: string):
+  | { type: "domain"; def: DomainDef; max: number }
+  | { type: "skill"; def: SkillDef; max: number }
+  | null {
+  const d = DOMAINS[cardId];
+  if (d) return { type: "domain", def: d, max: MAX_DOMAIN_LEVEL };
+  const s = SKILLS[cardId];
+  if (s) return { type: "skill", def: s, max: MAX_SKILL_LEVEL };
+  return null;
 }

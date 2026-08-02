@@ -375,10 +375,18 @@ export const voteComment = async (req: Request, res: Response, next: NextFunctio
             }
           });
         }
-      } else if (newScore === 0 && oldScore === 1) {
-        // Deduct point if upvote is removed
-        await prisma.user.update({ where: { id: comment.userId }, data: { arisePoints: { decrement: 1 } } });
-        await prisma.pointLog.create({ data: { userId: comment.userId, amount: -1, reason: "Upvote removed from your comment" } });
+      } else if (oldScore === 1 && newScore !== 1) {
+        /**
+         * Give back exactly what was given. This used to award 2 on an upvote
+         * and reclaim only 1 when it was withdrawn, so toggling the same
+         * upvote on and off MINTED a point to the author every cycle — free
+         * Arise Points for anyone willing to click twice.
+         *
+         * It also only fired on newScore === 0, so switching straight from
+         * upvote to DOWNVOTE kept the +2 as well.
+         */
+        await prisma.user.update({ where: { id: comment.userId }, data: { arisePoints: { decrement: 2 } } });
+        await prisma.pointLog.create({ data: { userId: comment.userId, amount: -2, reason: "Upvote removed from your comment" } });
       }
     }
 

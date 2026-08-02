@@ -144,6 +144,20 @@ async function isStaffFree(userId: string): Promise<boolean> {
   return role === "LEAD_DEV" || role === "ADMIN";
 }
 
+/**
+ * The LEAD DEV's shard spends are free — that account exists to test every
+ * sink (craft, foil, relic packs, wake, levels, skills, duel items) without
+ * grinding dust first. LEAD DEV ONLY, deliberately narrower than
+ * isStaffFree: admins play the real economy. Same role-column-first,
+ * username-fallback shape as everything else (the identity rule).
+ */
+export async function isLeadDevFree(userId: string): Promise<boolean> {
+  const u = await prisma.user.findUnique({ where: { id: userId }, select: { username: true, role: true } });
+  if (!u) return false;
+  const role = u.role && u.role !== "USER" ? u.role : getRole(u.username);
+  return role === "LEAD_DEV";
+}
+
 // GET /api/cards/collectors — who owns what, ranked by completion. This is the
 // "see other people's collections" board.
 export const getCollectors = async (_req: Request, res: Response, next: NextFunction) => {
@@ -346,14 +360,18 @@ export const craftCard = async (req: Request, res: Response, next: NextFunction)
     const cost = CRAFT_COST[card.rarity];
     if (!cost || card.rarity === "event") return res.status(400).json({ success: false, message: "That card can't be crafted." });
 
+    const free = await isLeadDevFree(userId!);
     try {
       const result = await prisma.$transaction(async (tx) => {
         // Atomic shard debit — same conditional-updateMany guard as AP.
-        const debit = await tx.user.updateMany({
-          where: { id: userId, shards: { gte: cost } },
-          data: { shards: { decrement: cost } },
-        });
-        if (debit.count === 0) throw new CardError(402, `Crafting ${card.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        // The lead dev skips it entirely, same shape as openPack's staff-free.
+        if (!free) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (debit.count === 0) throw new CardError(402, `Crafting ${card.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        }
 
         await tx.userCard.upsert({
           where: { userId_cardId: { userId: userId!, cardId: cardId! } },
@@ -393,11 +411,13 @@ export const foilCard = async (req: Request, res: Response, next: NextFunction) 
         if (!owned) throw new CardError(400, "You don't own that card.");
         if (owned.foil) throw new CardError(409, "That card is already foil.");
 
-        const debit = await tx.user.updateMany({
-          where: { id: userId, shards: { gte: cost } },
-          data: { shards: { decrement: cost } },
-        });
-        if (debit.count === 0) throw new CardError(402, `Foiling ${card.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        if (!(await isLeadDevFree(userId!))) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (debit.count === 0) throw new CardError(402, `Foiling ${card.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        }
 
         await tx.userCard.update({ where: { userId_cardId: { userId: userId!, cardId: cardId! } }, data: { foil: true } });
         const user = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
@@ -423,13 +443,16 @@ export const openRelicPack = async (req: Request, res: Response, next: NextFunct
 
     const pulls = rollRelicPack(PACK_SIZE);
 
+    const free = await isLeadDevFree(userId!);
     try {
       const result = await prisma.$transaction(async (tx) => {
-        const debit = await tx.user.updateMany({
-          where: { id: userId, shards: { gte: RELIC_PACK_SHARDS } },
-          data: { shards: { decrement: RELIC_PACK_SHARDS } },
-        });
-        if (debit.count === 0) throw new CardError(402, `A relic pack costs ${RELIC_PACK_SHARDS.toLocaleString()} shards — you don't have enough.`);
+        if (!free) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: RELIC_PACK_SHARDS } },
+            data: { shards: { decrement: RELIC_PACK_SHARDS } },
+          });
+          if (debit.count === 0) throw new CardError(402, `A relic pack costs ${RELIC_PACK_SHARDS.toLocaleString()} shards — you don't have enough.`);
+        }
 
         const prints: PrintInfo[] = [];
         for (const cardId of pulls) {
@@ -614,16 +637,19 @@ export const wakeCard = async (req: Request, res: Response, next: NextFunction) 
     if (!row.hibernating) return res.status(400).json({ success: false, message: `${def.name} is already awake.` });
 
     const cost = WAKE_COST[def.rarity] ?? 0;
+    const free = await isLeadDevFree(userId!);
 
     try {
       const shards = await prisma.$transaction(async (tx) => {
         // Conditional decrement makes the check and the spend a single atomic
         // operation — two rapid clicks can't both pass an "enough shards" test.
-        const paid = await tx.user.updateMany({
-          where: { id: userId, shards: { gte: cost } },
-          data: { shards: { decrement: cost } },
-        });
-        if (paid.count === 0) throw new Error("POOR");
+        if (!free) {
+          const paid = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (paid.count === 0) throw new Error("POOR");
+        }
         // Guarded on it still being asleep, so a double submit can't charge twice.
         const woke = await tx.userCard.updateMany({
           where: { userId, cardId, hibernating: true },
@@ -694,13 +720,16 @@ export const upgradeSkill = async (req: Request, res: Response, next: NextFuncti
       ? domainUpgradeCost(level)
       : skillUpgradeCost(level, def.rarity);
 
+    const free = await isLeadDevFree(userId!);
     try {
       const out = await prisma.$transaction(async (tx) => {
-        const paid = await tx.user.updateMany({
-          where: { id: userId, shards: { gte: cost } },
-          data: { shards: { decrement: cost } },
-        });
-        if (paid.count === 0) throw new CardError(402, `${skill.type === "domain" ? "Deepening" : "Training"} ${skill.def.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        if (!free) {
+          const paid = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (paid.count === 0) throw new CardError(402, `${skill.type === "domain" ? "Deepening" : "Training"} ${skill.def.name} costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        }
         const bumped = await tx.userCard.updateMany({
           where: { userId, cardId, skillLevel: level },
           data: { skillLevel: { increment: 1 } },
@@ -854,16 +883,19 @@ export const upgradeCard = async (req: Request, res: Response, next: NextFunctio
       return res.status(400).json({ success: false, message: `${def.name} is already at max level.` });
     }
     const cost = upgradeCost(def.rarity, level);
+    const free = await isLeadDevFree(userId!);
 
     try {
       const out = await prisma.$transaction(async (tx) => {
         // One conditional decrement makes the affordability check and the spend
         // a single operation — two fast clicks can't both pass.
-        const paid = await tx.user.updateMany({
-          where: { id: userId, shards: { gte: cost } },
-          data: { shards: { decrement: cost } },
-        });
-        if (paid.count === 0) throw new Error("POOR");
+        if (!free) {
+          const paid = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (paid.count === 0) throw new Error("POOR");
+        }
         // Guarded on the level we priced, so a double submit can't buy two
         // levels for the price of the cheaper one.
         const bumped = await tx.userCard.updateMany({

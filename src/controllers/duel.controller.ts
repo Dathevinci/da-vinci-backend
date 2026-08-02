@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
+import { isLeadDevFree } from "./card.controller";
 import { CARDS } from "../data/cardCatalog";
 import {
   DECK_SIZE, ITEMS, ItemId, DuelState, makeSide, applyAction, sideOf,
@@ -639,13 +640,18 @@ export const buyItem = async (req: Request, res: Response, next: NextFunction) =
     const def = item ? ITEMS[item] : undefined;
     if (!def) return res.status(400).json({ success: false, message: "Unknown item." });
 
+    // The lead dev's shard spends are free — mirrors isLeadDevFree in
+    // card.controller (the testing account, lead dev ONLY, role-column-first).
+    const free = await isLeadDevFree(userId!);
     try {
       const shards = await prisma.$transaction(async (tx) => {
-        const debit = await tx.user.updateMany({
-          where: { id: userId, shards: { gte: def.shards } },
-          data: { shards: { decrement: def.shards } },
-        });
-        if (debit.count === 0) throw new DuelError(402, `${def.name} costs ${def.shards} shards — you don't have enough.`);
+        if (!free) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: def.shards } },
+            data: { shards: { decrement: def.shards } },
+          });
+          if (debit.count === 0) throw new DuelError(402, `${def.name} costs ${def.shards} shards — you don't have enough.`);
+        }
         const u = await tx.user.update({
           where: { id: userId },
           data: { duelItems: { push: def.id } },

@@ -132,7 +132,7 @@ export const dispatch = async (req: Request, res: Response, next: NextFunction) 
 
     const rows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: ids } },
-      select: { cardId: true, foil: true, level: true, dgnHp: true, dgnInjured: true, dgnDead: true },
+      select: { cardId: true, foil: true, level: true, skillLevel: true, dgnHp: true, dgnInjured: true, dgnDead: true },
     });
     if (rows.length !== ids.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that party." });
@@ -147,7 +147,7 @@ export const dispatch = async (req: Request, res: Response, next: NextFunction) 
 
     const byId = new Map(rows.map((r) => [r.cardId, r]));
     const party = ids
-      .map((id) => { const r = byId.get(id)!; return makeUnit(id, r.level, r.foil, r.dgnHp, r.dgnInjured); })
+      .map((id) => { const r = byId.get(id)!; return makeUnit(id, r.level, r.foil, r.dgnHp, r.dgnInjured, r.skillLevel); })
       .filter((u): u is DgnUnit => !!u);
     if (party.length !== ids.length) {
       return res.status(400).json({ success: false, message: "That party couldn't be formed." });

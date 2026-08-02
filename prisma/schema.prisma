@@ -238,17 +238,15 @@ model PointLog {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
-/**
- * A card put up for sale.
- *
- * The copies are ESCROWED here — they leave the seller's UserCard row the
- * moment the listing is created, not when it sells. Without that a seller
- * could list two copies and then dust them, and the listing would later hand
- * a buyer cards that no longer exist. The listing IS the custody record.
- *
- * foil and level are copied onto the listing because they are properties of
- * the specific copies being sold, and the seller may still hold others.
- */
+// A card put up for sale.
+//
+// The copies are ESCROWED here — they leave the seller's UserCard row the
+// moment the listing is created, not when it sells. Without that a seller
+// could list two copies and then dust them, and the listing would later hand
+// a buyer cards that no longer exist. The listing IS the custody record.
+//
+// foil and level are copied onto the listing because they are properties of
+// the specific copies being sold, and the seller may still hold others.
 model CardListing {
   id        String    @id @default(uuid())
   sellerId  String

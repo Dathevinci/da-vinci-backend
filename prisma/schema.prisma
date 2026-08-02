@@ -43,6 +43,7 @@ model User {
   showcaseCards    String[] @default([])  // up to 3 card ids pinned to the profile
   cardTitle        String?                // title earned from completing a set
   cards            UserCard[]
+  cardListings     CardListing[] @relation("CardListings")
 
   activeRole       String?
   activeTag        String?
@@ -235,6 +236,38 @@ model PointLog {
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/**
+ * A card put up for sale.
+ *
+ * The copies are ESCROWED here — they leave the seller's UserCard row the
+ * moment the listing is created, not when it sells. Without that a seller
+ * could list two copies and then dust them, and the listing would later hand
+ * a buyer cards that no longer exist. The listing IS the custody record.
+ *
+ * foil and level are copied onto the listing because they are properties of
+ * the specific copies being sold, and the seller may still hold others.
+ */
+model CardListing {
+  id        String    @id @default(uuid())
+  sellerId  String
+  sellerName String
+  cardId    String    // id in the server-side card catalog
+  qty       Int       @default(1)
+  foil      Boolean   @default(false)
+  level     Int       @default(1)
+  price     Int       // Arise Points for the WHOLE lot
+  status    String    @default("ACTIVE") // ACTIVE | SOLD | CANCELLED
+  buyerId   String?
+  buyerName String?
+  createdAt DateTime  @default(now())
+  soldAt    DateTime?
+
+  seller    User      @relation("CardListings", fields: [sellerId], references: [id], onDelete: Cascade)
+
+  @@index([status, cardId])
+  @@index([sellerId, status])
 }
 
 // A collectible card a user owns, with how many copies. `count > 1` = dupes,

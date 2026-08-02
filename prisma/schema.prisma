@@ -41,13 +41,12 @@ model User {
   duelItems        String[] @default([])  // bag of duel consumables; one entry = one charge
   claimedSets      String[] @default([])  // set names whose completion reward has been paid
   showcaseCards    String[] @default([])  // up to 3 card ids pinned to the profile
-  // Arena effects change the DUEL BOARD rather than the profile, so they get
-  // their own inventory and their own equipped slot.
+  // RETIRED — the arena-effect feature was removed. Columns kept rather than
+  // dropped: `prisma db push --accept-data-loss` runs on every deploy and a
+  // dropped column is gone for good. They are read by nothing and cost
+  // nothing. Safe to delete deliberately, later.
   purchasedArenaEffects String[] @default([])
   activeArenaEffect     String?
-  // Arena Cache pity. Counts DUPLICATES since the last new effect; the chest id
-  // is stored alongside so pity banked on one chest can't be cashed on a
-  // different, richer one later.
   arenaChestPity        Int      @default(0)
   arenaChestPityChest   String   @default("")
   cardTitle        String?                // title earned from completing a set
@@ -323,9 +322,7 @@ model Duel {
   challengerDeck String[] @default([])     // card ids
   opponentDeck   String[] @default([])
   state          String?                   // JSON: fighters, hp, items, log
-  // Arena effects. Each side says whether it wants to play with effects on;
-  // only if BOTH agree does `arenaEffect` get set, and it holds the rarer of
-  // the two they brought. Purely cosmetic — combat maths never reads it.
+  // RETIRED with the arena-effect feature. Kept, not dropped — see User.
   challengerArena Boolean @default(false)   // challenger opted in
   opponentArena   Boolean @default(false)   // opponent opted in
   arenaEffect     String?                   // the effect actually in play
@@ -528,14 +525,8 @@ model Donation {
   createdAt     DateTime @default(now())
 }
 
-// One row per Arena Cache opening, claimed BEFORE any money moves.
-//
-// This exists purely to make the endpoint idempotent: the client mints a rollId
-// per button press and reuses it across retries, so a replayed request hits the
-// unique index, rolls the whole transaction back, and returns the ORIGINAL
-// result instead of charging again. It could not live on PointLog — adding a
-// unique there would fail against the thousands of existing duplicate
-// "card-pack:x4" rows.
+// RETIRED with the arena-effect feature. Kept, not dropped — dropping a table
+// on a deploy that runs db push is irreversible, and this one is inert.
 model ArenaChestOpen {
   id        String   @id @default(uuid())
   userId    String

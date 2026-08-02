@@ -197,8 +197,7 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     // admin). They change only via trusted server-side paths.
     const { username, email, avatar, bannerUrl, bannerPosition, bannerStyle, bio, arisePoints, isPrivate, theme,
             purchasedBanners, purchasedTags, purchasedRoles, purchasedEffects, purchasedThemes, purchasedColors, purchasedFonts, purchasedFrames,
-            activeRole, activeTag, activeEffect, activeTheme, activeColor, activeFont, activeFrame,
-            activeArenaEffect } = req.body;
+            activeRole, activeTag, activeEffect, activeTheme, activeColor, activeFont, activeFrame } = req.body;
     const userId = req.params.id as string;
 
     // Identity guard (soft): if the request carries a VERIFIED token, it must be
@@ -253,17 +252,14 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     // dropped so the rest of the profile save still applies.
     let allowedActiveEffect = activeEffect;
     let allowedActiveFrame = activeFrame;
-    let allowedActiveArena = activeArenaEffect;
     const wantsEffect = typeof activeEffect === "string" && activeEffect && activeEffect !== "effect_none";
     const wantsFrame = typeof activeFrame === "string" && activeFrame;
-    const wantsArena = typeof activeArenaEffect === "string" && activeArenaEffect && activeArenaEffect !== "arena_none";
-    if (wantsEffect || wantsFrame || wantsArena) {
+    if (wantsEffect || wantsFrame) {
       const current = await prisma.user.findUnique({
         where: { id: userId },
         select: {
           username: true, role: true, activeEffect: true, activeFrame: true,
           purchasedEffects: true, purchasedFrames: true,
-          activeArenaEffect: true, purchasedArenaEffects: true,
         },
       });
       if (current) {
@@ -276,16 +272,9 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
           if (wantsFrame && activeFrame !== current.activeFrame && !current.purchasedFrames.includes(activeFrame)) {
             allowedActiveFrame = undefined;
           }
-          if (wantsArena && activeArenaEffect !== current.activeArenaEffect && !current.purchasedArenaEffects.includes(activeArenaEffect)) {
-            allowedActiveArena = undefined;
-          }
         }
       }
     }
-    // "arena_none" is the unequip sentinel; store it as NULL so the duel
-    // resolver's `arenaEffect(id)` lookup misses cleanly instead of hunting
-    // for a catalog entry that doesn't exist.
-    if (allowedActiveArena === "arena_none") allowedActiveArena = null;
 
     const updateData: any = {
       // NOTE: username goes through the gated changeUsername endpoint.
@@ -308,7 +297,6 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
       ...(activeColor !== undefined && { activeColor }),
       ...(activeFont !== undefined && { activeFont }),
       ...(allowedActiveFrame !== undefined && { activeFrame: allowedActiveFrame }),
-      ...(allowedActiveArena !== undefined && { activeArenaEffect: allowedActiveArena }),
     };
 
     if (incrementPoints > 0 && arisePoints === undefined) {

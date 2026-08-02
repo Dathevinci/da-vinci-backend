@@ -4,7 +4,7 @@ import { getActorId } from "../lib/jwt";
 import { CARDS } from "../data/cardCatalog";
 import {
   DECK_SIZE, ITEMS, ItemId, DuelState, makeSide, applyAction, sideOf,
-  eloDelta, payout, MIN_STAKE, MAX_STAKE, DUEL_EXPIRY_HOURS, forfeitFine,
+  eloDelta, payout, MIN_STAKE, MAX_STAKE, DUEL_EXPIRY_HOURS, forfeitFine, SUPPORTS_PER_DUEL,
 } from "../data/duelRules";
 
 /**
@@ -494,7 +494,12 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
       } else if (act.type === "deploy") {
         why = "That card can't be sent in.";
       } else if (act.type === "support") {
-        why = "That card wouldn't do anything right now.";
+        const used = meSide.usedSupports || [];
+        why = used.length >= SUPPORTS_PER_DUEL
+          ? `You've already played ${SUPPORTS_PER_DUEL} support cards this duel.`
+          : used.includes(act.cardId)
+          ? "You've already played that one this duel."
+          : "That card wouldn't do anything right now.";
       }
       return res.status(400).json({ success: false, message: why });
     }

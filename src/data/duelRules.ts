@@ -14,6 +14,10 @@ import { CARDS, CardRarity, levelMult } from "./cardCatalog";
 
 export const DECK_SIZE = 5;
 
+// How many DIFFERENT support cards one player may play in a single duel.
+// Owning more is fine; picking which three matter is the decision.
+export const SUPPORTS_PER_DUEL = 3;
+
 // Walking out of a staked duel costs you the pot AND a fine on top, paid to the
 // player whose time you wasted. Without the fine, quitting is free the moment
 // you're losing — the stake was already gone either way — so the whole point is
@@ -214,6 +218,15 @@ export function applyAction(
     // Side, and property narrowing across the branches below is fragile.
     const used: string[] = me.usedSupports || (me.usedSupports = []);
     if (used.includes(action.cardId)) return { state, finished: false };
+    /**
+     * At most SUPPORTS_PER_DUEL different supports in one duel.
+     *
+     * Enforced HERE rather than by trusting a client-side loadout, because a
+     * hand-rolled request would otherwise let someone play their entire
+     * collection of supports across a single match. Owning more is fine —
+     * choosing which three matter is the decision.
+     */
+    if (used.length >= SUPPORTS_PER_DUEL) return { state, finished: false };
 
     // `target` is the card the player dropped this onto. When it's absent (a
     // tap rather than a drag) we fall back to the active fighter — but when the

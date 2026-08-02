@@ -498,7 +498,7 @@ export const blessComment = async (req: Request, res: Response, next: NextFuncti
 export const editComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { content, mediaUrl } = req.body;
+    const { content, mediaUrl, title, tag } = req.body;
 
     if (!content) {
       return res.status(400).json({ success: false, message: "Invalid payload" });
@@ -520,7 +520,18 @@ export const editComment = async (req: Request, res: Response, next: NextFunctio
 
     const updatedComment = await prisma.comment.update({
       where: { id },
-      data: { content, mediaUrl: mediaUrl || null },
+      data: {
+        content,
+        mediaUrl: mediaUrl || null,
+        // Forum posts carry a headline and a topic. Without these an author
+        // could fix a typo in the body but was stuck with the title forever.
+        // `undefined` leaves a field alone, so a plain comment edit — which
+        // sends neither — is completely unaffected.
+        ...(typeof title === "string"
+          ? { title: title.trim() ? title.trim().slice(0, 30) : null }
+          : {}),
+        ...(typeof tag === "string" && FORUM_TAGS.includes(tag) ? { tag } : {}),
+      },
       include: {
         user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
         votes: true

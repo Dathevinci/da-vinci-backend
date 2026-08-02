@@ -307,6 +307,36 @@ model UserCard {
   @@index([userId])
 }
 
+// One physical COPY of a legendary card. UserCard.count stays the source of
+// truth for HOW MANY you own; a print is the identity of each copy — a global
+// serial in mint order plus the condition it was pulled in. Condition and
+// serial are cosmetic and market-facing ONLY: nothing in duelRules reads
+// them, the same deliberate zero-combat-impact line the arena effects drew.
+// No FK relations on purpose — additive columns only, safe under the
+// `prisma db push --accept-data-loss` that runs on every deploy.
+model CardPrint {
+  id        String   @id @default(uuid())
+  cardId    String   // id in the server-side card catalog (legendaries only)
+  serial    Int      // 1-based, global per cardId, in mint order
+  condition String   // "fresh" | "factory" | "rusted" — see prints.ts
+  userId    String?  // current holder; null while escrowed in a listing
+  listingId String?  // the CardListing holding it while escrowed
+  createdAt DateTime @default(now())
+
+  @@unique([cardId, serial])
+  @@index([userId])
+  @@index([listingId])
+}
+
+// Hands out the next serial for a card under a row lock, so two packs opening
+// the same legendary at the same moment can never mint the same number. A
+// unique-violation retry can't work here — Postgres aborts the surrounding
+// transaction on constraint failure, which would kill the whole pack open.
+model PrintCounter {
+  cardId String @id
+  next   Int    @default(1)
+}
+
 // A staked, ranked card duel. Both players ante Arise Points; the winner takes
 // the pot MINUS a rake that is burned, so competitive play is itself a sink.
 // Game state lives in `state` as JSON — the rules engine is server-side only,

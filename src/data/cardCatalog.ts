@@ -155,6 +155,18 @@ export const CARDS: Record<string, CardDef> = {
   card_lampofhours:{ id: "card_lampofhours",name: "Lamp of Hours",    rarity: "epic",   set: "Vigil",   hue: 46,  motif: "seed",   flavor: "Burns down exactly as fast as it is needed." },
   card_longmorrow: { id: "card_longmorrow",  name: "The Long Morrow",  rarity: "legendary", set: "Vigil", hue: 275, motif: "comet", flavor: "It arrives. It has always been going to arrive." },
 
+  // ═══ SET · REQUIEM — seven legendaries and nothing else ═══════════════════
+  // A set with no commons to pad it: every card in it is a chase. Kept as its
+  // own set so adding seven legendaries doesn't quietly make the existing
+  // sets impossible to finish for anyone mid-collection.
+  card_blacksun:    { id: "card_blacksun",    name: "The Sun That Bleeds",     rarity: "legendary", set: "Requiem", hue: 350, motif: "dawn",  flavor: "It rose black over the cathedral, and what it shed was not light." },
+  card_crowfeast:   { id: "card_crowfeast",   name: "What the Crows Keep",     rarity: "legendary", set: "Requiem", hue: 35,  motif: "path",  flavor: "They circle nothing. They are very patient about it." },
+  card_redmoon:     { id: "card_redmoon",     name: "The Rite of the Red Moon", rarity: "legendary", set: "Requiem", hue: 355, motif: "bell",  flavor: "The steps are bone because everyone who climbed them stayed." },
+  card_palepilgrim: { id: "card_palepilgrim", name: "The Pale Pilgrim",        rarity: "legendary", set: "Requiem", hue: 200, motif: "peak",  flavor: "Winter follows at a respectful distance, in chains." },
+  card_monarch:     { id: "card_monarch",     name: "The Sword That Remembers", rarity: "legendary", set: "Requiem", hue: 210, motif: "blade", flavor: "Every hand that ever held it is still holding it." },
+  card_grin:        { id: "card_grin",        name: "The Grin in the Dark",    rarity: "legendary", set: "Requiem", hue: 280, motif: "mask",  flavor: "You do not find it. It notices you." },
+  card_drownedgate: { id: "card_drownedgate", name: "The Drowned Gate",        rarity: "legendary", set: "Requiem", hue: 220, motif: "gate",  flavor: "The shrine went under mid-prayer, and the water finished it." },
+
   // ── Event (limited; NOT in normal packs) ──
   card_founder:    { id: "card_founder",    name: "The Founder's Seal", rarity: "event", set: "Genesis", hue: 290, motif: "seal", flavor: "Given to those who were here at the beginning." },
 };
@@ -178,11 +190,20 @@ export const PACK_SIZE = 4;
  * Crafting is the deliberate escape hatch. Odds this long without a
  * deterministic path just punish unlucky players indefinitely.
  */
+/**
+ * Legendary squeezed again: 1% → 0.6% per card. The tier just went from 8
+ * cards to 15, so without this the chance of pulling SOME legendary would
+ * have stayed flat while each named one halved — the owner asked for the
+ * whole tier to get harder, not merely more diluted. At 0.6% a four-card
+ * pack carries ~2.4% odds of any legendary; craft stays the escape hatch.
+ * Weights are floats now — the roll multiplies Math.random() by the sum, so
+ * nothing anywhere assumes integers.
+ */
 const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event">, number> = {
   common: 64,
-  rare: 27,
+  rare: 27.4,
   epic: 8,
-  legendary: 1,
+  legendary: 0.6,
 };
 
 // Dust value (shards you get for one duplicate) and craft cost (shards to make a
@@ -192,7 +213,10 @@ export const DUST_VALUE: Record<CardRarity, number> = {
   common: 5, rare: 15, epic: 40, legendary: 120, event: 0, // event cards can't be dusted
 };
 export const CRAFT_COST: Record<CardRarity, number> = {
-  common: 40, rare: 120, epic: 340, legendary: 1000, event: 0, // event can't be crafted
+  // Legendary 1000 → 1500 alongside the pull-rate squeeze: the deterministic
+  // path gets longer in step with the lucky one, or crafting becomes the
+  // obvious bypass and the squeeze does nothing.
+  common: 40, rare: 120, epic: 340, legendary: 1500, event: 0, // event can't be crafted
 };
 
 /**
@@ -290,9 +314,15 @@ export const FOIL_COST: Record<CardRarity, number> = {
 export const RELIC_PACK_SHARDS = 500;
 
 // Roll a relic pack: normal odds, but the first slot is forced to epic+.
+// The chase slot is WEIGHTED, not uniform over cards. Uniform was fine when
+// legendaries were 8 cards against 13 epics (~38%), but at 15 legendaries a
+// uniform pick would have made the guaranteed slot MORE likely to be
+// legendary than epic — growing the tier would have made it easier to hit,
+// the exact opposite of the squeeze everywhere else.
 export function rollRelicPack(size = PACK_SIZE): string[] {
-  const chase = PACK_POOL.filter((c) => c.rarity === "epic" || c.rarity === "legendary");
-  const guaranteed = chase[Math.floor(Math.random() * chase.length)].id;
+  const rarity = Math.random() < 0.2 ? "legendary" : "epic";
+  const pool = PACK_POOL.filter((c) => c.rarity === rarity);
+  const guaranteed = pool[Math.floor(Math.random() * pool.length)].id;
   return [guaranteed, ...rollPack(size - 1)];
 }
 
@@ -313,6 +343,9 @@ export const SET_REWARDS: Record<string, SetReward> = {
   Ronin:     { set: "Ronin",     ap: 3000, shards: 500, title: "Sword Without a Lord" },
   Vigil:     { set: "Vigil",     ap: 3200, shards: 550, title: "Keeper of the Long Watch" },
   Genesis:   { set: "Genesis",   ap: 1000, shards: 200, title: "Keeper of Genesis" },
+  // Seven legendaries, no padding — completing this is the longest chase in
+  // the game, and the payout is sized like it.
+  Requiem:   { set: "Requiem",   ap: 8000, shards: 1500, title: "The Requiem Made Whole" },
 };
 
 // Distinct card ids belonging to a set (for completion checks).
@@ -464,7 +497,14 @@ export type DomainKind =
   | "ascend"        // your line keeps the power, permanently
   | "judgement"     // fells the weakest thing standing, no roll
   | "seal"          // the other side loses its supports
-  | "inevitability"; // a doom that lands later no matter what happens
+  | "inevitability" // a doom that lands later no matter what happens
+  | "eclipse"       // the enemy's next attacks land weakened
+  | "carrion"       // feeds on every fallen card on the board
+  | "bloodmoon"     // the enemy's active card bleeds, and keeps bleeding
+  | "chains"        // the enemy simply cannot attack for a span
+  | "monarch"       // your fallen lend their strength to the living
+  | "terror"        // the thing standing opposite loses its nerve, and its health
+  | "abyss";        // for a span, damage dealt to you comes back on the dealer
 
 export interface DomainDef {
   name: string;
@@ -509,6 +549,36 @@ export const DOMAINS: Record<string, DomainDef> = {
     name: "It Has Always Been Coming", kind: "inevitability", base: 200, step: 80,
     text: (p) => `In three turns, ${p}% ATK lands on whoever is standing. Nothing stops it.`,
   },
+
+  // ── The Requiem seven ──
+  card_blacksun: {
+    name: "The Sun Goes Out", kind: "eclipse", base: 30, step: 10,
+    text: (p) => `The enemy's next three attacks land ${p}% weaker. They swing in the dark.`,
+  },
+  card_crowfeast: {
+    name: "The Field Is Theirs", kind: "carrion", base: 40, step: 15,
+    text: (p) => `${p}% ATK for every fallen card on the board, dealt to whoever stands opposite — and eaten as healing.`,
+  },
+  card_redmoon: {
+    name: "The Moon Drinks", kind: "bloodmoon", base: 8, step: 3,
+    text: (p) => `The card opposite bleeds ${p}% of its health every turn. It does not stop.`,
+  },
+  card_palepilgrim: {
+    name: "The Long Chain", kind: "chains", base: 1, step: 1,
+    text: (p) => `The other side cannot attack for ${p} turn${p === 1 ? "" : "s"}. The chain holds.`,
+  },
+  card_monarch: {
+    name: "The Dead March Behind", kind: "monarch", base: 12, step: 6,
+    text: (p) => `+${p}% ATK for every one of your fallen cards, kept for the rest of the duel.`,
+  },
+  card_grin: {
+    name: "It Smiles Back", kind: "terror", base: 35, step: 15,
+    text: (p) => `The card opposite loses ${p}% of its CURRENT health. No roll, no guard.`,
+  },
+  card_drownedgate: {
+    name: "The Water Remembers", kind: "abyss", base: 2, step: 1,
+    text: (p) => `For the enemy's next ${p} attack${p === 1 ? "" : "s"}, half of what they deal comes straight back on them.`,
+  },
 };
 
 export function domainFor(cardId: string): DomainDef | null {
@@ -522,7 +592,7 @@ export function domainPower(def: DomainDef, level: number): number {
 
 /**
  * Domains cap at three ranks rather than five, and each one costs more than a
- * maxed epic skill. Eight cards in the game have one; it should read as a
+ * maxed epic skill. Fifteen cards in the game have one; it should read as a
  * different order of investment, not a longer version of the same one.
  */
 export function domainUpgradeCost(level: number): number {

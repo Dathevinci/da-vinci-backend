@@ -93,6 +93,13 @@ export interface Side {
   bleed?: { pct: number; from: string };
   /** A doom that lands on this side in `turns`, for `power` percent of ATK. */
   doom?: { turns: number; power: number; from: string };
+  /** Eclipse: this side's next `turns` attacks land `pct` percent weaker. */
+  atkDown?: { pct: number; turns: number };
+  /** Chains: this side cannot attack at all while > 0, spent per attempt. */
+  chainTurns?: number;
+  /** Abyss: while > 0, half of what lands ON this side comes back on the
+   *  attacker. Spent per attack that actually deals damage. */
+  reflectTurns?: number;
 }
 
 export interface DuelState {
@@ -494,6 +501,58 @@ export function applyAction(
         // Lands in three turns no matter what. Stored on the SIDE it will hit.
         foe.doom = { turns: 3, power: p, from: self.name };
         s.log.push(`Something is coming for ${foe.username}. Three turns.`);
+      } else if (k === "eclipse") {
+        // A lasting dimming on the ENEMY's swings, spent per attack they make.
+        foe.atkDown = { pct: p, turns: 3 };
+        s.log.push(`The sun went out over ${foe.username} — their next 3 attacks land ${p}% weaker.`);
+      } else if (k === "carrion") {
+        // Feeds on every fallen card on the board, BOTH sides — the crows do
+        // not care whose dead they are.
+        const fallenAll =
+          me.fighters.filter((f) => f.hp <= 0).length +
+          foe.fighters.filter((f) => f.hp <= 0).length;
+        if (fallenAll === 0 || !target) { s.log.pop(); return { state, finished: false }; }
+        // The crows can only carry what was actually there — the heal is
+        // what was TAKEN, not the theoretical feast.
+        const feast = Math.max(1, Math.round(self.atk * (p / 100) * fallenAll));
+        const taken = Math.min(feast, target.hp);
+        target.hp = Math.max(0, target.hp - feast);
+        self.hp = Math.min(self.maxHp, self.hp + taken);
+        s.log.push(`The crows took ${taken} from ${target.name} and fed it to ${self.name}.`);
+      } else if (k === "bloodmoon") {
+        if (!target) { s.log.pop(); return { state, finished: false }; }
+        // Reuses the bleed channel, but never DOWNGRADES it — a rank-5 venom
+        // bleeds harder than a rank-1 moon, and casting the domain over it
+        // must not halve the poison you already landed.
+        const pct = Math.max(foe.bleed?.pct ?? 0, p);
+        foe.bleed = { pct, from: ability.def.name };
+        s.log.push(`${target.name} began to bleed ${pct}% of its health every turn. It will not stop.`);
+      } else if (k === "chains") {
+        foe.chainTurns = (foe.chainTurns || 0) + p;
+        s.log.push(`${foe.username} is chained — no attacks for ${foe.chainTurns} turn${foe.chainTurns === 1 ? "" : "s"}.`);
+      } else if (k === "monarch") {
+        // The fallen lend their strength. Rides the same lasting atkBonus as
+        // ascend, scaled by how many of yours are down — refuse on none, so
+        // the once-per-duel use is never burnt for zero.
+        const fallenMine = me.fighters.filter((f) => f.hp <= 0).length;
+        if (fallenMine === 0) { s.log.pop(); return { state, finished: false }; }
+        const gain = p * fallenMine;
+        me.atkBonus = (me.atkBonus || 0) + gain;
+        s.log.push(`${fallenMine} fallen answered the call — ${me.username}'s line strikes ${gain}% harder, for good.`);
+      } else if (k === "terror") {
+        if (!target) { s.log.pop(); return { state, finished: false }; }
+        // Percent of CURRENT health: never lethal on its own, devastating on
+        // anything healthy, and it ignores guard by design — nerve is not
+        // something armour helps with. The cap at hp-1 is what makes "never
+        // lethal" literally true — without it the 1-damage floor executed a
+        // card sitting on its last hit point.
+        const bite = Math.min(Math.max(0, target.hp - 1), Math.max(1, Math.round((target.hp * p) / 100)));
+        if (bite <= 0) { s.log.pop(); return { state, finished: false }; }
+        target.hp = Math.max(0, target.hp - bite);
+        s.log.push(`${target.name} saw it smile, and lost ${bite}.`);
+      } else if (k === "abyss") {
+        me.reflectTurns = (me.reflectTurns || 0) + p;
+        s.log.push(`The water remembers — for ${me.reflectTurns} attack${me.reflectTurns === 1 ? "" : "s"}, what lands on ${me.username} comes back on the dealer.`);
       } else {
         s.log.pop();
         return { state, finished: false };
@@ -553,6 +612,18 @@ export function applyAction(
     // Unreachable after the force-deploy above, but strict tsc can't see that
     // and `theirs` is now optional — narrow it rather than assert non-null.
     if (!theirs) return { state, finished: false };
+    // Chained by The Long Chain: the swing simply does not happen. Spent per
+    // ATTEMPTED attack, and the turn still passes — that is the whole cost.
+    // Checked before bulwark/block so the defender's wards aren't wasted on
+    // an attack that was never going to arrive.
+    if (me.chainTurns && me.chainTurns > 0) {
+      me.chainTurns -= 1;
+      s.log.push(`${mine.name} pulled against the chain — the swing never came. ${me.chainTurns} turn${me.chainTurns === 1 ? "" : "s"} of chain left.`);
+      s.turn = foe.userId;
+      s.round += 1;
+      if (s.log.length > 60) s.log = s.log.slice(-60);
+      return { state: s, finished: false };
+    }
     // A block negates the hit entirely and is consumed. Checked BEFORE the
     // focus buffs are spent: attacking into a Bulwark used to burn your Focus
     // and your War Cry for zero damage, which made the counter feel like a bug.
@@ -580,6 +651,13 @@ export function applyAction(
     // Ascend is a lasting, side-wide multiplier, so it applies before the
     // one-shot buffs rather than competing with them.
     if (me.atkBonus) dmg *= 1 + me.atkBonus / 100;
+    // Eclipse: this side swings in the dark for a few attacks. Spent per
+    // swing, capped so it can never zero a blow outright.
+    if (me.atkDown && me.atkDown.turns > 0) {
+      dmg *= 1 - Math.min(90, me.atkDown.pct) / 100;
+      me.atkDown.turns -= 1;
+      if (me.atkDown.turns <= 0) me.atkDown = undefined;
+    }
     // One-shot weakening from an enemy stagger, spent whether it kills or not.
     if (me.weaken) { dmg *= 1 - Math.min(90, me.weaken) / 100; me.weaken = undefined; }
     if (me.focus) {
@@ -615,6 +693,21 @@ export function applyAction(
       s.log.push(`${theirs.name} fell.`);
       // Their field empties. They pick who steps up next, on their turn.
       foe.active = -1;
+    }
+
+    // The abyss answers: half of what landed comes straight back on the
+    // attacker. Spent per attack that actually dealt damage — a nullified or
+    // blocked swing never reaches this code, which is correct: nothing
+    // landed, so there is nothing for the water to remember.
+    if (foe.reflectTurns && foe.reflectTurns > 0) {
+      foe.reflectTurns -= 1;
+      const back = Math.max(1, Math.round(dealt / 2));
+      mine.hp = Math.max(0, mine.hp - back);
+      s.log.push(`The water returned ${back} of it to ${mine.name}.`);
+      if (mine.hp === 0) {
+        s.log.push(`${mine.name} fell.`);
+        me.active = -1;
+      }
     }
   }
 

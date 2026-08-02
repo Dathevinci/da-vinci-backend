@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { CARDS } from "../data/cardCatalog";
+import { escrowPrints, releasePrints, transferPrints } from "../lib/prints";
 
 /**
  * CARD MARKETPLACE — player-to-player sales, server-escrowed.
@@ -95,11 +96,24 @@ export const listListings = async (req: Request, res: Response, next: NextFuncti
       take: 120,
     });
 
+    // Legendary listings carry the escrowed prints' identities — a Fresh
+    // Build #3 is a different asset from a Factory New #212, and a buyer is
+    // owed the difference before they pay for it.
+    const prints = await prisma.cardPrint.findMany({
+      where: { listingId: { in: rows.map((l) => l.id) } },
+      select: { listingId: true, serial: true, condition: true },
+      orderBy: { serial: "asc" },
+    });
+    const byListing: Record<string, { serial: number; condition: string }[]> = {};
+    for (const p of prints) {
+      if (p.listingId) (byListing[p.listingId] ||= []).push({ serial: p.serial, condition: p.condition });
+    }
+
     // The card definition travels with the listing so the client never has to
     // guess at a name or rarity it might not have loaded yet.
     res.json({
       success: true,
-      data: rows.map((l) => ({ ...l, card: CARDS[l.cardId] ?? null })),
+      data: rows.map((l) => ({ ...l, card: CARDS[l.cardId] ?? null, prints: byListing[l.id] || undefined })),
     });
   } catch (error) {
     next(error);
@@ -152,7 +166,7 @@ export const createListing = async (req: Request, res: Response, next: NextFunct
         // The row goes so the card stops showing in the binder at all.
         await tx.userCard.deleteMany({ where: { userId, cardId, count: { lte: 0 } } });
 
-        return tx.cardListing.create({
+        const created = await tx.cardListing.create({
           data: {
             sellerId: userId!,
             sellerName: seller.username,
@@ -163,6 +177,13 @@ export const createListing = async (req: Request, res: Response, next: NextFunct
             price: ask,
           },
         });
+        // Legendary copies have identities: escrow the seller's WORST prints
+        // into the listing, so listing two of five copies never gives away
+        // the Fresh Build they meant to keep.
+        if (CARDS[cardId!]?.rarity === "legendary") {
+          await escrowPrints(tx, userId!, cardId!, created.id, amount);
+        }
+        return created;
       });
 
       res.status(201).json({ success: true, data: { ...listing, card: def } });
@@ -263,6 +284,9 @@ export const buyListing = async (req: Request, res: Response, next: NextFunction
             },
           });
         }
+        // The escrowed prints change hands with the copies — serial and
+        // condition travel to the buyer, which is the entire point of them.
+        await transferPrints(tx, listing.id, userId!);
 
         await tx.notification.create({
           data: {
@@ -335,6 +359,8 @@ export const cancelListing = async (req: Request, res: Response, next: NextFunct
             },
           });
         }
+        // Escrowed prints come home with the copies.
+        await releasePrints(tx, listing.id, userId!);
       });
       res.json({ success: true });
     } catch (e) {

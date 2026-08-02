@@ -31,6 +31,13 @@ import {
   skillPower,
   skillUpgradeCost,
 } from "../data/cardCatalog";
+import {
+  mintPrints,
+  burnWorstPrints,
+  isLegendary,
+  CONDITION_META,
+  type PrintInfo,
+} from "../lib/prints";
 
 /**
  * ARISE CARDS — collectible packs, dusting and crafting.
@@ -75,6 +82,9 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         foilMult: FOIL_MULT,
         maxSkillLevel: MAX_SKILL_LEVEL,
         maxDomainLevel: MAX_DOMAIN_LEVEL,
+        // Legendary print conditions — labels + mint odds, served so the
+        // client never grows its own copy of either.
+        printConditions: CONDITION_META,
         /**
          * Legendary DOMAIN EXPANSIONS. A separate map from skills, with kinds
          * that share nothing with them — a legendary is meant to be a
@@ -189,14 +199,29 @@ function ownerGuard(req: Request, res: Response, userId?: string): boolean {
 export const getCollection = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.params.userId as string;
-    const [owned, user] = await Promise.all([
+    const [owned, user, prints] = await Promise.all([
       prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
+      // Legendary print identities — serial + condition per held copy. Best
+      // condition first, then oldest serial, so the first entry is always
+      // the copy a collector would lead with.
+      prisma.cardPrint.findMany({
+        where: { userId },
+        select: { cardId: true, serial: true, condition: true },
+        orderBy: { serial: "asc" },
+      }),
     ]);
+    const printMap: Record<string, { serial: number; condition: string }[]> = {};
+    for (const p of prints) (printMap[p.cardId] ||= []).push({ serial: p.serial, condition: p.condition });
+    // The orderBy above is serial-only; finish the promised ordering here.
+    const rank: Record<string, number> = { fresh: 2, rusted: 1, factory: 0 };
+    for (const list of Object.values(printMap)) {
+      list.sort((a, b) => (rank[b.condition] ?? 0) - (rank[a.condition] ?? 0) || a.serial - b.serial);
+    }
     res.json({
       success: true,
       data: {
-        cards: owned,
+        cards: owned.map((c) => ({ ...c, prints: printMap[c.cardId] || undefined })),
         shards: user?.shards ?? 0,
         claimedSets: user?.claimedSets ?? [],
         cardTitle: user?.cardTitle ?? null,
@@ -237,19 +262,24 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
         }
 
         // Grant each pull — upsert the per-card count so dupes stack.
+        // Every LEGENDARY copy also mints a print: its serial and condition
+        // are born here, inside the same transaction as the grant, so a
+        // failed grant can never leave an orphan print (or vice versa).
+        const prints: PrintInfo[] = [];
         for (const cardId of pulls) {
           await tx.userCard.upsert({
             where: { userId_cardId: { userId: userId!, cardId } },
             create: { userId: userId!, cardId, count: 1 },
             update: { count: { increment: 1 }, hibernating: false },
           });
+          if (isLegendary(cardId)) prints.push(...(await mintPrints(tx, userId!, cardId, 1)));
         }
 
         const user = await tx.user.findUnique({ where: { id: userId }, select: { arisePoints: true } });
-        return { arisePoints: user?.arisePoints ?? 0 };
+        return { arisePoints: user?.arisePoints ?? 0, prints };
       });
 
-      res.json({ success: true, data: { pulls, arisePoints: result.arisePoints } });
+      res.json({ success: true, data: { pulls, prints: result.prints, arisePoints: result.arisePoints } });
     } catch (e) {
       if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
       throw e;
@@ -279,8 +309,18 @@ export const dustCard = async (req: Request, res: Response, next: NextFunction) 
 
         const dupes = owned.count - 1;
         const gained = dupes * DUST_VALUE[card.rarity];
-        // Collapse to a single copy, mint the shards.
-        await tx.userCard.update({ where: { userId_cardId: { userId: userId!, cardId: cardId! } }, data: { count: 1 } });
+        // Collapse to a single copy, GUARDED on the count still being what we
+        // read — the unconditional write was a latent race (double-dust paid
+        // twice; a pack landing mid-dust got clobbered), and prints turned
+        // that from double-pay into permanent print/copy drift.
+        const collapsed = await tx.userCard.updateMany({
+          where: { userId, cardId, count: owned.count },
+          data: { count: 1 },
+        });
+        if (collapsed.count === 0) throw new CardError(409, "Your copies just changed — try again.");
+        // Legendary dupes have identities: the dusted copies' prints burn
+        // WORST first, so the copy that survives is your best one.
+        if (isLegendary(cardId!)) await burnWorstPrints(tx, userId!, cardId!, dupes);
         const user = await tx.user.update({ where: { id: userId }, data: { shards: { increment: gained } }, select: { shards: true } });
         return { gained, shards: user.shards };
       });
@@ -320,10 +360,12 @@ export const craftCard = async (req: Request, res: Response, next: NextFunction)
           create: { userId: userId!, cardId: cardId!, count: 1 },
           update: { count: { increment: 1 }, hibernating: false },
         });
+        // A crafted legendary is a real copy — it gets a print like any other.
+        const prints = isLegendary(cardId!) ? await mintPrints(tx, userId!, cardId!, 1) : [];
         const user = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
-        return { shards: user?.shards ?? 0 };
+        return { shards: user?.shards ?? 0, prints };
       });
-      res.json({ success: true, data: { cardId, shards: result.shards } });
+      res.json({ success: true, data: { cardId, prints: result.prints, shards: result.shards } });
     } catch (e) {
       if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
       throw e;
@@ -389,17 +431,19 @@ export const openRelicPack = async (req: Request, res: Response, next: NextFunct
         });
         if (debit.count === 0) throw new CardError(402, `A relic pack costs ${RELIC_PACK_SHARDS.toLocaleString()} shards — you don't have enough.`);
 
+        const prints: PrintInfo[] = [];
         for (const cardId of pulls) {
           await tx.userCard.upsert({
             where: { userId_cardId: { userId: userId!, cardId } },
             create: { userId: userId!, cardId, count: 1 },
             update: { count: { increment: 1 }, hibernating: false },
           });
+          if (isLegendary(cardId)) prints.push(...(await mintPrints(tx, userId!, cardId, 1)));
         }
         const user = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
-        return { shards: user?.shards ?? 0 };
+        return { shards: user?.shards ?? 0, prints };
       });
-      res.json({ success: true, data: { pulls, shards: result.shards } });
+      res.json({ success: true, data: { pulls, prints: result.prints, shards: result.shards } });
     } catch (e) {
       if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
       throw e;
@@ -751,6 +795,9 @@ export const attuneCard = async (req: Request, res: Response, next: NextFunction
           data: { count: { decrement: 1 }, skillLevel: { increment: 1 } },
         });
         if (spent.count === 0) throw new CardError(409, "That copy is already being attuned — try again in a moment.");
+        // The consumed copy was a real print: burn the worst one held, so
+        // attuning never eats a Fresh Build while a Factory New sits there.
+        if (isLegendary(cardId)) await burnWorstPrints(tx, userId!, cardId, 1);
         const after = await tx.userCard.findUnique({
           where: { userId_cardId: { userId: userId!, cardId } },
           select: { count: true, skillLevel: true },

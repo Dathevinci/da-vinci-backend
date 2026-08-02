@@ -561,7 +561,7 @@ export const getLadder = async (_req: Request, res: Response, next: NextFunction
 };
 
 // ── PUT /api/cards/showcase ───────────────────────────────────────────────
-// The cards pinned to a profile — up to five. Ownership is checked
+// The cards pinned to a profile — up to four. Ownership is checked
 // server-side: a showcase is a claim about what you have, so it must not be
 // possible to pin a card you have never pulled.
 export const setShowcase = async (req: Request, res: Response, next: NextFunction) => {
@@ -572,8 +572,8 @@ export const setShowcase = async (req: Request, res: Response, next: NextFunctio
     if (actor && actor !== userId) {
       return res.status(403).json({ success: false, message: "You can only change your own showcase." });
     }
-    if (!Array.isArray(cardIds) || cardIds.length > 5) {
-      return res.status(400).json({ success: false, message: "Pick up to five cards." });
+    if (!Array.isArray(cardIds) || cardIds.length > 4) {
+      return res.status(400).json({ success: false, message: "Pick up to four cards." });
     }
     const unique = [...new Set(cardIds)];
     if (unique.length) {

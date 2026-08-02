@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { CARDS } from "../data/cardCatalog";
-import { escrowPrints, releasePrints, transferPrints } from "../lib/prints";
+import { escrowPrints, escrowSerials, releasePrints, transferPrints } from "../lib/prints";
 
 /**
  * CARD MARKETPLACE — player-to-player sales, server-escrowed.
@@ -123,15 +123,21 @@ export const listListings = async (req: Request, res: Response, next: NextFuncti
 // ── POST /api/market  { userId, cardId, qty, price } ───────────────────────
 export const createListing = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, cardId, qty, price } = (req.body || {}) as {
-      userId?: string; cardId?: string; qty?: number; price?: number;
+    const { userId, cardId, qty, price, serials } = (req.body || {}) as {
+      userId?: string; cardId?: string; qty?: number; price?: number; serials?: number[];
     };
     if (!guard(req, res, userId)) return;
 
     const def = cardId ? CARDS[cardId] : undefined;
     if (!def) return res.status(404).json({ success: false, message: "No such card." });
 
-    const amount = Math.floor(Number(qty) || 0);
+    // A legendary seller names EXACT serials — each wear tier is its own
+    // asset, not a stack the server picks from. When serials are given they
+    // ARE the quantity; qty is only trusted for tiers without prints.
+    const chosen = def.rarity === "legendary" && Array.isArray(serials)
+      ? [...new Set(serials.filter((n) => Number.isInteger(n) && n > 0))].slice(0, 60)
+      : [];
+    const amount = chosen.length > 0 ? chosen.length : Math.floor(Number(qty) || 0);
     const ask = Math.floor(Number(price) || 0);
     if (amount < 1) return res.status(400).json({ success: false, message: "List at least one copy." });
     if (ask < MIN_PRICE || ask > MAX_PRICE) {
@@ -177,11 +183,21 @@ export const createListing = async (req: Request, res: Response, next: NextFunct
             price: ask,
           },
         });
-        // Legendary copies have identities: escrow the seller's WORST prints
-        // into the listing, so listing two of five copies never gives away
-        // the Fresh Build they meant to keep.
+        // Legendary copies have identities. If the seller NAMED serials,
+        // exactly those prints go up — a shortfall means someone raced them
+        // (a concurrent list/attune took one), and the whole listing rolls
+        // back rather than selling a different copy than the one they chose.
+        // Without named serials (old clients), fall back to worst-first so a
+        // partial listing never gives away the Fresh Build they meant to keep.
         if (CARDS[cardId!]?.rarity === "legendary") {
-          await escrowPrints(tx, userId!, cardId!, created.id, amount);
+          if (chosen.length > 0) {
+            const moved = await escrowSerials(tx, userId!, cardId!, created.id, chosen);
+            if (moved !== chosen.length) {
+              throw new MarketError(409, "Those exact prints just changed hands — refresh and pick again.");
+            }
+          } else {
+            await escrowPrints(tx, userId!, cardId!, created.id, amount);
+          }
         }
         return created;
       });

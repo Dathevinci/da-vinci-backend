@@ -150,6 +150,27 @@ export async function escrowPrints(
   return ids.length;
 }
 
+/**
+ * Escrow EXACT prints by serial — the seller chose which copies to part
+ * with, so wear tiers stop being one stack and become their own assets.
+ * Returns how many actually moved; the caller must treat a shortfall as a
+ * conflict (someone raced them) and roll the whole listing back.
+ */
+export async function escrowSerials(
+  tx: Tx,
+  userId: string,
+  cardId: string,
+  listingId: string,
+  serials: number[]
+): Promise<number> {
+  if (!serials.length) return 0;
+  const moved = await tx.cardPrint.updateMany({
+    where: { userId, cardId, serial: { in: serials } },
+    data: { userId: null, listingId },
+  });
+  return moved.count;
+}
+
 /** Return escrowed prints to their seller (listing cancelled). */
 export async function releasePrints(
   tx: Tx,

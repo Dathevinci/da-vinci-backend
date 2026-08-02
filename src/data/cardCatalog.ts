@@ -125,6 +125,36 @@ export const CARDS: Record<string, CardDef> = {
   card_communion:  { id: "card_communion",  name: "Quiet Communion",  rarity: "epic",   set: "Succour", hue: 280, motif: "heart",  flavor: "Everyone stands a little straighter, and nobody says why.", support: { kind: "mend", power: 12 } },
   card_secondwind: { id: "card_secondwind", name: "Second Wind",      rarity: "legendary", set: "Succour", hue: 48, motif: "dawn", flavor: "The dead are only the resting, if you argue well enough.", support: { kind: "revive", power: 50 } },
 
+  // ── More Succour: support you collect, one use per duel each ──
+  card_lastlight:  { id: "card_lastlight",  name: "Last Light",       rarity: "common", set: "Succour", hue: 52,  motif: "dawn",   flavor: "Enough to see by. Not enough to rest.", support: { kind: "heal", power: 15 } },
+  card_emberward:  { id: "card_emberward",  name: "Ember Ward",       rarity: "common", set: "Succour", hue: 20,  motif: "ember",  flavor: "Hold the coal. It will hold you back.", support: { kind: "shield" } },
+  card_tidecall:   { id: "card_tidecall",   name: "Tidecall",         rarity: "rare",   set: "Succour", hue: 188, motif: "sea",    flavor: "The water remembers everyone who stood in it.", support: { kind: "mend", power: 8 } },
+  card_ironvow:    { id: "card_ironvow",    name: "Iron Vow",         rarity: "epic",   set: "Succour", hue: 215, motif: "seal",   flavor: "Spoken once, and the next blow simply declines to land.", support: { kind: "block" } },
+  card_gravebloom: { id: "card_gravebloom", name: "Gravebloom",       rarity: "epic",   set: "Succour", hue: 305, motif: "lotus",  flavor: "It only grows where something ended.", support: { kind: "revive", power: 35 } },
+
+  // ── More Abyssal ──
+  card_drownbell:  { id: "card_drownbell",  name: "The Drowned Bell", rarity: "common", set: "Abyssal", hue: 198, motif: "bell",   flavor: "It still rings. Nobody agrees on what for." },
+  card_shallowpact:{ id: "card_shallowpact",name: "The Shallow Pact",  rarity: "common", set: "Abyssal", hue: 176, motif: "seal",   flavor: "Signed in the tide line, where nothing stays written." },
+  card_undertow:   { id: "card_undertow",   name: "The Undertow",     rarity: "rare",   set: "Abyssal", hue: 205, motif: "ripple", flavor: "Pulls politely, at first." },
+  card_blackreach: { id: "card_blackreach", name: "Blackreach",       rarity: "epic",   set: "Abyssal", hue: 232, motif: "trench", flavor: "Down where pressure does the arguing." },
+  card_hollowtide: { id: "card_hollowtide", name: "Hollow Tide",      rarity: "legendary", set: "Abyssal", hue: 190, motif: "leviathan", flavor: "The sea exhaled once, and a coastline stopped existing." },
+
+  // ── More Ronin ──
+  card_ashblade:   { id: "card_ashblade",   name: "Ashblade",         rarity: "common", set: "Ronin",   hue: 14,  motif: "blade",  flavor: "Sharpened on the way out of a burning house." },
+  card_lanternoath:{ id: "card_lanternoath",name: "Lantern Oath",     rarity: "common", set: "Ronin",   hue: 42,  motif: "ember",  flavor: "A promise you can carry in one hand." },
+  card_thousandcut:{ id: "card_thousandcut",name: "Thousand Cuts",    rarity: "rare",   set: "Ronin",   hue: 348, motif: "web",    flavor: "None of them decisive. All of them counted." },
+  card_lastretainer:{id: "card_lastretainer",name:"The Last Retainer", rarity: "epic",   set: "Ronin",   hue: 355, motif: "path",   flavor: "Still standing at a gate whose house is gone." },
+  card_swordsaint: { id: "card_swordsaint",  name: "The Sword Saint",  rarity: "legendary", set: "Ronin", hue: 8,  motif: "storm",  flavor: "Drew once, at dawn. The duel had ended by breakfast." },
+
+  // ── Vigil: the long watch ──
+  card_nightporter:{ id: "card_nightporter",name: "Night Porter",     rarity: "common", set: "Vigil",   hue: 250, motif: "path",   flavor: "Somebody has to keep the road open until morning." },
+  card_thinhour:   { id: "card_thinhour",   name: "The Thin Hour",    rarity: "common", set: "Vigil",   hue: 268, motif: "moth",   flavor: "Three in the morning, where most resolve is lost." },
+  card_paleorbit:  { id: "card_paleorbit",  name: "Pale Orbit",       rarity: "common", set: "Vigil",   hue: 222, motif: "wheel",  flavor: "It has gone around longer than anyone watching." },
+  card_sleeplessone:{id: "card_sleeplessone",name:"The Sleepless One", rarity: "rare",   set: "Vigil",   hue: 288, motif: "eye",    flavor: "Blinks on a schedule of its own choosing." },
+  card_coldvigil:  { id: "card_coldvigil",  name: "Cold Vigil",       rarity: "rare",   set: "Vigil",   hue: 200, motif: "peak",   flavor: "Waiting, at altitude, without complaint." },
+  card_lampofhours:{ id: "card_lampofhours",name: "Lamp of Hours",    rarity: "epic",   set: "Vigil",   hue: 46,  motif: "seed",   flavor: "Burns down exactly as fast as it is needed." },
+  card_longmorrow: { id: "card_longmorrow",  name: "The Long Morrow",  rarity: "legendary", set: "Vigil", hue: 275, motif: "comet", flavor: "It arrives. It has always been going to arrive." },
+
   // ── Event (limited; NOT in normal packs) ──
   card_founder:    { id: "card_founder",    name: "The Founder's Seal", rarity: "event", set: "Genesis", hue: 290, motif: "seal", flavor: "Given to those who were here at the beginning." },
 };
@@ -137,11 +167,22 @@ export const PACK_SIZE = 4;
 
 // Per-card rarity roll for a normal pack. Weighted so a pack usually feels like
 // commons + a rare, with epics/legendaries as the chase.
+/**
+ * Pull odds. Legendary dropped from 2% to 1% per card.
+ *
+ * The squeeze is bigger than that number looks, because it compounds with the
+ * pool: the legendary tier went from 5 cards to 8, so the chance of any ONE
+ * named legendary fell from 0.4% to 0.125% per card — roughly a third of what
+ * it was. A four-card pack now carries about a 4% chance of a legendary at all.
+ *
+ * Crafting is the deliberate escape hatch. Odds this long without a
+ * deterministic path just punish unlucky players indefinitely.
+ */
 const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event">, number> = {
-  common: 62,
+  common: 64,
   rare: 27,
-  epic: 9,
-  legendary: 2,
+  epic: 8,
+  legendary: 1,
 };
 
 // Dust value (shards you get for one duplicate) and craft cost (shards to make a
@@ -270,6 +311,7 @@ export const SET_REWARDS: Record<string, SetReward> = {
   Ascension: { set: "Ascension", ap: 3000, shards: 500, title: "Archivist of Ascension" },
   Abyssal:   { set: "Abyssal",   ap: 3000, shards: 500, title: "Sounder of the Abyss" },
   Ronin:     { set: "Ronin",     ap: 3000, shards: 500, title: "Sword Without a Lord" },
+  Vigil:     { set: "Vigil",     ap: 3200, shards: 550, title: "Keeper of the Long Watch" },
   Genesis:   { set: "Genesis",   ap: 1000, shards: 200, title: "Keeper of Genesis" },
 };
 

@@ -67,9 +67,9 @@ export const CARDS: Record<string, CardDef> = {
   card_wanderer:   { id: "card_wanderer",   name: "The Wanderer",       rarity: "rare", set: "Ascension", hue: 50,  motif: "path", flavor: "Home is a direction, not a place." },
 
   // ── Epic ──
-  card_voidgaze:   { id: "card_voidgaze",   name: "The Void's Gaze",    rarity: "epic", set: "Ascension", hue: 185, motif: "eye", flavor: "Look long enough and it blinks back." },
+  card_voidgaze:   { id: "card_voidgaze",   name: "What Watches Below", rarity: "epic", set: "Ascension", hue: 185, motif: "eye", flavor: "Look long enough and it blinks back." },
   card_ninehands:  { id: "card_ninehands",  name: "Nine-Handed Wheel",  rarity: "epic", set: "Ascension", hue: 42,  motif: "wheel", flavor: "It has adapted to this before." },
-  card_crimsonsea: { id: "card_crimsonsea", name: "The Crimson Sea",    rarity: "epic", set: "Ascension", hue: 350, motif: "sea", flavor: "A tide that only ever comes in." },
+  card_crimsonsea: { id: "card_crimsonsea", name: "The Last Crossing",  rarity: "epic", set: "Ascension", hue: 350, motif: "sea", flavor: "Everyone crosses once. Nobody has described the far bank." },
   card_unblinking: { id: "card_unblinking", name: "The Unblinking",     rarity: "epic", set: "Ascension", hue: 0,   motif: "eye", flavor: "It noticed you the moment you noticed it." },
 
   // ── Legendary ──
@@ -107,7 +107,7 @@ export const CARDS: Record<string, CardDef> = {
   card_nightcomet:  { id: "card_nightcomet",  name: "Comet Over the Pass", rarity: "rare", set: "Ronin", hue: 232, motif: "comet", flavor: "The banner-men read it as an omen; it was only a stone in a hurry." },
 
   // ── Epic ──
-  card_onimask:     { id: "card_onimask",     name: "The Oni's Face",      rarity: "epic", set: "Ronin", hue: 352, motif: "mask", flavor: "He put it on to frighten bandits and never found a reason to take it off." },
+  card_onimask:     { id: "card_onimask",     name: "The Hundred Masks",   rarity: "epic", set: "Ronin", hue: 352, motif: "mask", flavor: "He wore one to frighten bandits. The other ninety-nine came on their own." },
 
   // ── Legendary ──
   card_lastronin:   { id: "card_lastronin",   name: "The Last Ronin",      rarity: "legendary", set: "Ronin", hue: 8,   motif: "blade", flavor: "No lord remains to serve, and still the blade is drawn at dawn." },

@@ -117,6 +117,11 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
         supportCards: rows
           .filter((r) => CARDS[r.cardId]?.support)
           .map((r) => r.cardId),
+        // Their levels ride along so the client can show the TRUE effect —
+        // use-support already scales by level; the display must match it.
+        supportLevels: Object.fromEntries(rows
+          .filter((r) => CARDS[r.cardId]?.support)
+          .map((r) => [r.cardId, r.level || 1])),
       },
     });
   } catch (error) { next(error); }

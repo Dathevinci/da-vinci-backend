@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { CARDS } from "../data/cardCatalog";
 import { escrowPrints, escrowSerials, releasePrints, transferPrints } from "../lib/prints";
+import { isLeadDevFree } from "./card.controller";
 
 /**
  * CARD MARKETPLACE — player-to-player sales, server-escrowed.
@@ -248,6 +249,10 @@ export const buyListing = async (req: Request, res: Response, next: NextFunction
 
     const def = CARDS[listing.cardId];
     const { fee, toSeller } = marketFee(listing.price);
+    // Same bypass as every other sink: the lead dev never pays. The seller
+    // is still paid in full below, so testing the market never shorts a
+    // real player — the house simply eats the cost.
+    const free = await isLeadDevFree(userId!);
 
     try {
       const out = await prisma.$transaction(async (tx) => {
@@ -265,14 +270,16 @@ export const buyListing = async (req: Request, res: Response, next: NextFunction
         if (claim.count === 0) throw new MarketError(409, "Someone just bought that.");
 
         // Conditional debit: the affordability check and the spend are one op.
-        const paid = await tx.user.updateMany({
-          where: { id: userId, arisePoints: { gte: listing.price } },
-          data: { arisePoints: { decrement: listing.price } },
-        });
-        if (paid.count === 0) {
-          throw new MarketError(402, `You need ${listing.price.toLocaleString()} Arise Points for that.`);
+        if (!free) {
+          const paid = await tx.user.updateMany({
+            where: { id: userId, arisePoints: { gte: listing.price } },
+            data: { arisePoints: { decrement: listing.price } },
+          });
+          if (paid.count === 0) {
+            throw new MarketError(402, `You need ${listing.price.toLocaleString()} Arise Points for that.`);
+          }
+          await tx.pointLog.create({ data: { userId: userId!, amount: -listing.price, reason: `market-buy:${id}` } });
         }
-        await tx.pointLog.create({ data: { userId: userId!, amount: -listing.price, reason: `market-buy:${id}` } });
 
         // Seller is paid the price minus the house fee.
         await tx.user.update({ where: { id: listing.sellerId }, data: { arisePoints: { increment: toSeller } } });

@@ -365,7 +365,7 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
 
         const user = await tx.user.findUnique({ where: { id: userId }, select: { arisePoints: true } });
         return { arisePoints: user?.arisePoints ?? 0, prints };
-      });
+      }, { timeout: 30000 }); // a x32 is 32 upserts and up to 32 print mints — the default 5s is too tight
 
       res.json({ success: true, data: { pulls, prints: result.prints, arisePoints: result.arisePoints } });
     } catch (e) {

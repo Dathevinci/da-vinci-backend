@@ -10,7 +10,7 @@
 // choice matter, short enough to finish while you're still looking at it.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { CARDS, CardRarity, levelMult, abilityFor, skillPower, domainPower } from "./cardCatalog";
+import { CARDS, CardRarity, levelMult, abilityFor, skillPower, domainPower, FORGE_ATK_STEP, FORGE_HP_STEP } from "./cardCatalog";
 
 export const DECK_SIZE = 5;
 
@@ -116,7 +116,10 @@ export interface DuelState {
   timeline?: { a: number; b: number }[];
 }
 
-export function buildFighter(cardId: string, foil: boolean, level = 1, skillLevel = 1): Fighter | null {
+export function buildFighter(
+  cardId: string, foil: boolean, level = 1, skillLevel = 1,
+  atkForge = 0, hpForge = 0
+): Fighter | null {
   const def = CARDS[cardId];
   // Support cards are played, never fielded — they have no stat line, so
   // letting one into a deck would field a fighter with undefined HP.
@@ -124,16 +127,17 @@ export function buildFighter(cardId: string, foil: boolean, level = 1, skillLeve
   const base = CARD_STATS[def.rarity];
   // Foil and level stack. Levels are shard-bought, so they have to show up
   // HERE — a level that only changed a number on the card page would be a
-  // currency sink that sells nothing.
+  // currency sink that sells nothing. The FORGE lands after the multipliers
+  // as flat points, same reason: bought power fights or it isn't power.
   const mult = (foil ? FOIL_MULT : 1) * levelMult(level);
-  const hp = Math.round(base.hp * mult);
+  const hp = Math.round(base.hp * mult) + Math.max(0, hpForge) * FORGE_HP_STEP;
   return {
     cardId,
     name: def.name,
     rarity: def.rarity,
     maxHp: hp,
     hp,
-    atk: Math.round(base.atk * mult),
+    atk: Math.round(base.atk * mult) + Math.max(0, atkForge) * FORGE_ATK_STEP,
     foil,
     level,
     skillLevel,
@@ -151,10 +155,13 @@ export function makeSide(
   levels: Record<string, number> = {},
   // cardId -> skill/domain rank. Same contract as `levels`: absent means 1,
   // so an in-flight duel from before abilities existed still builds.
-  skillLevels: Record<string, number> = {}
+  skillLevels: Record<string, number> = {},
+  // cardId -> forge ranks. Absent means unforged — same contract as levels.
+  atkForges: Record<string, number> = {},
+  hpForges: Record<string, number> = {}
 ): Side {
   const fighters = deck
-    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1, skillLevels[id] || 1))
+    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1, skillLevels[id] || 1, atkForges[id] || 0, hpForges[id] || 0))
     .filter((f): f is Fighter => !!f);
   // active = -1 means NOBODY is on the field yet. The arena opens empty and
   // your first move is genuinely choosing who walks in, instead of the engine

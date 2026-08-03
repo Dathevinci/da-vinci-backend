@@ -1,4 +1,4 @@
-import { CARDS, levelMult, DOMAINS, domainPower, DomainDef } from "./cardCatalog";
+import { CARDS, levelMult, DOMAINS, domainPower, DomainDef, FORGE_ATK_STEP, FORGE_HP_STEP } from "./cardCatalog";
 import { CARD_STATS, FOIL_MULT } from "./duelRules";
 
 /**
@@ -163,15 +163,18 @@ export function makeUnit(
   foil: boolean,
   carriedHp: number | null,
   injured: boolean,
-  skillLevel = 1
+  skillLevel = 1,
+  atkForge = 0,
+  hpForge = 0
 ): DgnUnit | null {
   const def = CARDS[cardId];
   if (!def || def.support) return null; // supports don't raid, same as duels
   const base = CARD_STATS[def.rarity];
-  // EXACTLY the duel formula — shared levelMult (with its level-10 clamp)
-  // and shared foil multiplier. A card must not fight harder in one mode.
+  // EXACTLY the duel formula — shared levelMult (with its level-10 clamp),
+  // shared foil multiplier, shared flat forge. A card must not fight harder
+  // in one mode than the other.
   const mult = (foil ? FOIL_MULT : 1) * levelMult(level);
-  const fullMax = Math.round(base.hp * mult);
+  const fullMax = Math.round(base.hp * mult) + Math.max(0, hpForge) * FORGE_HP_STEP;
   const maxHp = injured ? Math.max(1, Math.round(fullMax * INJURY_MAX_HP_MULT)) : fullMax;
   const hp = carriedHp === null ? maxHp : Math.max(1, Math.min(carriedHp, maxHp));
   const dom: DomainDef | undefined = DOMAINS[cardId];
@@ -181,7 +184,7 @@ export function makeUnit(
     rarity: def.rarity,
     maxHp,
     hp,
-    atk: Math.round(base.atk * mult),
+    atk: Math.round(base.atk * mult) + Math.max(0, atkForge) * FORGE_ATK_STEP,
     foil,
     ...(dom ? {
       domainKind: dom.kind,

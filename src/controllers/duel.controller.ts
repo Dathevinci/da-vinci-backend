@@ -261,7 +261,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },
-      select: { cardId: true, foil: true, hibernating: true, level: true, skillLevel: true },
+      select: { cardId: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true },
     });
     if (ownedRows.filter((r) => deck.includes(r.cardId)).length !== deck.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that deck." });
@@ -280,7 +280,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     // upgrade would be a number on a card page that never reached a fight.
     const challengerRows = await prisma.userCard.findMany({
       where: { userId: duel.challengerId, cardId: { in: duel.challengerDeck } },
-      select: { cardId: true, foil: true, level: true, skillLevel: true },
+      select: { cardId: true, foil: true, level: true, skillLevel: true, atkForge: true, hpForge: true },
     });
     const challengerLevels: Record<string, number> = {};
     for (const r of challengerRows) challengerLevels[r.cardId] = r.level || 1;
@@ -293,12 +293,20 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     for (const r of challengerRows) challengerSkills[r.cardId] = (r as any).skillLevel || 1;
     const mySkills: Record<string, number> = {};
     for (const r of ownedRows) mySkills[r.cardId] = (r as any).skillLevel || 1;
+    // Forge ranks travel for the same reason levels and ranks do: a shard
+    // sink that never reaches a fight sells nothing.
+    const challengerAtkF: Record<string, number> = {};
+    const challengerHpF: Record<string, number> = {};
+    for (const r of challengerRows) { challengerAtkF[r.cardId] = (r as any).atkForge || 0; challengerHpF[r.cardId] = (r as any).hpForge || 0; }
+    const myAtkF: Record<string, number> = {};
+    const myHpF: Record<string, number> = {};
+    for (const r of ownedRows) { myAtkF[r.cardId] = (r as any).atkForge || 0; myHpF[r.cardId] = (r as any).hpForge || 0; }
 
     const stateObj: DuelState = {
       a: makeSide(duel.challengerId, duel.challengerName, duel.challengerDeck,
-        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels, challengerSkills),
+        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels, challengerSkills, challengerAtkF, challengerHpF),
       b: makeSide(duel.opponentId, duel.opponentName, deck,
-        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels, mySkills),
+        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels, mySkills, myAtkF, myHpF),
       turn: duel.challengerId, // challenger moves first
       log: [`${duel.opponentName} accepted the challenge.`],
       round: 1,

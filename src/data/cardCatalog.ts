@@ -647,6 +647,27 @@ export function domainUpgradeCost(level: number): number {
 }
 
 /**
+ * ── THE FORGE ── flat stat training, per card, per stat.
+ *
+ * Levels raise everything by percent; the forge hammers ONE stat by a flat
+ * point. In this game's small numbers (+1 ATK on a 10-ATK legendary) a
+ * forge rank is a big, legible swing — which is why the price DOUBLES per
+ * rank and scales with rarity. Five ranks of ATK on a legendary run
+ * 660 → 1,320 → 2,640 → 5,280 → 10,560 shards: deliberately a late-game
+ * shard sink, not an early-game checkbox.
+ */
+export const FORGE_MAX = 5;
+export const FORGE_ATK_STEP = 1; // flat ATK per rank
+export const FORGE_HP_STEP = 2;  // flat HP per rank
+const FORGE_RARITY_MULT: Record<CardRarity, number> = {
+  common: 1, rare: 1.3, epic: 1.7, legendary: 2.2, event: 1.8,
+};
+export function forgeCost(stat: "atk" | "hp", rarity: CardRarity, rank: number): number {
+  const base = stat === "atk" ? 300 : 200;
+  return Math.round(base * (FORGE_RARITY_MULT[rarity] ?? 1) * Math.pow(2, Math.max(0, rank)));
+}
+
+/**
  * The one ability a card has, whichever kind it is. Every caller wants this
  * rather than the two maps — a card can never carry both, so branching on
  * rarity at each call site would be the same check written eight times.

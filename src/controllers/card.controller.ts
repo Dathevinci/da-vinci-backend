@@ -30,6 +30,10 @@ import {
   domainUpgradeCost,
   skillPower,
   skillUpgradeCost,
+  FORGE_MAX,
+  FORGE_ATK_STEP,
+  FORGE_HP_STEP,
+  forgeCost,
 } from "../data/cardCatalog";
 import {
   mintPrints,
@@ -74,6 +78,17 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         upgradeGrowth: 1.35,
         levelStep: 0.07,
         foilCost: FOIL_COST,
+        // The forge, priced per rarity per rank so the client can show the
+        // exact bill: cost[rank] is what the NEXT rank from `rank` costs.
+        forge: {
+          max: FORGE_MAX,
+          atkStep: FORGE_ATK_STEP,
+          hpStep: FORGE_HP_STEP,
+          atkCost: Object.fromEntries((["common", "rare", "epic", "legendary", "event"] as const)
+            .map((r) => [r, Array.from({ length: FORGE_MAX }, (_, i) => forgeCost("atk", r, i))])),
+          hpCost: Object.fromEntries((["common", "rare", "epic", "legendary", "event"] as const)
+            .map((r) => [r, Array.from({ length: FORGE_MAX }, (_, i) => forgeCost("hp", r, i))])),
+        },
         relicPackShards: RELIC_PACK_SHARDS,
         setRewards: SET_REWARDS,
         // Combat stats ship with the catalog so the UI can show what a card
@@ -214,7 +229,7 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
   try {
     const userId = req.params.userId as string;
     const [owned, user, prints] = await Promise.all([
-      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true } }),
+      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
       // Legendary print identities — serial + condition per held copy. Best
       // condition first, then oldest serial, so the first entry is always
@@ -672,6 +687,66 @@ export const wakeCard = async (req: Request, res: Response, next: NextFunction) 
   } catch (error) {
     next(error);
   }
+};
+
+// ── POST /api/cards/forge  { userId, cardId, stat: "atk" | "hp" } ──────────
+// The forge: flat stat training, one stat at a time, priced to hurt (cost
+// doubles per rank, scaled by rarity). Same house rules as every other
+// spend: atomic conditional debit, rank-guarded bump so a double-submit
+// can't buy two ranks for one price, lead dev forges free.
+export const forgeCard = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardId, stat } = (req.body || {}) as { userId?: string; cardId?: string; stat?: string };
+    if (!ownerGuard(req, res, userId)) return;
+    if (stat !== "atk" && stat !== "hp") {
+      return res.status(400).json({ success: false, message: "Forge ATK or HP — nothing else fits on the anvil." });
+    }
+    const card = cardId ? CARDS[cardId] : undefined;
+    if (!card) return res.status(404).json({ success: false, message: "No such card." });
+    if (card.support) return res.status(400).json({ success: false, message: "Support cards don't fight — nothing to forge." });
+
+    const owned = await prisma.userCard.findUnique({ where: { userId_cardId: { userId: userId!, cardId: cardId! } } });
+    if (!owned) return res.status(400).json({ success: false, message: "You don't own that card." });
+    const rank = stat === "atk" ? ((owned as any).atkForge || 0) : ((owned as any).hpForge || 0);
+    if (rank >= FORGE_MAX) {
+      return res.status(400).json({ success: false, message: `${card.name}'s ${stat.toUpperCase()} is fully forged.` });
+    }
+    const cost = forgeCost(stat, card.rarity, rank);
+    const free = await isLeadDevFree(userId!);
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        if (!free) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (debit.count === 0) throw new CardError(402, `This forge rank costs ${cost.toLocaleString()} shards — you don't have enough.`);
+        }
+        // Guarded on the rank still being what we read — the same shape as
+        // the level and skill bumps, for the same double-submit reason.
+        const bump = stat === "atk"
+          ? await tx.userCard.updateMany({ where: { userId, cardId, atkForge: rank }, data: { atkForge: { increment: 1 } } })
+          : await tx.userCard.updateMany({ where: { userId, cardId, hpForge: rank }, data: { hpForge: { increment: 1 } } });
+        if (bump.count === 0) throw new CardError(409, "That forge just landed — try again in a moment.");
+        const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
+        return { shards: u?.shards ?? 0 };
+      });
+      const newRank = rank + 1;
+      res.json({
+        success: true,
+        data: {
+          ...result,
+          stat,
+          rank: newRank,
+          nextCost: newRank >= FORGE_MAX ? null : forgeCost(stat, card.rarity, newRank),
+        },
+      });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) { next(error); }
 };
 
 // ── POST /api/cards/upgrade  { userId, cardId } ───────────────────────────

@@ -306,6 +306,11 @@ model UserCard {
   dgnInjured Boolean @default(false) // came home under 40% — BLOCKS dispatch until healed
   dgnDead    Boolean @default(false) // fell in a dungeon; revived with Arise Points, never deleted
   dgnDeaths  Int     @default(0)     // lifetime death count — each one makes the NEXT revival dearer
+  // ── THE FORGE ── flat stat training, bought with shards, deliberately
+  // expensive: cost doubles per rank. Separate tracks so a player can shape
+  // a card — glass cannon or anvil — instead of only raising the level dial.
+  atkForge   Int     @default(0)     // +1 flat ATK per rank, capped
+  hpForge    Int     @default(0)     // +2 flat HP per rank, capped
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

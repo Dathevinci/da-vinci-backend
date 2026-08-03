@@ -685,18 +685,18 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
     const userId = req.params.userId as string;
     const u = await prisma.user.findUnique({
       where: { id: userId },
-      select: { claimedSets: true, cardTitle: true, equippedTitles: true } as any,
+      select: { claimedSets: true, cardTitle: true, equippedTitles: true },
     });
     if (!u) return res.status(404).json({ success: false, message: "User not found." });
     const owned = (u.claimedSets || [])
       .map((s: string) => ({ set: s, title: SET_REWARDS[s]?.title }))
-      .filter((x: any): x is { set: string; title: string } => !!x.title);
+      .filter((x): x is { set: string; title: string } => !!x.title);
     // Legacy: a cardTitle from before this system stays wearable even if its
     // set somehow isn't in claimedSets.
-    if (u.cardTitle && !owned.some((o: any) => o.title === u.cardTitle)) {
+    if (u.cardTitle && !owned.some((o) => o.title === u.cardTitle)) {
       owned.push({ set: "", title: u.cardTitle });
     }
-    res.json({ success: true, data: { owned, equipped: (u as any).equippedTitles || [] } });
+    res.json({ success: true, data: { owned, equipped: u.equippedTitles || [] } });
   } catch (error) { next(error); }
 };
 
@@ -716,7 +716,7 @@ export const setTitles = async (req: Request, res: Response, next: NextFunction)
     if (u.cardTitle) ownable.add(u.cardTitle);
     const chosen = [...new Set((Array.isArray(titles) ? titles : [])
       .filter((t) => typeof t === "string" && ownable.has(t)))].slice(0, 3);
-    await prisma.user.update({ where: { id: userId }, data: { equippedTitles: chosen } as any });
+    await prisma.user.update({ where: { id: userId }, data: { equippedTitles: chosen } });
     res.json({ success: true, data: { equipped: chosen } });
   } catch (error) { next(error); }
 };

@@ -287,6 +287,11 @@ export function applyAction(
     const explicit = typeof action.target === "number";
     const wanted = explicit ? (action.target as number) : me.active;
 
+    // A LEVELLED support is a STRONGER EFFECT — supports have no ATK or HP,
+    // so their shard levels buy power where the card actually lives: the
+    // same +7%/level curve as fighters, applied to what the card DOES.
+    const supMult = levelMult((action as any).level || 1);
+
     if (eff.kind === "heal") {
       // You can only mend the living — bringing someone back is Second Wind's job.
       const t = me.fighters[wanted];
@@ -295,7 +300,7 @@ export function applyAction(
       if (!tgt || tgt.hp <= 0 || tgt.hp >= tgt.maxHp) return { state, finished: false };
       used.push(action.cardId);
       const before = tgt.hp;
-      tgt.hp = Math.min(tgt.maxHp, tgt.hp + eff.power);
+      tgt.hp = Math.min(tgt.maxHp, tgt.hp + Math.round(eff.power * supMult));
       s.log.push(`${me.username} played ${def.name} — ${tgt.name} recovered ${tgt.hp - before} HP.`);
     } else if (eff.kind === "revive") {
       // Target must be a card that has actually fallen. An aimed drop on a
@@ -304,7 +309,7 @@ export function applyAction(
       const tgt = explicit ? t : me.fighters.find((f) => f.hp <= 0);
       if (!tgt || tgt.hp > 0) return { state, finished: false };
       used.push(action.cardId);
-      tgt.hp = Math.max(1, Math.round((tgt.maxHp * eff.power) / 100));
+      tgt.hp = Math.max(1, Math.round((tgt.maxHp * Math.min(95, Math.round(eff.power * supMult))) / 100));
       s.log.push(`${me.username} played ${def.name} — ${tgt.name} rose again at ${tgt.hp} HP.`);
     } else if (eff.kind === "mend") {
       const wounded = me.fighters.some((f) => f.hp > 0 && f.hp < f.maxHp);
@@ -314,7 +319,7 @@ export function applyAction(
       for (const f of me.fighters) {
         if (f.hp > 0 && f.hp < f.maxHp) {
           const b = f.hp;
-          f.hp = Math.min(f.maxHp, f.hp + eff.power);
+          f.hp = Math.min(f.maxHp, f.hp + Math.round(eff.power * supMult));
           healed += f.hp - b;
         }
       }
@@ -329,7 +334,8 @@ export function applyAction(
       s.log.push(`${me.username} played ${def.name}. The next attack will not land at all.`);
     } else if (eff.kind === "focus") {
       used.push(action.cardId);
-      me.focusMult = eff.power;
+      // Level scales the BONUS part: a ×1.5 card at level 10 is ×1.8, not ×2.4.
+      me.focusMult = 1 + (eff.power - 1) * supMult;
       s.log.push(`${me.username} played ${def.name} — the next strike will hit far harder.`);
     } else {
       return { state, finished: false };

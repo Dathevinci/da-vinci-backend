@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { isLeadDevFree } from "./card.controller";
-import { CARDS } from "../data/cardCatalog";
+import { CARDS, levelMult } from "../data/cardCatalog";
 import {
   DUNGEONS, PARTY_MAX, INJURY_THRESHOLD, HEAL_COST_AP, reviveCost,
   PACK_MAX,
@@ -233,12 +233,19 @@ export const useSupport = async (req: Request, res: Response, next: NextFunction
     if (slot.used) return res.status(400).json({ success: false, message: `${def.name} has already been played this run.` });
 
     const sup = def.support as any;
+    // The card's LEVEL scales its effect — same +7%/level curve as fighters,
+    // same reason it exists: supports have no stats for a level to raise.
+    const ownedSup = await prisma.userCard.findUnique({
+      where: { userId_cardId: { userId: userId!, cardId: cardId! } },
+      select: { level: true },
+    });
+    const supMult = levelMult(ownedSup?.level || 1);
     let note = "";
     if (sup.kind === "heal") {
       const living = state.party.filter((u) => u.hp > 0 && u.hp < u.maxHp);
       if (!living.length) return res.status(400).json({ success: false, message: "Nobody is hurt right now." });
       const worst = living.sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp)[0];
-      const healed = Math.min(worst.maxHp - worst.hp, sup.power || 10);
+      const healed = Math.min(worst.maxHp - worst.hp, Math.round((sup.power || 10) * supMult));
       worst.hp += healed;
       note = `> ${def.name} reaches ${worst.name} — +${healed} HP.`;
     } else if (sup.kind === "mend") {
@@ -246,7 +253,7 @@ export const useSupport = async (req: Request, res: Response, next: NextFunction
       if (!living.length) return res.status(400).json({ success: false, message: "Nobody left to mend." });
       let total = 0;
       for (const u of living) {
-        const healed = Math.min(u.maxHp - u.hp, sup.power || 8);
+        const healed = Math.min(u.maxHp - u.hp, Math.round((sup.power || 8) * supMult));
         u.hp += healed;
         total += healed;
       }
@@ -255,7 +262,7 @@ export const useSupport = async (req: Request, res: Response, next: NextFunction
     } else if (sup.kind === "revive") {
       const fallen = state.party.find((u) => u.hp <= 0);
       if (!fallen) return res.status(400).json({ success: false, message: "Nobody has fallen. May it stay that way." });
-      fallen.hp = Math.max(1, Math.round((fallen.maxHp * (sup.power || 50)) / 100));
+      fallen.hp = Math.max(1, Math.round((fallen.maxHp * Math.min(95, Math.round((sup.power || 50) * supMult))) / 100));
       note = `> ${def.name} — ${fallen.name} STANDS BACK UP at ${fallen.hp} HP.`;
     } else if (sup.kind === "shield") {
       if (state.pendingWard) return res.status(400).json({ success: false, message: "A ward is already held over them." });
@@ -268,8 +275,9 @@ export const useSupport = async (req: Request, res: Response, next: NextFunction
     } else if (sup.kind === "focus") {
       if (state.pendingFocus) return res.status(400).json({ success: false, message: "A cry is already carried." });
       state.pendingFocus = true;
-      state.focusPower = sup.power || 1.5;
-      note = `> ${def.name} is armed — the next opening volley hits ${Math.round(((sup.power || 1.5) - 1) * 100)}% harder.`;
+      // Level scales the BONUS part, same rule as the duel arena.
+      state.focusPower = 1 + ((sup.power || 1.5) - 1) * supMult;
+      note = `> ${def.name} is armed — the next opening volley hits ${Math.round((state.focusPower - 1) * 100)}% harder.`;
     } else {
       return res.status(400).json({ success: false, message: "That card doesn't know what to do down there." });
     }

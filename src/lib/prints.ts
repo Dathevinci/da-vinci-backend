@@ -95,6 +95,36 @@ export async function mintPrints(
  * rusted before fresh, newest serial first within a condition) — dusting and
  * attuning consume the copies a collector values least.
  */
+/**
+ * Wear-aware duplicates: a Fresh Build and a Factory New of the same card
+ * are DIFFERENT objects, never duplicates of each other. Only extras WITHIN
+ * one wear count — the lowest serial of each wear survives (the copy a
+ * collector leads with), later serials are the dust. Returns the print ids
+ * that qualify; the caller decides what to do with them.
+ */
+export async function findDuplicatePrints(
+  tx: Tx,
+  userId: string,
+  cardId: string
+): Promise<string[]> {
+  const held = await tx.cardPrint.findMany({
+    where: { userId, cardId },
+    select: { id: true, serial: true, condition: true },
+  });
+  const byCond = new Map<string, { id: string; serial: number }[]>();
+  for (const p of held) {
+    const list = byCond.get(p.condition) || [];
+    list.push({ id: p.id, serial: p.serial });
+    byCond.set(p.condition, list);
+  }
+  const extras: string[] = [];
+  for (const list of byCond.values()) {
+    list.sort((a, b) => a.serial - b.serial);
+    for (let i = 1; i < list.length; i++) extras.push(list[i].id);
+  }
+  return extras;
+}
+
 export async function burnWorstPrints(
   tx: Tx,
   userId: string,

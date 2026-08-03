@@ -478,7 +478,7 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
       | { type: "deploy"; index: number }
       | { type: "attack"; index?: number }
       | { type: "item"; item: ItemId }
-      | { type: "support"; cardId: string; target?: number }
+      | { type: "support"; cardId: string; target?: number; level?: number }
       | { type: "ability" };
 
     if (action === "deploy") {
@@ -496,7 +496,7 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
       // enforces once-per-duel.
       const owned = await prisma.userCard.findUnique({
         where: { userId_cardId: { userId: userId!, cardId: cardId! } },
-        select: { cardId: true },
+        select: { cardId: true, level: true },
       });
       if (!owned) return res.status(403).json({ success: false, message: `You don't own ${def.name}.` });
       act = {
@@ -505,6 +505,9 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
         // Which of YOUR fighters the card was dropped on. Only heal/revive
         // read it; the engine clamps an out-of-range value on its own.
         target: Number.isInteger(target) ? Number(target) : undefined,
+        // A support's level scales its EFFECT — supports have no stats, so
+        // their shard levels have to buy power where the card actually lives.
+        level: owned.level || 1,
       };
     } else if (action === "ability") {
       // No payload at all: WHICH ability fires is decided by whichever card is

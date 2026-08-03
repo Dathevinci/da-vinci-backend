@@ -38,6 +38,7 @@ import {
 import {
   mintPrints,
   burnWorstPrints,
+  findDuplicatePrints,
   isLegendary,
   CONDITION_META,
   type PrintInfo,
@@ -336,20 +337,36 @@ export const dustCard = async (req: Request, res: Response, next: NextFunction) 
         const owned = await tx.userCard.findUnique({ where: { userId_cardId: { userId: userId!, cardId: cardId! } } });
         if (!owned || owned.count <= 1) throw new CardError(400, "You have no duplicates of that card.");
 
-        const dupes = owned.count - 1;
+        let dupes: number;
+        if (isLegendary(cardId!)) {
+          // WEAR-AWARE: a Fresh Build and a Factory New are different
+          // objects, not duplicates of each other. Only same-build extras
+          // dust; the best serial of every build survives. Two copies in two
+          // different builds = zero dupes, and the dust is refused.
+          const extras = await findDuplicatePrints(tx, userId!, cardId!);
+          if (extras.length === 0) {
+            throw new CardError(400, "Different builds aren't duplicates — every copy you hold is its own wear.");
+          }
+          dupes = extras.length;
+          // Guarded decrement, same race-of-record rule as the collapse below.
+          const taken = await tx.userCard.updateMany({
+            where: { userId, cardId, count: owned.count },
+            data: { count: { decrement: dupes } },
+          });
+          if (taken.count === 0) throw new CardError(409, "Your copies just changed — try again.");
+          await tx.cardPrint.deleteMany({ where: { id: { in: extras } } });
+        } else {
+          dupes = owned.count - 1;
+          // Collapse to a single copy, GUARDED on the count still being what
+          // we read — the unconditional write was a latent race (double-dust
+          // paid twice; a pack landing mid-dust got clobbered).
+          const collapsed = await tx.userCard.updateMany({
+            where: { userId, cardId, count: owned.count },
+            data: { count: 1 },
+          });
+          if (collapsed.count === 0) throw new CardError(409, "Your copies just changed — try again.");
+        }
         const gained = dupes * DUST_VALUE[card.rarity];
-        // Collapse to a single copy, GUARDED on the count still being what we
-        // read — the unconditional write was a latent race (double-dust paid
-        // twice; a pack landing mid-dust got clobbered), and prints turned
-        // that from double-pay into permanent print/copy drift.
-        const collapsed = await tx.userCard.updateMany({
-          where: { userId, cardId, count: owned.count },
-          data: { count: 1 },
-        });
-        if (collapsed.count === 0) throw new CardError(409, "Your copies just changed — try again.");
-        // Legendary dupes have identities: the dusted copies' prints burn
-        // WORST first, so the copy that survives is your best one.
-        if (isLegendary(cardId!)) await burnWorstPrints(tx, userId!, cardId!, dupes);
         const user = await tx.user.update({ where: { id: userId }, data: { shards: { increment: gained } }, select: { shards: true } });
         return { gained, shards: user.shards };
       });

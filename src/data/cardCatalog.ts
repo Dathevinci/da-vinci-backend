@@ -237,11 +237,12 @@ export const CRAFT_COST: Record<CardRarity, number> = {
  * here rather than from the request, so a hand-rolled call can't ask for a
  * hundred cards or name its own price.
  */
-export const PULL_SIZES = [1, 3, PACK_SIZE];
+export const PULL_SIZES = [1, 3, PACK_SIZE, 8];
 export const PULL_PRICES: Record<number, number> = {
   1: 70,
   3: 195,
   [PACK_SIZE]: PACK_PRICE,
+  8: 500, // the big spin — two packs' worth in one crescendo
 };
 
 /**

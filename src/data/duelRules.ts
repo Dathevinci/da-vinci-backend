@@ -100,6 +100,12 @@ export interface Side {
   /** Abyss: while > 0, half of what lands ON this side comes back on the
    *  attacker. Spent per attack that actually deals damage. */
   reflectTurns?: number;
+  /** Ophanim: `pct` percent of what lands on this side returns to the
+   *  attacker, for the next `volleys` blows that actually land. */
+  judge?: { pct: number; volleys: number };
+  /** Mirror: `pct` percent of what lands returns to the attacker AND heals
+   *  the card it landed on. Lasting — the sliver is small on purpose. */
+  mirror?: { pct: number };
 }
 
 export interface DuelState {
@@ -337,6 +343,62 @@ export function applyAction(
       // Level scales the BONUS part: a ×1.5 card at level 10 is ×1.8, not ×2.4.
       me.focusMult = 1 + (eff.power - 1) * supMult;
       s.log.push(`${me.username} played ${def.name} — the next strike will hit far harder.`);
+    } else if (eff.kind === "bless") {
+      // Seraphim — a PERCENT mend across every living ally. Caps keep a
+      // level-10 blessing strong rather than absolute.
+      const wounded = me.fighters.some((f) => f.hp > 0 && f.hp < f.maxHp);
+      if (!wounded) return { state, finished: false };
+      used.push(action.cardId);
+      const pct = Math.min(80, Math.round(eff.power * 100 * supMult));
+      let healed = 0;
+      for (const f of me.fighters) {
+        if (f.hp > 0 && f.hp < f.maxHp) {
+          const b = f.hp;
+          f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.round((f.maxHp * pct) / 100)));
+          healed += f.hp - b;
+        }
+      }
+      s.log.push(`${me.username} played ${def.name} — a blessing restored ${healed} HP across the line.`);
+    } else if (eff.kind === "reflect") {
+      used.push(action.cardId);
+      const pct = Math.min(80, Math.round(eff.power * 100 * supMult));
+      me.judge = { pct, volleys: 3 };
+      s.log.push(`${me.username} played ${def.name} — for the next 3 blows that land, judgment answers with ${pct}% in kind.`);
+    } else if (eff.kind === "pact") {
+      // Trade with the Devil — the contract needs a living signer with HP
+      // to give. The PRICE is fixed; only the payout scales with level.
+      const t = me.active >= 0 ? me.fighters[me.active] : undefined;
+      if (!t || t.hp <= 1) return { state, finished: false };
+      used.push(action.cardId);
+      const price = Math.max(1, Math.round(t.hp * eff.power));
+      t.hp = Math.max(1, t.hp - price);
+      const bonus = Math.min(90, Math.round(50 * supMult));
+      me.atkBonus = Math.max(me.atkBonus || 0, bonus);
+      me.guardPct = Math.max(me.guardPct || 0, 25);
+      s.log.push(`${me.username} played ${def.name} — ${t.name} paid ${price} HP, and the contract pays back in power.`);
+    } else if (eff.kind === "stone") {
+      used.push(action.cardId);
+      const bonus = Math.min(60, Math.round(eff.power * supMult));
+      me.atkBonus = Math.max(me.atkBonus || 0, bonus);
+      // Untargetable rides the same rail as a domain's bulwarks: the next
+      // two enemy attacks simply do not land.
+      me.bulwarks = Math.max(me.bulwarks || 0, 2);
+      s.log.push(`${me.username} played ${def.name} — stone hands hit ${bonus}% harder, and the next 2 attacks find nothing.`);
+    } else if (eff.kind === "mirror") {
+      used.push(action.cardId);
+      const pct = Math.min(30, Math.round(eff.power * 100 * supMult));
+      me.mirror = { pct };
+      s.log.push(`${me.username} played ${def.name} — the glass returns ${pct}% of every blow, and drinks what it returns.`);
+    } else if (eff.kind === "arise") {
+      // ALL the fallen, at once — that is the whole card.
+      const fallen = me.fighters.filter((f) => f.hp <= 0);
+      if (fallen.length === 0) return { state, finished: false };
+      used.push(action.cardId);
+      const pct = Math.min(25, Math.round(eff.power * 100 * supMult));
+      for (const f of fallen) f.hp = Math.max(1, Math.round((f.maxHp * pct) / 100));
+      const bonus = Math.min(40, Math.round(20 * supMult));
+      me.atkBonus = Math.max(me.atkBonus || 0, bonus);
+      s.log.push(`${me.username} played ${def.name} — ARISE. ${fallen.length} fallen stood back up, angrier.`);
     } else {
       return { state, finished: false };
     }
@@ -782,6 +844,31 @@ export function applyAction(
       const back = Math.max(1, Math.round(dealt / 2));
       mine.hp = Math.max(0, mine.hp - back);
       s.log.push(`The water returned ${back} of it to ${mine.name}.`);
+      if (mine.hp === 0) {
+        s.log.push(`${mine.name} fell.`);
+        me.active = -1;
+      }
+    }
+    // Divine Judgment: a share of what landed comes back, spent per blow
+    // that actually landed — same rule as the abyss above.
+    if (foe.judge && foe.judge.volleys > 0) {
+      foe.judge.volleys -= 1;
+      const back = Math.max(1, Math.round((dealt * foe.judge.pct) / 100));
+      mine.hp = Math.max(0, mine.hp - back);
+      s.log.push(`Judgment returned ${back} to ${mine.name}. ${foe.judge.volleys} answer(s) remain.`);
+      if (foe.judge.volleys <= 0) foe.judge = undefined;
+      if (mine.hp === 0) {
+        s.log.push(`${mine.name} fell.`);
+        me.active = -1;
+      }
+    }
+    // The mirror: a sliver returns AND heals the card it landed on. Only
+    // while that card still stands — broken glass reflects nothing.
+    if (foe.mirror && theirs.hp > 0) {
+      const back = Math.max(1, Math.round((dealt * foe.mirror.pct) / 100));
+      mine.hp = Math.max(0, mine.hp - back);
+      theirs.hp = Math.min(theirs.maxHp, theirs.hp + back);
+      s.log.push(`The mirror returned ${back} — and drank it.`);
       if (mine.hp === 0) {
         s.log.push(`${mine.name} fell.`);
         me.active = -1;

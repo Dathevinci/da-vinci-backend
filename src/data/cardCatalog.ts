@@ -31,7 +31,14 @@ export type SupportEffect =
   | { kind: "block" }                      // negate the next attack entirely
   | { kind: "focus"; power: number }       // multiply your next attack
   | { kind: "mend"; power: number }        // heal EVERY living card you have
-  | { kind: "revive"; power: number };     // bring a fallen card back at power%
+  | { kind: "revive"; power: number }      // bring a fallen card back at power%
+  // ── the Covenant — legendary supports, percent-scaled ──
+  | { kind: "reflect"; power: number }     // return power (0-1) of each blow, 3 hits
+  | { kind: "bless"; power: number }       // heal ALL allies power (0-1) of max HP
+  | { kind: "pact"; power: number }        // pay power (0-1) of current HP; hit far harder, guarded
+  | { kind: "stone"; power: number }       // +power% ATK; next 2 enemy attacks find nothing
+  | { kind: "mirror"; power: number }      // return power (0-1) of damage AND heal it
+  | { kind: "arise"; power: number };      // ALL fallen return at power (0-1) of max HP, emboldened
 
 export interface CardDef {
   id: string;
@@ -126,6 +133,17 @@ export const CARDS: Record<string, CardDef> = {
   card_secondwind: { id: "card_secondwind", name: "Second Wind",      rarity: "legendary", set: "Succour", hue: 48, motif: "dawn", flavor: "The dead are only the resting, if you argue well enough.", support: { kind: "revive", power: 50 } },
 
   // ── More Succour: support you collect, one use per duel each ──
+  // ═══ SET · COVENANT — legendary supports ═══════════════════════════════════
+  // Six chases, no padding, every one a support: the Covenant is what you
+  // sign, not what you field. Same one-use-per-duel rule as Succour; effects
+  // are PERCENT-based, which is what makes a legendary support legendary.
+  card_ophanim:     { id: "card_ophanim",     name: "Ophanim",              rarity: "legendary", set: "Covenant", hue: 45,  motif: "wheel",  flavor: "It does not strike. It answers — and every answer weighs the same as the blow.", support: { kind: "reflect", power: 0.5 } },
+  card_seraphim:    { id: "card_seraphim",    name: "Seraphim",             rarity: "legendary", set: "Covenant", hue: 40,  motif: "dawn",   flavor: "Six wings, and every one of them a mercy.", support: { kind: "bless", power: 0.5 } },
+  card_deviltrade:  { id: "card_deviltrade",  name: "Trade with the Devil", rarity: "legendary", set: "Covenant", hue: 355, motif: "seal",   flavor: "The terms were fair. That should have been the warning.", support: { kind: "pact", power: 0.5 } },
+  card_rockscissors:{ id: "card_rockscissors",name: "Rock and Scissors",    rarity: "legendary", set: "Covenant", hue: 210, motif: "web",    flavor: "The hand that turns to stone cannot be cut. The hand that waits, decides.", support: { kind: "stone", power: 25 } },
+  card_mirror:      { id: "card_mirror",      name: "Mirror",               rarity: "legendary", set: "Covenant", hue: 200, motif: "ripple", flavor: "It gives back everything you offer, and keeps a little for itself.", support: { kind: "mirror", power: 0.15 } },
+  card_arise:       { id: "card_arise",       name: "Arise",                rarity: "legendary", set: "Covenant", hue: 275, motif: "comet",  flavor: "The dead heard their name spoken like an order — and obeyed.", support: { kind: "arise", power: 0.1 } },
+
   card_lastlight:  { id: "card_lastlight",  name: "Last Light",       rarity: "common", set: "Succour", hue: 52,  motif: "dawn",   flavor: "Enough to see by. Not enough to rest.", support: { kind: "heal", power: 15 } },
   card_emberward:  { id: "card_emberward",  name: "Ember Ward",       rarity: "common", set: "Succour", hue: 20,  motif: "ember",  flavor: "Hold the coal. It will hold you back.", support: { kind: "shield" } },
   card_tidecall:   { id: "card_tidecall",   name: "Tidecall",         rarity: "rare",   set: "Succour", hue: 188, motif: "sea",    flavor: "The water remembers everyone who stood in it.", support: { kind: "mend", power: 8 } },
@@ -356,6 +374,8 @@ export const SET_REWARDS: Record<string, SetReward> = {
   // Seven legendaries, no padding — completing this is the longest chase in
   // the game, and the payout is sized like it.
   Requiem:   { set: "Requiem",   ap: 8000, shards: 1500, title: "The Requiem Made Whole" },
+  // Six legendary supports, no padding — the second-longest chase.
+  Covenant:  { set: "Covenant",  ap: 6000, shards: 1200, title: "Signatory of the Covenant" },
 };
 
 // Distinct card ids belonging to a set (for completion checks).

@@ -137,6 +137,11 @@ export interface DungeonState {
   pendingFocus?: boolean;   // party's opening volley boosted…
   focusPower?: number;      // …by this multiplier (the card's own power)
   pendingBlock?: boolean;   // the next enemy volley is negated outright
+  // ── the Covenant's armed effects, one floor each ──
+  pendingJudge?: number;    // enemies eat back this % of every blow they land
+  pendingMirror?: number;   // this % of enemy damage returns AND heals the taker
+  pendingStone?: number;    // this many whole enemy volleys simply MISS
+  pendingSurge?: number;    // party attacks this % harder, the whole floor
 }
 
 export const PACK_MAX = 3;
@@ -270,6 +275,28 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     blockVolley = true;
     state.pendingBlock = undefined;
     events.push({ k: "note", text: "> a bulwark stands with them — the first enemy volley will NOT land." });
+  }
+  // ── the Covenant lands here, one floor each ──
+  let judgePct = 0, mirrorPct = 0, stoneVolleys = 0, surgePct = 0;
+  if (state.pendingJudge && state.pendingJudge > 0) {
+    judgePct = state.pendingJudge;
+    state.pendingJudge = undefined;
+    events.push({ k: "note", text: `> judgment turns its wheels — enemies eat back ${judgePct}% of every blow they land.` });
+  }
+  if (state.pendingMirror && state.pendingMirror > 0) {
+    mirrorPct = state.pendingMirror;
+    state.pendingMirror = undefined;
+    events.push({ k: "note", text: `> the mirror is raised — ${mirrorPct}% of enemy damage returns, and heals.` });
+  }
+  if (state.pendingStone && state.pendingStone > 0) {
+    stoneVolleys = state.pendingStone;
+    state.pendingStone = undefined;
+    events.push({ k: "note", text: `> stone hands — the next ${stoneVolleys} enemy volleys will find NOTHING.` });
+  }
+  if (state.pendingSurge && state.pendingSurge > 0) {
+    surgePct = state.pendingSurge;
+    state.pendingSurge = undefined;
+    events.push({ k: "note", text: `> the contract holds — the party hits ${surgePct}% HARDER this floor.` });
   }
 
   const livingEnemies = () => enemies.map((e, idx) => ({ e, idx })).filter((x) => x.e.hp > 0);
@@ -475,7 +502,7 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     }
 
     // ── party swings — always at the weakest thing standing
-    const atkMul = (1 + (state.atkBonusPct || 0) / 100) * (focusVolley ? focusMult : 1);
+    const atkMul = (1 + (state.atkBonusPct || 0) / 100) * (focusVolley ? focusMult : 1) * (1 + surgePct / 100);
     for (let i = 0; i < state.party.length; i++) {
       const u = state.party[i];
       if (u.hp <= 0) continue;
@@ -498,6 +525,9 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     if (blockVolley) {
       blockVolley = false;
       events.push({ k: "note", text: "> the bulwark takes the whole volley. nothing gets through." });
+    } else if (stoneVolleys > 0) {
+      stoneVolleys--;
+      events.push({ k: "note", text: "> the volley passes through where the party should be. stone tells no one." });
     } else if (st.enemyFrozenRounds > 0) {
       st.enemyFrozenRounds--;
       events.push({ k: "note", text: "> the chains hold. nothing moves." });
@@ -519,6 +549,13 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
         target.u.hp = Math.max(0, target.u.hp - dmg);
         events.push({ k: "ehit", e, i: target.idx, dmg });
         if (st.reflectRounds > 0) damageEnemy(e, dmg);
+        // Judgment answers every blow; the mirror answers AND drinks.
+        if (judgePct > 0) damageEnemy(e, Math.max(1, Math.round((dmg * judgePct) / 100)));
+        if (mirrorPct > 0) {
+          const back = Math.max(1, Math.round((dmg * mirrorPct) / 100));
+          damageEnemy(e, back);
+          if (target.u.hp > 0) target.u.hp = Math.min(target.u.maxHp, target.u.hp + back);
+        }
         if (target.u.hp === 0) events.push({ k: "fall", i: target.idx });
       }
       if (wardVolleys > 0) wardVolleys--;

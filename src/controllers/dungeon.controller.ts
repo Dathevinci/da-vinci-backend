@@ -284,6 +284,52 @@ export const useSupport = async (req: Request, res: Response, next: NextFunction
       // Level scales the BONUS part, same rule as the duel arena.
       state.focusPower = 1 + ((sup.power || 1.5) - 1) * supMult;
       note = `> ${def.name} is armed — the next opening volley hits ${Math.round((state.focusPower - 1) * 100)}% harder.`;
+    } else if (sup.kind === "bless") {
+      // Seraphim — instant PERCENT mend on every living unit. Caps mirror
+      // the duel arena exactly.
+      const living = state.party.filter((u) => u.hp > 0 && u.hp < u.maxHp);
+      if (!living.length) return res.status(400).json({ success: false, message: "Nobody is hurt right now." });
+      const pct = Math.min(80, Math.round((sup.power || 0.5) * 100 * supMult));
+      let total = 0;
+      for (const u of living) {
+        const healed = Math.min(u.maxHp - u.hp, Math.max(1, Math.round((u.maxHp * pct) / 100)));
+        u.hp += healed;
+        total += healed;
+      }
+      note = `> ${def.name} — a blessing settles over the party. ${total} HP restored.`;
+    } else if (sup.kind === "arise") {
+      // ALL the fallen, at once, and the survivors swing harder next floor.
+      const fallen = state.party.filter((u) => u.hp <= 0);
+      if (!fallen.length) return res.status(400).json({ success: false, message: "Nobody has fallen. May it stay that way." });
+      const pct = Math.min(25, Math.round((sup.power || 0.1) * 100 * supMult));
+      for (const u of fallen) u.hp = Math.max(1, Math.round((u.maxHp * pct) / 100));
+      const bonus = Math.min(40, Math.round(20 * supMult));
+      state.pendingSurge = Math.max(state.pendingSurge || 0, bonus);
+      note = `> ${def.name} — ARISE. ${fallen.length} fallen stand back up, and the party is emboldened.`;
+    } else if (sup.kind === "pact") {
+      // The strongest living unit signs; the whole party collects next floor.
+      const living = state.party.filter((u) => u.hp > 1);
+      if (!living.length) return res.status(400).json({ success: false, message: "Nobody has the HP left to sign." });
+      const signer = living.sort((a, b) => b.hp - a.hp)[0];
+      const price = Math.max(1, Math.round(signer.hp * (sup.power || 0.5)));
+      signer.hp = Math.max(1, signer.hp - price);
+      const bonus = Math.min(90, Math.round(50 * supMult));
+      state.pendingSurge = Math.max(state.pendingSurge || 0, bonus);
+      note = `> ${def.name} — ${signer.name} paid ${price} HP. Next floor, the contract pays back ${bonus}% harder.`;
+    } else if (sup.kind === "reflect") {
+      if (state.pendingJudge) return res.status(400).json({ success: false, message: "Judgment is already turning." });
+      state.pendingJudge = Math.min(80, Math.round((sup.power || 0.5) * 100 * supMult));
+      note = `> ${def.name} is armed — next floor, enemies eat back ${state.pendingJudge}% of every blow they land.`;
+    } else if (sup.kind === "stone") {
+      if (state.pendingStone) return res.status(400).json({ success: false, message: "The stone already stands." });
+      state.pendingStone = 2;
+      const bonus = Math.min(60, Math.round((sup.power || 25) * supMult));
+      state.pendingSurge = Math.max(state.pendingSurge || 0, bonus);
+      note = `> ${def.name} is armed — next floor, 2 whole volleys MISS and the party hits ${bonus}% harder.`;
+    } else if (sup.kind === "mirror") {
+      if (state.pendingMirror) return res.status(400).json({ success: false, message: "The mirror is already raised." });
+      state.pendingMirror = Math.min(30, Math.round((sup.power || 0.15) * 100 * supMult));
+      note = `> ${def.name} is armed — next floor, ${state.pendingMirror}% of enemy damage returns, and heals.`;
     } else {
       return res.status(400).json({ success: false, message: "That card doesn't know what to do down there." });
     }

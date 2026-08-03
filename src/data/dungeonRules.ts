@@ -484,15 +484,18 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     rounds++;
 
     if (eruption && rounds >= eruption.atRound) {
-      const hit = Math.max(1, Math.round((eruption.atk * eruption.power) / 100));
+      // Snapshot to a const FIRST: `eruption` is captured by closures, so
+      // strict tsc forgets the null-check after every function call below.
+      const er = eruption;
+      eruption = null;
+      const hit = Math.max(1, Math.round((er.atk * er.power) / 100));
       for (const { idx } of livingEnemies()) {
         damageEnemy(idx, hit);
       }
       for (const u of state.party) {
-        if (u.hp > 0) u.hp = Math.min(u.maxHp, u.hp + Math.max(1, Math.round((u.maxHp * eruption.healPct) / 100)));
+        if (u.hp > 0) u.hp = Math.min(u.maxHp, u.hp + Math.max(1, Math.round((u.maxHp * er.healPct) / 100)));
       }
-      events.push({ k: "note", text: `> ${eruption.name} ERUPTS — every enemy takes ${hit}, and the party steadies.` });
-      eruption = null;
+      events.push({ k: "note", text: `> ${er.name} ERUPTS — every enemy takes ${hit}, and the party steadies.` });
       if (enemies.every((e) => e.hp <= 0)) break;
     }
 

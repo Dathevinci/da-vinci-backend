@@ -938,14 +938,18 @@ export function applyAction(
     if (!side.ascended) continue;
     side.ascended.rounds -= 1;
     if (side.ascended.rounds > 0) continue;
+    // Snapshot to a const: property narrowing dies at every call below
+    // under strict tsc, and this block is full of calls.
+    const asc = side.ascended;
+    side.ascended = undefined;
     const other = side === me ? foe : me;
-    const caster = side.fighters.find((f) => f.cardId === side.ascended!.cardId);
+    const caster = side.fighters.find((f) => f.cardId === asc.cardId);
     // The caster may be dead by now — the domain erupts anyway, off the
     // stored power and the caster's BASE-built atk if it still stands,
     // else a floor of its printed attack. An eruption that fizzles when
     // the caster falls would make focusing the mythic erase the whole tell.
     const atkRef = caster?.atk ?? CARD_STATS.mythic.atk;
-    const hit = Math.max(1, Math.round((atkRef * side.ascended.power) / 100));
+    const hit = Math.max(1, Math.round((atkRef * asc.power) / 100));
     let struck = 0;
     for (const f of other.fighters) {
       if (f.hp <= 0) continue;
@@ -955,11 +959,10 @@ export function applyAction(
     }
     for (const f of side.fighters) {
       if (f.hp <= 0) continue;
-      f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.round((f.maxHp * side.ascended.healPct) / 100)));
+      f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.round((f.maxHp * asc.healPct) / 100)));
     }
-    s.log.push(`▲▲ ${side.ascended.name} ERUPTED — ${struck} card${struck === 1 ? "" : "s"} took ${hit}, and ${side.username}'s line steadied.`);
+    s.log.push(`▲▲ ${asc.name} ERUPTED — ${struck} card${struck === 1 ? "" : "s"} took ${hit}, and ${side.username}'s line steadied.`);
     if (other.active >= 0 && other.fighters[other.active]?.hp <= 0) other.active = -1;
-    side.ascended = undefined;
   }
   for (const side of [me, foe]) {
     if (!side.doom) continue;

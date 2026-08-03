@@ -458,6 +458,77 @@ export const dustCard = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
+// POST /api/cards/max  body { userId, cardId, dryRun? }
+// ONE bill for everything a card has left: levels to 10, both forge ranks
+// to 5 (fighters), and its skill or domain to cap. dryRun prices it without
+// spending, so the button can say the number before the finger commits.
+export const maxCard = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardId, dryRun } = (req.body || {}) as { userId?: string; cardId?: string; dryRun?: boolean };
+    if (!ownerGuard(req, res, userId)) return;
+    const card = cardId ? CARDS[cardId] : undefined;
+    if (!card) return res.status(400).json({ success: false, message: "Unknown card." });
+
+    const row = await prisma.userCard.findUnique({ where: { userId_cardId: { userId: userId!, cardId: cardId! } } });
+    if (!row || row.count < 1) return res.status(400).json({ success: false, message: "You don't own that card." });
+
+    const curLevel = row.level || 1;
+    const curSkill = row.skillLevel || 1;
+    const curAtk = (row as any).atkForge || 0;
+    const curHp = (row as any).hpForge || 0;
+
+    // What's left, and what it costs — same formulas as the single steps.
+    let cost = 0;
+    for (let l = curLevel; l < MAX_CARD_LEVEL; l++) cost += upgradeCost(card.rarity, l);
+    const forgeable = !card.support;
+    if (forgeable) {
+      for (let r = curAtk; r < FORGE_MAX; r++) cost += forgeCost("atk", card.rarity, r);
+      for (let r = curHp; r < FORGE_MAX; r++) cost += forgeCost("hp", card.rarity, r);
+    }
+    const isDom = !!DOMAINS[cardId!];
+    const skillDef = SKILLS[cardId!];
+    const skillCap = isDom ? MAX_DOMAIN_LEVEL : skillDef ? MAX_SKILL_LEVEL : curSkill;
+    for (let s = curSkill; s < skillCap; s++) cost += isDom ? domainUpgradeCost(s) : skillUpgradeCost(s, card.rarity);
+
+    const targetAtk = forgeable ? FORGE_MAX : curAtk;
+    const targetHp = forgeable ? FORGE_MAX : curHp;
+    const already = curLevel >= MAX_CARD_LEVEL && curAtk >= targetAtk && curHp >= targetHp && curSkill >= skillCap;
+    if (already) return res.status(400).json({ success: false, message: "Every dial is already at the top." });
+
+    if (dryRun) {
+      return res.json({ success: true, data: { cost, level: MAX_CARD_LEVEL, atkForge: targetAtk, hpForge: targetHp, skillLevel: skillCap } });
+    }
+
+    const free = await isLeadDevFree(userId!);
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        if (!free) {
+          const debit = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (debit.count === 0) throw new CardError(402, `Maxing this card costs ${cost.toLocaleString()} shards.`);
+        }
+        // Guarded on the EXACT dials we priced — two fast presses can't buy
+        // the same climb twice, and a mid-flight single upgrade aborts this.
+        const bump = await tx.userCard.updateMany({
+          where: { userId, cardId, level: curLevel, skillLevel: curSkill, atkForge: curAtk, hpForge: curHp },
+          data: { level: MAX_CARD_LEVEL, skillLevel: skillCap, atkForge: targetAtk, hpForge: targetHp },
+        });
+        if (bump.count === 0) throw new CardError(409, "The card just changed — try again.");
+        const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
+        return { cost, shards: u?.shards ?? 0, level: MAX_CARD_LEVEL, atkForge: targetAtk, hpForge: targetHp, skillLevel: skillCap };
+      });
+      res.json({ success: true, data: result });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/cards/synthesize  body { userId, a, b, boostShards? }
 // THE MACHINE. Two fusion-eligible legendaries in, one Mythic out — the pair
 // DECIDES which Mythic; only the affix and eruption-mod rolls are luck.

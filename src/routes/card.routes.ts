@@ -2,7 +2,7 @@ import { Router } from "express";
 import {
   getCatalog, getCollection, getCollectors, openPack, dustCard, craftCard,
   foilCard, openRelicPack, claimSet, getLadder, setShowcase, wakeCard, upgradeCard, upgradeSkill, attuneCard, forgeCard,
-  getPullStats, getTitles, setTitles, dustAllDupes, grantAllCards, synthesizeMythic,
+  getPullStats, getTitles, setTitles, dustAllDupes, grantAllCards, synthesizeMythic, maxCard,
 } from "../controllers/card.controller";
 
 const router = Router();
@@ -16,6 +16,7 @@ router.post("/dust", dustCard);
 router.post("/dust-all", dustAllDupes);
 router.post("/grant-all", grantAllCards);
 router.post("/synthesize", synthesizeMythic);
+router.post("/max", maxCard);
 router.post("/craft", craftCard);
 router.post("/foil", foilCard);
 router.post("/relic-pack", openRelicPack);

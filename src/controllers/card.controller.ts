@@ -182,21 +182,31 @@ export async function isLeadDevFree(userId: string): Promise<boolean> {
 export const getPullStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = (req.query.userId as string) || "";
+    // TWO reason formats live in the log: launch-day packs wrote a plain
+    // "card-pack" (always the standard 4-card pack), the pull-size update
+    // writes "card-pack:xN". Matching only the new one silently erased
+    // every launch-week pull — the owner's friend hand-counted 2,410 spins
+    // while this endpoint reported 186. startsWith catches both eras.
     const tally = async (who?: string) => {
-      const rows = await Promise.all(PULL_SIZES.map(async (s) => ({
-        size: s,
-        n: await prisma.pointLog.count({
-          where: { ...(who ? { userId: who } : {}), reason: `card-pack:x${s}` },
-        }),
-      })));
-      return {
-        packs: rows.reduce((a, r) => a + r.n, 0),
-        cards: rows.reduce((a, r) => a + r.n * r.size, 0),
-      };
+      const rows = await prisma.pointLog.groupBy({
+        by: ["reason"],
+        where: { ...(who ? { userId: who } : {}), reason: { startsWith: "card-pack" } },
+        _count: { _all: true },
+        _sum: { amount: true },
+      });
+      let packs = 0, cards = 0, apSpent = 0;
+      for (const r of rows) {
+        const m = /^card-pack:x(\d+)$/.exec(r.reason);
+        const size = m ? Number(m[1]) : PACK_SIZE;
+        packs += r._count._all;
+        cards += r._count._all * size;
+        apSpent += -(r._sum.amount || 0);
+      }
+      return { packs, cards, apSpent };
     };
     const [community, mine] = await Promise.all([
       tally(),
-      userId ? tally(userId) : Promise.resolve({ packs: 0, cards: 0 }),
+      userId ? tally(userId) : Promise.resolve({ packs: 0, cards: 0, apSpent: 0 }),
     ]);
     // Percentages derived from the live weights, never hand-copied — if the
     // squeeze ever moves again, this endpoint moves with it.
@@ -332,6 +342,11 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
           });
           if (debit.count === 0) throw new CardError(402, `That pull costs ${price.toLocaleString()} Arise Points — you don't have enough.`);
           await tx.pointLog.create({ data: { userId: userId!, amount: -price, reason: `card-pack:x${size}` } });
+        } else {
+          // Free staff pulls still log — amount 0, so AP-spent stays honest
+          // while the pull COUNTERS see every pack. Without this the owner's
+          // own stats read a lifetime of zero.
+          await tx.pointLog.create({ data: { userId: userId!, amount: 0, reason: `card-pack:x${size}` } });
         }
 
         // Grant each pull — upsert the per-card count so dupes stack.

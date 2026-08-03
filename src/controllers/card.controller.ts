@@ -438,6 +438,60 @@ export const dustCard = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
+// POST /api/cards/dust-all  body { userId }
+// The whole binder in ONE sweep: keep one copy of every card (and the best
+// serial of EVERY build of every legendary), dust the rest. Same rules as
+// dustCard per card — events never dust, different builds are never dupes —
+// with per-card guarded writes so a pack landing mid-sweep aborts cleanly
+// instead of being eaten.
+export const dustAllDupes = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req.body || {}) as { userId?: string };
+    if (!ownerGuard(req, res, userId)) return;
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const rows = await tx.userCard.findMany({ where: { userId, count: { gt: 1 } } });
+        let copies = 0, gained = 0;
+        for (const owned of rows) {
+          const card = CARDS[owned.cardId];
+          if (!card || card.rarity === "event") continue;
+          let dupes = 0;
+          if (isLegendary(owned.cardId)) {
+            const extras = await findDuplicatePrints(tx, userId!, owned.cardId);
+            if (extras.length === 0) continue;
+            dupes = extras.length;
+            const taken = await tx.userCard.updateMany({
+              where: { userId, cardId: owned.cardId, count: owned.count },
+              data: { count: { decrement: dupes } },
+            });
+            if (taken.count === 0) throw new CardError(409, "Your collection just changed — try again.");
+            await tx.cardPrint.deleteMany({ where: { id: { in: extras } } });
+          } else {
+            dupes = owned.count - 1;
+            const collapsed = await tx.userCard.updateMany({
+              where: { userId, cardId: owned.cardId, count: owned.count },
+              data: { count: 1 },
+            });
+            if (collapsed.count === 0) throw new CardError(409, "Your collection just changed — try again.");
+          }
+          copies += dupes;
+          gained += dupes * DUST_VALUE[card.rarity];
+        }
+        if (copies === 0) throw new CardError(400, "No duplicates to dust — every copy you hold is one of a kind.");
+        const user = await tx.user.update({ where: { id: userId }, data: { shards: { increment: gained } }, select: { shards: true } });
+        return { copies, gained, shards: user.shards };
+      }, { timeout: 20000 }); // a big binder is many guarded writes; the default 5s is too tight for the free-tier DB
+      res.json({ success: true, data: result });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/cards/craft  body { userId, cardId }
 // Spend shards to add a specific card (turns bad luck into a guaranteed path).
 export const craftCard = async (req: Request, res: Response, next: NextFunction) => {

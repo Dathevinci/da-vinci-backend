@@ -438,6 +438,47 @@ export const dustCard = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
+// POST /api/cards/grant-all  body { userId } — LEAD DEV ONLY.
+// One copy of every catalog card the account doesn't already hold, prints
+// minted for the legendaries in the same transaction (the invariant that
+// keeps serials honest). Idempotent: owned cards are skipped, so a second
+// press grants nothing and inflates nothing.
+export const grantAllCards = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req.body || {}) as { userId?: string };
+    if (!ownerGuard(req, res, userId)) return;
+    // Role-column gate, never the username — the whole catalog is an owner
+    // tool, not a purchasable.
+    if (!(await isLeadDevFree(userId!))) {
+      return res.status(403).json({ success: false, message: "The full catalog belongs to the lead dev alone." });
+    }
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const owned = await tx.userCard.findMany({ where: { userId }, select: { cardId: true } });
+        const have = new Set(owned.map((o) => o.cardId));
+        const missing = Object.keys(CARDS).filter((id) => !have.has(id));
+        const prints: PrintInfo[] = [];
+        for (const cardId of missing) {
+          await tx.userCard.upsert({
+            where: { userId_cardId: { userId: userId!, cardId } },
+            create: { userId: userId!, cardId, count: 1 },
+            update: { count: { increment: 1 }, hibernating: false },
+          });
+          if (isLegendary(cardId)) prints.push(...(await mintPrints(tx, userId!, cardId, 1)));
+        }
+        return { granted: missing.length, prints };
+      }, { timeout: 30000 }); // one write per missing card; a fresh account is the whole catalog
+      res.json({ success: true, data: result });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
 // POST /api/cards/dust-all  body { userId }
 // The whole binder in ONE sweep: keep one copy of every card (and the best
 // serial of EVERY build of every legendary), dust the rest. Same rules as

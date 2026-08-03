@@ -155,6 +155,23 @@ export const createListing = async (req: Request, res: Response, next: NextFunct
       return res.status(400).json({ success: false, message: `${def.name} is asleep. Wake it before selling.` });
     }
 
+    // ONE BUILD PER LISTING — each wear is its own market with its own
+    // price. A lot mixing a Rusted with a Factory New would price them as
+    // if they were the same thing. Condition never changes on a print, so
+    // this pre-transaction read cannot be raced into a mixed lot.
+    if (chosen.length > 1) {
+      const picked = await prisma.cardPrint.findMany({
+        where: { userId: userId!, cardId: cardId!, serial: { in: chosen } },
+        select: { condition: true },
+      });
+      if (new Set(picked.map((p) => p.condition)).size > 1) {
+        return res.status(400).json({
+          success: false,
+          message: "One build per listing — different wears are different cards. List each build separately.",
+        });
+      }
+    }
+
     const seller = await prisma.user.findUnique({ where: { id: userId }, select: { username: true } });
     if (!seller) return res.status(404).json({ success: false, message: "User not found." });
 

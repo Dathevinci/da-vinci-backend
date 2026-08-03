@@ -43,9 +43,10 @@ export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
   epic:      { hp: 23, atk: 9 },
   legendary: { hp: 26, atk: 10 },
   event:     { hp: 24, atk: 9 },
-  // The ★5 premium: costs two consumed legendaries, so it must clearly
-  // outrank one — without one card deciding every duel.
-  mythic:    { hp: 30, atk: 12 },
+  // The ★5 premium, on the owner's order: OP. It cost two consumed
+  // legendaries and a synthesis bill — it fights like it. +38% HP and
+  // +50% ATK over legendary, and the level curve compounds on top.
+  mythic:    { hp: 36, atk: 15 },
 };
 
 // Foil copies fight ~20% harder — a real reason to spend shards on one.

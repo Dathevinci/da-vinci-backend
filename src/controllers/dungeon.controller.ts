@@ -298,38 +298,42 @@ export const useSupport = async (req: Request, res: Response, next: NextFunction
       }
       note = `> ${def.name} — a blessing settles over the party. ${total} HP restored.`;
     } else if (sup.kind === "arise") {
-      // ALL the fallen, at once, and the survivors swing harder next floor.
+      // ALL the fallen, at once — and the survivors swing harder, LASTING,
+      // through the same channel the duel uses (max-write into atkBonus).
       const fallen = state.party.filter((u) => u.hp <= 0);
       if (!fallen.length) return res.status(400).json({ success: false, message: "Nobody has fallen. May it stay that way." });
       const pct = Math.min(25, Math.round((sup.power || 0.1) * 100 * supMult));
       for (const u of fallen) u.hp = Math.max(1, Math.round((u.maxHp * pct) / 100));
       const bonus = Math.min(40, Math.round(20 * supMult));
-      state.pendingSurge = Math.max(state.pendingSurge || 0, bonus);
-      note = `> ${def.name} — ARISE. ${fallen.length} fallen stand back up, and the party is emboldened.`;
+      state.atkBonusPct = Math.max(state.atkBonusPct || 0, bonus);
+      note = `> ${def.name} — ARISE. ${fallen.length} fallen stand back up, and the party hits ${bonus}% harder from here on.`;
     } else if (sup.kind === "pact") {
-      // The strongest living unit signs; the whole party collects next floor.
+      // The strongest living unit signs; the whole party collects — attack
+      // AND the 25% guard, both lasting, both duel-identical.
       const living = state.party.filter((u) => u.hp > 1);
       if (!living.length) return res.status(400).json({ success: false, message: "Nobody has the HP left to sign." });
       const signer = living.sort((a, b) => b.hp - a.hp)[0];
       const price = Math.max(1, Math.round(signer.hp * (sup.power || 0.5)));
       signer.hp = Math.max(1, signer.hp - price);
       const bonus = Math.min(90, Math.round(50 * supMult));
-      state.pendingSurge = Math.max(state.pendingSurge || 0, bonus);
-      note = `> ${def.name} — ${signer.name} paid ${price} HP. Next floor, the contract pays back ${bonus}% harder.`;
+      state.atkBonusPct = Math.max(state.atkBonusPct || 0, bonus);
+      state.guardPct = Math.max(state.guardPct || 0, 25);
+      note = `> ${def.name} — ${signer.name} paid ${price} HP. The contract pays back: ${bonus}% harder, 25% tougher, lasting.`;
     } else if (sup.kind === "reflect") {
-      if (state.pendingJudge) return res.status(400).json({ success: false, message: "Judgment is already turning." });
-      state.pendingJudge = Math.min(80, Math.round((sup.power || 0.5) * 100 * supMult));
-      note = `> ${def.name} is armed — next floor, enemies eat back ${state.pendingJudge}% of every blow they land.`;
+      if (state.judgePct) return res.status(400).json({ success: false, message: "Judgment is already turning." });
+      state.judgePct = Math.min(80, Math.round((sup.power || 0.5) * 100 * supMult));
+      state.judgeBlows = 3; // exactly the duel's counter
+      note = `> ${def.name} — judgment turns its wheels. The next 3 blows that land come back ${state.judgePct}%.`;
     } else if (sup.kind === "stone") {
       if (state.pendingStone) return res.status(400).json({ success: false, message: "The stone already stands." });
       state.pendingStone = 2;
       const bonus = Math.min(60, Math.round((sup.power || 25) * supMult));
-      state.pendingSurge = Math.max(state.pendingSurge || 0, bonus);
-      note = `> ${def.name} is armed — next floor, 2 whole volleys MISS and the party hits ${bonus}% harder.`;
+      state.atkBonusPct = Math.max(state.atkBonusPct || 0, bonus);
+      note = `> ${def.name} is armed — next floor, 2 whole volleys MISS; the party hits ${bonus}% harder, lasting.`;
     } else if (sup.kind === "mirror") {
-      if (state.pendingMirror) return res.status(400).json({ success: false, message: "The mirror is already raised." });
-      state.pendingMirror = Math.min(30, Math.round((sup.power || 0.15) * 100 * supMult));
-      note = `> ${def.name} is armed — next floor, ${state.pendingMirror}% of enemy damage returns, and heals.`;
+      if (state.mirrorPct) return res.status(400).json({ success: false, message: "The mirror is already raised." });
+      state.mirrorPct = Math.min(30, Math.round((sup.power || 0.15) * 100 * supMult));
+      note = `> ${def.name} — the mirror is raised, lasting. ${state.mirrorPct}% of enemy damage returns, and heals.`;
     } else {
       return res.status(400).json({ success: false, message: "That card doesn't know what to do down there." });
     }

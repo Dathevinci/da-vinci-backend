@@ -137,11 +137,13 @@ export interface DungeonState {
   pendingFocus?: boolean;   // party's opening volley boosted…
   focusPower?: number;      // …by this multiplier (the card's own power)
   pendingBlock?: boolean;   // the next enemy volley is negated outright
-  // ── the Covenant's armed effects, one floor each ──
-  pendingJudge?: number;    // enemies eat back this % of every blow they land
-  pendingMirror?: number;   // this % of enemy damage returns AND heals the taker
-  pendingStone?: number;    // this many whole enemy volleys simply MISS
-  pendingSurge?: number;    // party attacks this % harder, the whole floor
+  // ── the Covenant's armed effects ── SAME channels and durations as the
+  // duel engine: attack/guard write into atkBonusPct/guardPct (lasting,
+  // max-write), judgment is 3 landed blows, the mirror lasts.
+  pendingStone?: number;    // this many whole enemy volleys MISS, next floor
+  judgePct?: number;        // Ophanim: % returned per landed blow…
+  judgeBlows?: number;      // …for this many blows, then it clears (3, like the duel)
+  mirrorPct?: number;       // Mirror: % of enemy damage returns AND heals, lasting
 }
 
 export const PACK_MAX = 3;
@@ -276,27 +278,14 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     state.pendingBlock = undefined;
     events.push({ k: "note", text: "> a bulwark stands with them — the first enemy volley will NOT land." });
   }
-  // ── the Covenant lands here, one floor each ──
-  let judgePct = 0, mirrorPct = 0, stoneVolleys = 0, surgePct = 0;
-  if (state.pendingJudge && state.pendingJudge > 0) {
-    judgePct = state.pendingJudge;
-    state.pendingJudge = undefined;
-    events.push({ k: "note", text: `> judgment turns its wheels — enemies eat back ${judgePct}% of every blow they land.` });
-  }
-  if (state.pendingMirror && state.pendingMirror > 0) {
-    mirrorPct = state.pendingMirror;
-    state.pendingMirror = undefined;
-    events.push({ k: "note", text: `> the mirror is raised — ${mirrorPct}% of enemy damage returns, and heals.` });
-  }
+  // ── the Covenant: only stone is floor-armed; judgment and the mirror
+  // ride persistent state below, and attack/guard live in the same lasting
+  // channels the domains use — exactly the duel's composition.
+  let stoneVolleys = 0;
   if (state.pendingStone && state.pendingStone > 0) {
     stoneVolleys = state.pendingStone;
     state.pendingStone = undefined;
     events.push({ k: "note", text: `> stone hands — the next ${stoneVolleys} enemy volleys will find NOTHING.` });
-  }
-  if (state.pendingSurge && state.pendingSurge > 0) {
-    surgePct = state.pendingSurge;
-    state.pendingSurge = undefined;
-    events.push({ k: "note", text: `> the contract holds — the party hits ${surgePct}% HARDER this floor.` });
   }
 
   const livingEnemies = () => enemies.map((e, idx) => ({ e, idx })).filter((x) => x.e.hp > 0);
@@ -502,7 +491,7 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     }
 
     // ── party swings — always at the weakest thing standing
-    const atkMul = (1 + (state.atkBonusPct || 0) / 100) * (focusVolley ? focusMult : 1) * (1 + surgePct / 100);
+    const atkMul = (1 + (state.atkBonusPct || 0) / 100) * (focusVolley ? focusMult : 1);
     for (let i = 0; i < state.party.length; i++) {
       const u = state.party[i];
       if (u.hp <= 0) continue;
@@ -549,10 +538,15 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
         target.u.hp = Math.max(0, target.u.hp - dmg);
         events.push({ k: "ehit", e, i: target.idx, dmg });
         if (st.reflectRounds > 0) damageEnemy(e, dmg);
-        // Judgment answers every blow; the mirror answers AND drinks.
-        if (judgePct > 0) damageEnemy(e, Math.max(1, Math.round((dmg * judgePct) / 100)));
-        if (mirrorPct > 0) {
-          const back = Math.max(1, Math.round((dmg * mirrorPct) / 100));
+        // Judgment answers the next 3 blows that land — spent per blow and
+        // then cleared, exactly the duel's counter. The mirror lasts.
+        if (state.judgePct && (state.judgeBlows || 0) > 0) {
+          state.judgeBlows = (state.judgeBlows || 0) - 1;
+          damageEnemy(e, Math.max(1, Math.round((dmg * state.judgePct) / 100)));
+          if ((state.judgeBlows || 0) <= 0) { state.judgePct = undefined; state.judgeBlows = undefined; }
+        }
+        if (state.mirrorPct && state.mirrorPct > 0) {
+          const back = Math.max(1, Math.round((dmg * state.mirrorPct) / 100));
           damageEnemy(e, back);
           if (target.u.hp > 0) target.u.hp = Math.min(target.u.maxHp, target.u.hp + back);
         }

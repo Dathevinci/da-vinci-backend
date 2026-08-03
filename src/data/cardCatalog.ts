@@ -254,7 +254,9 @@ export const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event" | "mythic">, num
 // chosen card). Craft costs MORE than dust returns at the same rarity — recycling
 // is a grind, not an exploit, so you can't dust-and-craft your way to profit.
 export const DUST_VALUE: Record<CardRarity, number> = {
-  common: 5, rare: 15, epic: 40, legendary: 120, event: 0, mythic: 400, // event cards can't be dusted
+  // A mythic dupe cost two consumed legendaries and a synthesis bill to
+  // exist — its dust pays like it: 1000, more than eight legendaries' worth.
+  common: 5, rare: 15, epic: 40, legendary: 120, event: 0, mythic: 1000, // event cards can't be dusted
 };
 export const CRAFT_COST: Record<CardRarity, number> = {
   // Legendary 1000 → 1500 alongside the pull-rate squeeze: the deterministic

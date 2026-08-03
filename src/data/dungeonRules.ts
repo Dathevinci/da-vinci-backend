@@ -1,5 +1,5 @@
 import { CARDS, levelMult, DOMAINS, domainPower, DomainDef, FORGE_ATK_STEP, FORGE_HP_STEP, MYTHIC_AFFIXES, MYTHIC_MODS } from "./cardCatalog";
-import { CARD_STATS, FOIL_MULT } from "./duelRules";
+import { CARD_STATS, GOD_STATS, FOIL_MULT } from "./duelRules";
 
 /**
  * DUNGEON DISPATCH — the second game mode.
@@ -180,7 +180,7 @@ export function makeUnit(
 ): DgnUnit | null {
   const def = CARDS[cardId];
   if (!def || def.support) return null; // supports don't raid, same as duels
-  const base = CARD_STATS[def.rarity];
+  const base = def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity];
   // EXACTLY the duel formula — shared levelMult (with its level-10 clamp),
   // shared foil multiplier, shared flat forge, shared mythic affix percents.
   // A card must not fight harder in one mode than the other.

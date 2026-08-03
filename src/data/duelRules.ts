@@ -49,6 +49,11 @@ export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
   mythic:    { hp: 36, atk: 15 },
 };
 
+/** The Pantheon fights ABOVE its rarity: a god cost two consumed Mythics —
+ *  four legendaries deep — and its stat line says so. Applied by SET in
+ *  both engines, mirrored on every display surface. */
+export const GOD_STATS = { hp: 44, atk: 19 };
+
 // Foil copies fight ~20% harder — a real reason to spend shards on one.
 export const FOIL_MULT = 1.2;
 
@@ -140,7 +145,7 @@ export function buildFighter(
   // Support cards are played, never fielded — they have no stat line, so
   // letting one into a deck would field a fighter with undefined HP.
   if (!def || def.support) return null;
-  const base = CARD_STATS[def.rarity];
+  const base = def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity];
   // Foil and level stack. Levels are shard-bought, so they have to show up
   // HERE — a level that only changed a number on the card page would be a
   // currency sink that sells nothing. The FORGE lands after the multipliers

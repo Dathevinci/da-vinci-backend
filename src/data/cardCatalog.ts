@@ -50,6 +50,8 @@ export interface CardDef {
   flavor: string;
   /** Units fight; support cards are played for an effect. Absent = unit. */
   support?: SupportEffect;
+  /** Overrides the rarity word on the card's plate — the Pantheon says GOD. */
+  gradeLabel?: string;
 }
 
 // The base set. `event` cards are NOT in the normal pack pool (see PACK_POOL) —
@@ -163,9 +165,9 @@ export const CARDS: Record<string, CardDef> = {
   // ═══ SET · PANTHEON — the second-order tier ═══════════════════════════════
   // Three gods, forged by feeding the machine two MYTHICS. The recipes live
   // in FUSIONS beside the legendary pairs — same lever, higher stakes.
-  myth_gojo:    { id: "myth_gojo",    name: "Gojo Satoru",   rarity: "mythic", set: "Pantheon", hue: 210, motif: "eye",   flavor: "Throughout heaven and earth, he alone is the honored one." },
-  myth_sukuna:  { id: "myth_sukuna",  name: "Sukuna",        rarity: "mythic", set: "Pantheon", hue: 355, motif: "mask",  flavor: "The King of Curses does not grant domains. He grants endings." },
-  myth_unohana: { id: "myth_unohana", name: "Retsu Unohana", rarity: "mythic", set: "Pantheon", hue: 160, motif: "blade", flavor: "The first Kenpachi smiled, and the field learned what mercy costs." },
+  myth_gojo:    { id: "myth_gojo",    name: "Gojo Satoru",   rarity: "mythic", set: "Pantheon", hue: 210, motif: "eye",   gradeLabel: "GOD", flavor: "Throughout heaven and earth, he alone is the honored one." },
+  myth_sukuna:  { id: "myth_sukuna",  name: "Sukuna",        rarity: "mythic", set: "Pantheon", hue: 355, motif: "mask",  gradeLabel: "GOD", flavor: "The King of Curses does not grant domains. He grants endings." },
+  myth_unohana: { id: "myth_unohana", name: "Retsu Unohana", rarity: "mythic", set: "Pantheon", hue: 160, motif: "blade", gradeLabel: "GOD", flavor: "The first Kenpachi smiled, and the field learned what mercy costs." },
 
   card_lastlight:  { id: "card_lastlight",  name: "Last Light",       rarity: "common", set: "Succour", hue: 52,  motif: "dawn",   flavor: "Enough to see by. Not enough to rest.", support: { kind: "heal", power: 15 } },
   card_emberward:  { id: "card_emberward",  name: "Ember Ward",       rarity: "common", set: "Succour", hue: 20,  motif: "ember",  flavor: "Hold the coal. It will hold you back.", support: { kind: "shield" } },

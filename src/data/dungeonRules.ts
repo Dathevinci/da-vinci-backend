@@ -319,6 +319,11 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
    * the duel versions — retargeted at a corridor full of monsters. Each
    * returns the log line the client prints under the banner.
    */
+  // A Mythic's armed second stage — scheduled by expandDomain below, resolved
+  // at the top of the round it comes due. Declared BEFORE the closure that
+  // assigns it, or tsc treats every later read as `never`.
+  let eruption: { atRound: number; power: number; healPct: number; atk: number; name: string } | null = null;
+
   const expandDomain = (i: number): void => {
     const u = state.party[i];
     if (!u.domainKind || u.domainFired) return;
@@ -473,10 +478,6 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
       }
     }
   };
-
-  // A Mythic's armed second stage — scheduled by expandDomain, resolved at
-  // the top of the round it comes due. Same numbers as the duel eruption.
-  let eruption: { atRound: number; power: number; healPct: number; atk: number; name: string } | null = null;
 
   let rounds = 0;
   while (rounds < MAX_FLOOR_ROUNDS) {

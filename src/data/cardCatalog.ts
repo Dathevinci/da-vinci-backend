@@ -160,6 +160,13 @@ export const CARDS: Record<string, CardDef> = {
   myth_drownedgod:     { id: "myth_drownedgod",     name: "The Drowned God",              rarity: "mythic", set: "Mythos", hue: 175, motif: "tendril",  flavor: "It did not die in the water. The water is what it wears." },
   myth_lasttomorrow:   { id: "myth_lasttomorrow",   name: "The Last Tomorrow",            rarity: "mythic", set: "Mythos", hue: 350, motif: "dawn",     flavor: "After it, the calendar simply stops arguing." },
 
+  // ═══ SET · PANTHEON — the second-order tier ═══════════════════════════════
+  // Three gods, forged by feeding the machine two MYTHICS. The recipes live
+  // in FUSIONS beside the legendary pairs — same lever, higher stakes.
+  myth_gojo:    { id: "myth_gojo",    name: "Gojo Satoru",   rarity: "mythic", set: "Pantheon", hue: 210, motif: "eye",   flavor: "Throughout heaven and earth, he alone is the honored one." },
+  myth_sukuna:  { id: "myth_sukuna",  name: "Sukuna",        rarity: "mythic", set: "Pantheon", hue: 355, motif: "mask",  flavor: "The King of Curses does not grant domains. He grants endings." },
+  myth_unohana: { id: "myth_unohana", name: "Retsu Unohana", rarity: "mythic", set: "Pantheon", hue: 160, motif: "blade", flavor: "The first Kenpachi smiled, and the field learned what mercy costs." },
+
   card_lastlight:  { id: "card_lastlight",  name: "Last Light",       rarity: "common", set: "Succour", hue: 52,  motif: "dawn",   flavor: "Enough to see by. Not enough to rest.", support: { kind: "heal", power: 15 } },
   card_emberward:  { id: "card_emberward",  name: "Ember Ward",       rarity: "common", set: "Succour", hue: 20,  motif: "ember",  flavor: "Hold the coal. It will hold you back.", support: { kind: "shield" } },
   card_tidecall:   { id: "card_tidecall",   name: "Tidecall",         rarity: "rare",   set: "Succour", hue: 188, motif: "sea",    flavor: "The water remembers everyone who stood in it.", support: { kind: "mend", power: 8 } },
@@ -400,6 +407,8 @@ export const SET_REWARDS: Record<string, SetReward> = {
   // Ten Mythics, all synthesis-born. Completing this means fusing every
   // pair of the five eligible legendaries — the longest project in the game.
   Mythos:    { set: "Mythos",    ap: 12000, shards: 2500, title: "The Mythos Entire" },
+  // Three gods, each costing two Mythics — which cost two legendaries each.
+  Pantheon:  { set: "Pantheon",  ap: 20000, shards: 4000, title: "The Pantheon Risen" },
 };
 
 // Distinct card ids belonging to a set (for completion checks).
@@ -685,6 +694,11 @@ export const DOMAINS: Record<string, DomainDef> = {
   myth_tideofages:     { name: "An Era Goes Out",          kind: "siphon",       base: 45,  step: 18, text: (p) => `Take ${p}% of every enemy card's health and keep it. Two rounds on, the tide erupts.` },
   myth_drownedgod:     { name: "What It Wears",            kind: "abyss",        base: 3,   step: 1,  text: (p) => `For the enemy's next ${p} attacks, half of what they deal returns. Two rounds on, the god erupts.` },
   myth_lasttomorrow:   { name: "The Calendar Concedes",    kind: "terror",       base: 45,  step: 15, text: (p) => `The card opposite loses ${p}% of its CURRENT health. Two rounds on, tomorrow erupts.` },
+
+  // ── The Pantheon's domains — named by the owner ──
+  myth_gojo:    { name: "Infinity Void",     kind: "chains",   base: 2,   step: 1,  text: (p) => `Infinite information floods the other side — they cannot act for ${p} turn${p === 1 ? "" : "s"}. Two rounds on, the void erupts.` },
+  myth_sukuna:  { name: "Malevolent Shrine", kind: "massacre", base: 115, step: 30, text: (p) => `A domain with no walls. Every enemy card is cleaved for ${p}% ATK at once. Two rounds on, the shrine erupts.` },
+  myth_unohana: { name: "Minazuki",          kind: "revival",  base: 70,  step: 15, text: (p) => `The first blade drinks the field — every fallen ally stands back up at ${p}% health. Two rounds on, Minazuki erupts.` },
 };
 
 // ═══ MYTHIC SYNTHESIS ═══════════════════════════════════════════════════════
@@ -694,6 +708,8 @@ export const DOMAINS: Record<string, DomainDef> = {
 // joined with "+", so lookup order can never matter.
 export const FUSION_ELIGIBLE = [
   "card_gatekey", "card_lastronin", "card_leviathan", "card_longmorrow", "card_outergod",
+  // Second-order parents: the six Mythics that feed the Pantheon recipes.
+  "myth_doordream", "myth_hourdoor", "myth_bladebeyond", "myth_lasttomorrow", "myth_leviathansaint", "myth_tideofages",
 ];
 export const FUSIONS: Record<string, string> = {
   "card_gatekey+card_lastronin":    "myth_lockedblade",
@@ -706,6 +722,10 @@ export const FUSIONS: Record<string, string> = {
   "card_leviathan+card_longmorrow": "myth_tideofages",
   "card_leviathan+card_outergod":   "myth_drownedgod",
   "card_longmorrow+card_outergod":  "myth_lasttomorrow",
+  // ── PANTHEON — two Mythics in, a god out. Same machine, higher stakes. ──
+  "myth_doordream+myth_hourdoor":       "myth_gojo",    // doors through time and dream — Infinity Void
+  "myth_bladebeyond+myth_lasttomorrow": "myth_sukuna",  // the cut that ends calendars — Malevolent Shrine
+  "myth_leviathansaint+myth_tideofages":"myth_unohana", // the deep's oldest vow — Minazuki
 };
 export const SYNTH_COST_AP = 5000;
 export const SYNTH_COST_SHARDS = 800;

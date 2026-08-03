@@ -542,7 +542,7 @@ export const synthesizeMythic = async (req: Request, res: Response, next: NextFu
     if (!a || !b || a === b) return res.status(400).json({ success: false, message: "The machine needs two DIFFERENT legendaries." });
     const key = [a, b].sort().join("+");
     const mythId = FUSIONS[key];
-    if (!mythId) return res.status(400).json({ success: false, message: "The machine refuses that pairing. Only the five eligible legendaries fuse." });
+    if (!mythId) return res.status(400).json({ success: false, message: "The machine refuses that pairing — it isn't written in the recipes." });
 
     const steps = Math.max(0, Math.floor((Number(boostShards) || 0) / SYNTH_BOOST_STEP));
     const chance = Math.min(100, SYNTH_BASE_CHANCE + steps * 5);

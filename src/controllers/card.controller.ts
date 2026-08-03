@@ -580,7 +580,9 @@ export const grantAllCards = async (req: Request, res: Response, next: NextFunct
       const result = await prisma.$transaction(async (tx) => {
         const owned = await tx.userCard.findMany({ where: { userId }, select: { cardId: true } });
         const have = new Set(owned.map((o) => o.cardId));
-        const missing = Object.keys(CARDS).filter((id) => !have.has(id));
+        // Mythics are NEVER granted — not by packs, not by the catalog claim.
+        // Synthesis is the only door, even for the lead dev.
+        const missing = Object.keys(CARDS).filter((id) => !have.has(id) && CARDS[id].rarity !== "mythic");
         const prints: PrintInfo[] = [];
         for (const cardId of missing) {
           await tx.userCard.upsert({

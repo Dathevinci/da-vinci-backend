@@ -320,9 +320,11 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
    * returns the log line the client prints under the banner.
    */
   // A Mythic's armed second stage — scheduled by expandDomain below, resolved
-  // at the top of the round it comes due. Declared BEFORE the closure that
-  // assigns it, or tsc treats every later read as `never`.
-  let eruption: { atRound: number; power: number; healPct: number; atk: number; name: string } | null = null;
+  // at the top of the round it comes due. Boxed in an object ON PURPOSE:
+  // tsc ignores closure assignments to a plain `let` in its flow analysis
+  // and types every later read as forever-null; a property is re-read from
+  // its declared type at every check instead.
+  const eruptBox: { v: { atRound: number; power: number; healPct: number; atk: number; name: string } | null } = { v: null };
 
   const expandDomain = (i: number): void => {
     const u = state.party[i];
@@ -336,7 +338,7 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     // shapes when it lands and how hard — duel-identical numbers.
     if (CARDS[u.cardId]?.rarity === "mythic") {
       const mod = MYTHIC_MODS[u.mythMod || ""];
-      eruption = {
+      eruptBox.v = {
         atRound: rounds + (mod?.delay ?? 2),
         power: Math.round((50 + 15 * (u.domainRank || 1)) * (mod?.powerMult ?? 1)),
         healPct: mod?.healPct ?? 10,
@@ -483,11 +485,10 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
   while (rounds < MAX_FLOOR_ROUNDS) {
     rounds++;
 
-    if (eruption && rounds >= eruption.atRound) {
-      // Snapshot to a const FIRST: `eruption` is captured by closures, so
-      // strict tsc forgets the null-check after every function call below.
-      const er = eruption;
-      eruption = null;
+    if (eruptBox.v && rounds >= eruptBox.v.atRound) {
+      // Snapshot to a const FIRST: narrowing dies at every call below.
+      const er = eruptBox.v;
+      eruptBox.v = null;
       const hit = Math.max(1, Math.round((er.atk * er.power) / 100));
       for (const { idx } of livingEnemies()) {
         damageEnemy(idx, hit);

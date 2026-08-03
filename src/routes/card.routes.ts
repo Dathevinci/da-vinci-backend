@@ -2,7 +2,7 @@ import { Router } from "express";
 import {
   getCatalog, getCollection, getCollectors, openPack, dustCard, craftCard,
   foilCard, openRelicPack, claimSet, getLadder, setShowcase, wakeCard, upgradeCard, upgradeSkill, attuneCard, forgeCard,
-  getPullStats,
+  getPullStats, getTitles, setTitles,
 } from "../controllers/card.controller";
 
 const router = Router();
@@ -19,6 +19,8 @@ router.post("/relic-pack", openRelicPack);
 router.post("/claim-set", claimSet);
 router.get("/ladder", getLadder);
 router.put("/showcase", setShowcase);
+router.get("/titles/:userId", getTitles);
+router.put("/titles", setTitles);
 router.post("/wake", wakeCard);
 router.post("/upgrade", upgradeCard);
 router.post("/forge", forgeCard);

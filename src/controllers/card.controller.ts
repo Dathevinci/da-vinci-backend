@@ -677,6 +677,50 @@ export const getLadder = async (_req: Request, res: Response, next: NextFunction
 // The cards pinned to a profile — up to four. Ownership is checked
 // server-side: a showcase is a claim about what you have, so it must not be
 // possible to pin a card you have never pulled.
+// ── TITLES ── set-completion titles you can WEAR, stacked up to three.
+// GET /api/cards/titles/:userId — everything owned plus what's equipped.
+// Ownership is DERIVED from claimedSets each read, never stored twice.
+export const getTitles = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.params.userId as string;
+    const u = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { claimedSets: true, cardTitle: true, equippedTitles: true } as any,
+    });
+    if (!u) return res.status(404).json({ success: false, message: "User not found." });
+    const owned = (u.claimedSets || [])
+      .map((s: string) => ({ set: s, title: SET_REWARDS[s]?.title }))
+      .filter((x: any): x is { set: string; title: string } => !!x.title);
+    // Legacy: a cardTitle from before this system stays wearable even if its
+    // set somehow isn't in claimedSets.
+    if (u.cardTitle && !owned.some((o: any) => o.title === u.cardTitle)) {
+      owned.push({ set: "", title: u.cardTitle });
+    }
+    res.json({ success: true, data: { owned, equipped: (u as any).equippedTitles || [] } });
+  } catch (error) { next(error); }
+};
+
+// PUT /api/cards/titles  body { userId, titles: string[] } — equip a stack.
+// The ORDER is the wearer's choice; ownership and the cap are the server's.
+export const setTitles = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, titles } = (req.body || {}) as { userId?: string; titles?: string[] };
+    if (!userId) return res.status(400).json({ success: false, message: "Missing userId." });
+    const actor = getActorId(req);
+    if (actor && actor !== userId) {
+      return res.status(403).json({ success: false, message: "You can only change your own titles." });
+    }
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { claimedSets: true, cardTitle: true } });
+    if (!u) return res.status(404).json({ success: false, message: "User not found." });
+    const ownable = new Set((u.claimedSets || []).map((s) => SET_REWARDS[s]?.title).filter(Boolean));
+    if (u.cardTitle) ownable.add(u.cardTitle);
+    const chosen = [...new Set((Array.isArray(titles) ? titles : [])
+      .filter((t) => typeof t === "string" && ownable.has(t)))].slice(0, 3);
+    await prisma.user.update({ where: { id: userId }, data: { equippedTitles: chosen } as any });
+    res.json({ success: true, data: { equipped: chosen } });
+  } catch (error) { next(error); }
+};
+
 export const setShowcase = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, cardIds } = (req.body || {}) as { userId?: string; cardIds?: string[] };

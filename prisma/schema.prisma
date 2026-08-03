@@ -50,6 +50,7 @@ model User {
   arenaChestPity        Int      @default(0)
   arenaChestPityChest   String   @default("")
   cardTitle        String?                // title earned from completing a set
+  equippedTitles   String[] @default([])  // the titles WORN on the profile, wearer-ordered, max 3
   cards            UserCard[]
   cardListings     CardListing[] @relation("CardListings")
 

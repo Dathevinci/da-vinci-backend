@@ -9,6 +9,7 @@ import {
   PACK_SIZE,
   PULL_SIZES,
   PULL_PRICES,
+  RARITY_WEIGHTS,
   DUST_VALUE,
   CRAFT_COST,
   WAKE_COST,
@@ -173,6 +174,48 @@ export async function isLeadDevFree(userId: string): Promise<boolean> {
   const role = u.role && u.role !== "USER" ? u.role : getRole(u.username);
   return role === "LEAD_DEV";
 }
+
+// GET /api/cards/pull-stats?userId=... — how many packs have been opened
+// (community-wide and by you) plus the printed odds. Counts come from the
+// pointLog spend rows (`card-pack:xN`), which means free staff pulls don't
+// inflate the numbers — these are real, paid pulls.
+export const getPullStats = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = (req.query.userId as string) || "";
+    const tally = async (who?: string) => {
+      const rows = await Promise.all(PULL_SIZES.map(async (s) => ({
+        size: s,
+        n: await prisma.pointLog.count({
+          where: { ...(who ? { userId: who } : {}), reason: `card-pack:x${s}` },
+        }),
+      })));
+      return {
+        packs: rows.reduce((a, r) => a + r.n, 0),
+        cards: rows.reduce((a, r) => a + r.n * r.size, 0),
+      };
+    };
+    const [community, mine] = await Promise.all([
+      tally(),
+      userId ? tally(userId) : Promise.resolve({ packs: 0, cards: 0 }),
+    ]);
+    // Percentages derived from the live weights, never hand-copied — if the
+    // squeeze ever moves again, this endpoint moves with it.
+    const totalW = Object.values(RARITY_WEIGHTS).reduce((a, b) => a + b, 0);
+    const rates = Object.fromEntries(Object.entries(RARITY_WEIGHTS)
+      .map(([k, w]) => [k, Number(((w / totalW) * 100).toFixed(2))]));
+    res.json({
+      success: true,
+      data: {
+        community,
+        mine,
+        rates,
+        pullSizes: PULL_SIZES,
+        legendaryWears: Object.fromEntries(Object.entries(CONDITION_META)
+          .map(([k, m]) => [k, { label: m.label, pct: m.weight }])),
+      },
+    });
+  } catch (error) { next(error); }
+};
 
 // GET /api/cards/collectors — who owns what, ranked by completion. This is the
 // "see other people's collections" board.

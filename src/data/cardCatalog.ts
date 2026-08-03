@@ -208,7 +208,7 @@ export const PACK_SIZE = 4;
  * Weights are floats now — the roll multiplies Math.random() by the sum, so
  * nothing anywhere assumes integers.
  */
-const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event">, number> = {
+export const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event">, number> = {
   common: 64,
   rare: 27.4,
   epic: 8,

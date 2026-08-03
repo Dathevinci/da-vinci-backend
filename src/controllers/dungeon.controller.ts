@@ -87,7 +87,7 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
     const [rows, activeRun] = await Promise.all([
       prisma.userCard.findMany({
         where: { userId },
-        select: { cardId: true, count: true, foil: true, level: true, skillLevel: true, dgnHp: true, dgnInjured: true, dgnDead: true, dgnDeaths: true },
+        select: { cardId: true, count: true, foil: true, level: true, skillLevel: true, atkForge: true, hpForge: true, dgnHp: true, dgnInjured: true, dgnDead: true, dgnDeaths: true },
       }),
       prisma.dungeonRun.findFirst({ where: { userId, status: "RUNNING" }, orderBy: { createdAt: "desc" } }),
     ]);
@@ -96,6 +96,7 @@ export const getStatus = async (req: Request, res: Response, next: NextFunction)
       .map((r) => ({
         cardId: r.cardId, count: r.count, foil: r.foil, level: r.level,
         skillLevel: r.skillLevel,
+        atkForge: (r as any).atkForge || 0, hpForge: (r as any).hpForge || 0,
         dgnHp: r.dgnHp, dgnInjured: r.dgnInjured, dgnDead: r.dgnDead,
         dgnDeaths: r.dgnDeaths,
         // Priced PER CARD now: rarity base × how many times this exact card

@@ -35,6 +35,14 @@ import {
   FORGE_ATK_STEP,
   FORGE_HP_STEP,
   forgeCost,
+  FUSIONS,
+  FUSION_ELIGIBLE,
+  SYNTH_COST_AP,
+  SYNTH_COST_SHARDS,
+  SYNTH_BASE_CHANCE,
+  SYNTH_BOOST_STEP,
+  MYTHIC_AFFIXES,
+  MYTHIC_MODS,
 } from "../data/cardCatalog";
 import {
   mintPrints,
@@ -102,6 +110,18 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         // Legendary print conditions — labels + mint odds, served so the
         // client never grows its own copy of either.
         printConditions: CONDITION_META,
+        // The Synthesis Lab's whole rulebook, served so the client can only
+        // ever OFFER what the machine will accept.
+        synthesis: {
+          eligible: FUSION_ELIGIBLE,
+          fusions: FUSIONS,
+          ap: SYNTH_COST_AP,
+          shards: SYNTH_COST_SHARDS,
+          baseChance: SYNTH_BASE_CHANCE,
+          boostStep: SYNTH_BOOST_STEP,
+          affixes: MYTHIC_AFFIXES,
+          mods: MYTHIC_MODS,
+        },
         /**
          * Legendary DOMAIN EXPANSIONS. A separate map from skills, with kinds
          * that share nothing with them — a legendary is meant to be a
@@ -283,7 +303,7 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
   try {
     const userId = req.params.userId as string;
     const [owned, user, prints] = await Promise.all([
-      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true } }),
+      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
       // Legendary print identities — serial + condition per held copy. Best
       // condition first, then oldest serial, so the first entry is always
@@ -428,6 +448,109 @@ export const dustCard = async (req: Request, res: Response, next: NextFunction) 
         const user = await tx.user.update({ where: { id: userId }, data: { shards: { increment: gained } }, select: { shards: true } });
         return { gained, shards: user.shards };
       });
+      res.json({ success: true, data: result });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+// POST /api/cards/synthesize  body { userId, a, b, boostShards? }
+// THE MACHINE. Two fusion-eligible legendaries in, one Mythic out — the pair
+// DECIDES which Mythic; only the affix and eruption-mod rolls are luck.
+// Both parents are CONSUMED on success (counts down, prints burned worst-
+// first, the invariant that keeps serials honest). On failure exactly ONE
+// parent is lost, never both. Extra shards raise the odds to a hard 100.
+export const synthesizeMythic = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, a, b, boostShards } = (req.body || {}) as { userId?: string; a?: string; b?: string; boostShards?: number };
+    if (!ownerGuard(req, res, userId)) return;
+    if (!a || !b || a === b) return res.status(400).json({ success: false, message: "The machine needs two DIFFERENT legendaries." });
+    const key = [a, b].sort().join("+");
+    const mythId = FUSIONS[key];
+    if (!mythId) return res.status(400).json({ success: false, message: "The machine refuses that pairing. Only the five eligible legendaries fuse." });
+
+    const steps = Math.max(0, Math.floor((Number(boostShards) || 0) / SYNTH_BOOST_STEP));
+    const chance = Math.min(100, SYNTH_BASE_CHANCE + steps * 5);
+    const shardsCost = SYNTH_COST_SHARDS + steps * SYNTH_BOOST_STEP;
+    const free = await isLeadDevFree(userId!);
+
+    // Rolled BEFORE the transaction — pure, no I/O, and the outcome can't be
+    // re-rolled by a retry racing the commit.
+    const held = Math.random() * 100 < chance;
+    const lostParent = held ? null : [a, b][Math.floor(Math.random() * 2)];
+    const affixKeys = Object.keys(MYTHIC_AFFIXES);
+    const modKeys = Object.keys(MYTHIC_MODS);
+    const affix = affixKeys[Math.floor(Math.random() * affixKeys.length)];
+    const mod = modKeys[Math.floor(Math.random() * modKeys.length)];
+
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const rows = await tx.userCard.findMany({
+          where: { userId, cardId: { in: [a, b] } },
+          select: { cardId: true, count: true, hibernating: true },
+        });
+        for (const id of [a, b]) {
+          const r = rows.find((x) => x.cardId === id);
+          if (!r || r.count < 1) throw new CardError(400, `You don't hold ${CARDS[id]?.name || id}.`);
+          if (r.hibernating) throw new CardError(400, `${CARDS[id]?.name} is asleep — a sleeping card can't survive the machine.`);
+        }
+        if (!free) {
+          const ap = await tx.user.updateMany({
+            where: { id: userId, arisePoints: { gte: SYNTH_COST_AP } },
+            data: { arisePoints: { decrement: SYNTH_COST_AP } },
+          });
+          if (ap.count === 0) throw new CardError(402, `Synthesis costs ${SYNTH_COST_AP.toLocaleString()} AP.`);
+          const sh = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: shardsCost } },
+            data: { shards: { decrement: shardsCost } },
+          });
+          if (sh.count === 0) throw new CardError(402, `Synthesis costs ${shardsCost.toLocaleString()} shards at that boost.`);
+          await tx.pointLog.create({ data: { userId: userId!, amount: -SYNTH_COST_AP, reason: `synthesis:${mythId}` } });
+        }
+
+        const burn = async (id: string) => {
+          const taken = await tx.userCard.updateMany({
+            where: { userId, cardId: id, count: { gte: 1 } },
+            data: { count: { decrement: 1 } },
+          });
+          if (taken.count === 0) throw new CardError(409, "Your copies just changed — try again.");
+          await tx.userCard.deleteMany({ where: { userId, cardId: id, count: { lte: 0 } } });
+          await burnWorstPrints(tx, userId!, id, 1);
+        };
+
+        if (held) {
+          await burn(a);
+          await burn(b);
+          await tx.userCard.upsert({
+            where: { userId_cardId: { userId: userId!, cardId: mythId } },
+            create: { userId: userId!, cardId: mythId, count: 1, mythAffix: affix, mythMod: mod },
+            // A repeat synthesis REROLLS the copy's affix — that is the whole
+            // reason to forge the same Mythic twice.
+            update: { count: { increment: 1 }, hibernating: false, mythAffix: affix, mythMod: mod },
+          });
+        } else if (lostParent) {
+          await burn(lostParent);
+        }
+
+        const u = await tx.user.findUnique({ where: { id: userId }, select: { arisePoints: true, shards: true } });
+        return {
+          held,
+          mythId: held ? mythId : null,
+          affix: held ? affix : null,
+          affixLabel: held ? MYTHIC_AFFIXES[affix]?.label : null,
+          mod: held ? mod : null,
+          modLabel: held ? MYTHIC_MODS[mod]?.label : null,
+          lost: lostParent,
+          returned: held ? null : (lostParent === a ? b : a),
+          chance,
+          arisePoints: u?.arisePoints ?? 0,
+          shards: u?.shards ?? 0,
+        };
+      }, { timeout: 20000 });
       res.json({ success: true, data: result });
     } catch (e) {
       if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });

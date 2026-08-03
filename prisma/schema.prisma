@@ -312,6 +312,8 @@ model UserCard {
   // a card — glass cannon or anvil — instead of only raising the level dial.
   atkForge   Int     @default(0)     // +1 flat ATK per rank, capped
   hpForge    Int     @default(0)     // +2 flat HP per rank, capped
+  mythAffix  String?                 // a Mythic copy's rolled stat affix (MYTHIC_AFFIXES key)
+  mythMod    String?                 // a Mythic copy's rolled eruption mod (MYTHIC_MODS key)
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)

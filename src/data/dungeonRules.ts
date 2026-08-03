@@ -1,4 +1,4 @@
-import { CARDS, levelMult, DOMAINS, domainPower, DomainDef, FORGE_ATK_STEP, FORGE_HP_STEP } from "./cardCatalog";
+import { CARDS, levelMult, DOMAINS, domainPower, DomainDef, FORGE_ATK_STEP, FORGE_HP_STEP, MYTHIC_AFFIXES, MYTHIC_MODS } from "./cardCatalog";
 import { CARD_STATS, FOIL_MULT } from "./duelRules";
 
 /**
@@ -91,6 +91,8 @@ export interface DgnUnit {
   domainName?: string;
   domainRank?: number;
   domainFired?: boolean;
+  /** A Mythic's rolled eruption mod, carried into the sim. */
+  mythMod?: string;
 }
 
 export interface DgnEnemy {
@@ -172,16 +174,21 @@ export function makeUnit(
   injured: boolean,
   skillLevel = 1,
   atkForge = 0,
-  hpForge = 0
+  hpForge = 0,
+  affix = "",
+  mythMod = ""
 ): DgnUnit | null {
   const def = CARDS[cardId];
   if (!def || def.support) return null; // supports don't raid, same as duels
   const base = CARD_STATS[def.rarity];
   // EXACTLY the duel formula — shared levelMult (with its level-10 clamp),
-  // shared foil multiplier, shared flat forge. A card must not fight harder
-  // in one mode than the other.
+  // shared foil multiplier, shared flat forge, shared mythic affix percents.
+  // A card must not fight harder in one mode than the other.
   const mult = (foil ? FOIL_MULT : 1) * levelMult(level);
-  const fullMax = Math.round(base.hp * mult) + Math.max(0, hpForge) * FORGE_HP_STEP;
+  const af = MYTHIC_AFFIXES[affix];
+  const afAtk = 1 + (af?.atkPct || 0) / 100;
+  const afHp = 1 + (af?.hpPct || 0) / 100;
+  const fullMax = Math.round(base.hp * mult * afHp) + Math.max(0, hpForge) * FORGE_HP_STEP;
   const maxHp = injured ? Math.max(1, Math.round(fullMax * INJURY_MAX_HP_MULT)) : fullMax;
   const hp = carriedHp === null ? maxHp : Math.max(1, Math.min(carriedHp, maxHp));
   const dom: DomainDef | undefined = DOMAINS[cardId];
@@ -191,8 +198,9 @@ export function makeUnit(
     rarity: def.rarity,
     maxHp,
     hp,
-    atk: Math.round(base.atk * mult) + Math.max(0, atkForge) * FORGE_ATK_STEP,
+    atk: Math.round(base.atk * mult * afAtk) + Math.max(0, atkForge) * FORGE_ATK_STEP,
     foil,
+    ...(def.rarity === "mythic" && mythMod ? { mythMod } : {}),
     ...(dom ? {
       domainKind: dom.kind,
       domainName: dom.name,
@@ -319,6 +327,19 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     if (!dom) return;
     const p = domainPower(dom, u.domainRank || 1);
     events.push({ k: "domain", i, name: dom.name, text: dom.text(p) });
+    // A Mythic's domain HOLDS: schedule the second stage. The rolled mod
+    // shapes when it lands and how hard — duel-identical numbers.
+    if (CARDS[u.cardId]?.rarity === "mythic") {
+      const mod = MYTHIC_MODS[u.mythMod || ""];
+      eruption = {
+        atRound: rounds + (mod?.delay ?? 2),
+        power: Math.round((50 + 15 * (u.domainRank || 1)) * (mod?.powerMult ?? 1)),
+        healPct: mod?.healPct ?? 10,
+        atk: u.atk,
+        name: dom.name,
+      };
+      events.push({ k: "note", text: "> …and the domain HOLDS. it will erupt." });
+    }
     const k = u.domainKind;
 
     if (k === "revival") {
@@ -453,9 +474,26 @@ export function simulateFloor(state: DungeonState, rng: () => number = Math.rand
     }
   };
 
+  // A Mythic's armed second stage — scheduled by expandDomain, resolved at
+  // the top of the round it comes due. Same numbers as the duel eruption.
+  let eruption: { atRound: number; power: number; healPct: number; atk: number; name: string } | null = null;
+
   let rounds = 0;
   while (rounds < MAX_FLOOR_ROUNDS) {
     rounds++;
+
+    if (eruption && rounds >= eruption.atRound) {
+      const hit = Math.max(1, Math.round((eruption.atk * eruption.power) / 100));
+      for (const { idx } of livingEnemies()) {
+        damageEnemy(idx, hit);
+      }
+      for (const u of state.party) {
+        if (u.hp > 0) u.hp = Math.min(u.maxHp, u.hp + Math.max(1, Math.round((u.maxHp * eruption.healPct) / 100)));
+      }
+      events.push({ k: "note", text: `> ${eruption.name} ERUPTS — every enemy takes ${hit}, and the party steadies.` });
+      eruption = null;
+      if (enemies.every((e) => e.hp <= 0)) break;
+    }
 
     // ── domains first: desperation or a boss in the doorway. ONE per round,
     // so simultaneous legendaries stay separate moments.

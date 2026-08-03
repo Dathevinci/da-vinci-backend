@@ -10,7 +10,7 @@
 // choice matter, short enough to finish while you're still looking at it.
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { CARDS, CardRarity, levelMult, abilityFor, skillPower, domainPower, FORGE_ATK_STEP, FORGE_HP_STEP } from "./cardCatalog";
+import { CARDS, CardRarity, levelMult, abilityFor, skillPower, domainPower, FORGE_ATK_STEP, FORGE_HP_STEP, MYTHIC_MODS, MYTHIC_AFFIXES } from "./cardCatalog";
 
 export const DECK_SIZE = 5;
 
@@ -38,6 +38,7 @@ export function forfeitFine(stake: number): number {
 // Foil (x1.2) and levels (up to x1.63) stack on top, so an INVESTED card still
 // pulls far ahead. That gap is earned rather than drawn from a pack.
 export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
+  mythic: { hp: 34, atk: 15 },
   common:    { hp: 18, atk: 7 },
   rare:      { hp: 20, atk: 8 },
   epic:      { hp: 23, atk: 9 },
@@ -67,6 +68,8 @@ export interface Fighter {
   level?: number;
   /** Rank of this copy's skill or domain. Absent means rank 1. */
   skillLevel?: number;
+  /** A Mythic's rolled eruption mod (key into MYTHIC_MODS). */
+  mythMod?: string;
 }
 
 export interface Side {
@@ -106,6 +109,10 @@ export interface Side {
   /** Mirror: `pct` percent of what lands returns to the attacker AND heals
    *  the card it landed on. Lasting — the sliver is small on purpose. */
   mirror?: { pct: number };
+  /** A Mythic's armed second stage: `rounds` ticks after the cast it ERUPTS —
+   *  every living enemy takes `power`% of the caster's ATK and this side's
+   *  living line recovers `healPct`% of max HP. The rolled mod shapes it. */
+  ascended?: { cardId: string; name: string; rounds: number; power: number; healPct: number };
 }
 
 export interface DuelState {
@@ -124,7 +131,7 @@ export interface DuelState {
 
 export function buildFighter(
   cardId: string, foil: boolean, level = 1, skillLevel = 1,
-  atkForge = 0, hpForge = 0
+  atkForge = 0, hpForge = 0, affix = "", mythMod = ""
 ): Fighter | null {
   const def = CARDS[cardId];
   // Support cards are played, never fielded — they have no stat line, so
@@ -136,17 +143,24 @@ export function buildFighter(
   // currency sink that sells nothing. The FORGE lands after the multipliers
   // as flat points, same reason: bought power fights or it isn't power.
   const mult = (foil ? FOIL_MULT : 1) * levelMult(level);
-  const hp = Math.round(base.hp * mult) + Math.max(0, hpForge) * FORGE_HP_STEP;
+  // A Mythic's rolled affix is a PERCENT on top of everything multiplicative,
+  // before the flat forge points — a roll that only changed a tooltip would
+  // give re-forging nothing to chase.
+  const af = MYTHIC_AFFIXES[affix];
+  const afAtk = 1 + (af?.atkPct || 0) / 100;
+  const afHp = 1 + (af?.hpPct || 0) / 100;
+  const hp = Math.round(base.hp * mult * afHp) + Math.max(0, hpForge) * FORGE_HP_STEP;
   return {
     cardId,
     name: def.name,
     rarity: def.rarity,
     maxHp: hp,
     hp,
-    atk: Math.round(base.atk * mult) + Math.max(0, atkForge) * FORGE_ATK_STEP,
+    atk: Math.round(base.atk * mult * afAtk) + Math.max(0, atkForge) * FORGE_ATK_STEP,
     foil,
     level,
     skillLevel,
+    mythMod: mythMod || undefined,
   };
 }
 
@@ -164,10 +178,13 @@ export function makeSide(
   skillLevels: Record<string, number> = {},
   // cardId -> forge ranks. Absent means unforged — same contract as levels.
   atkForges: Record<string, number> = {},
-  hpForges: Record<string, number> = {}
+  hpForges: Record<string, number> = {},
+  // Mythic rolls: cardId -> affix key / mod key. Absent = not a mythic.
+  affixes: Record<string, string> = {},
+  mythMods: Record<string, string> = {}
 ): Side {
   const fighters = deck
-    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1, skillLevels[id] || 1, atkForges[id] || 0, hpForges[id] || 0))
+    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1, skillLevels[id] || 1, atkForges[id] || 0, hpForges[id] || 0, affixes[id] || "", mythMods[id] || ""))
     .filter((f): f is Fighter => !!f);
   // active = -1 means NOBODY is on the field yet. The arena opens empty and
   // your first move is genuinely choosing who walks in, instead of the engine
@@ -697,6 +714,22 @@ export function applyAction(
         s.log.pop();
         return { state, finished: false };
       }
+
+      // ── THE ASCENDED SECOND STAGE ── a Mythic's domain doesn't end when
+      // it fires: two rounds on (the rolled mod can move that), it ERUPTS —
+      // every living enemy takes a share of the caster's ATK and your line
+      // steadies. Armed here, resolved in the lasting-effects tick.
+      if (CARDS[self.cardId]?.rarity === "mythic") {
+        const mod = MYTHIC_MODS[self.mythMod || ""];
+        me.ascended = {
+          cardId: self.cardId,
+          name: ability.def.name,
+          rounds: mod?.delay ?? 2,
+          power: Math.round((50 + 15 * rank) * (mod?.powerMult ?? 1)),
+          healPct: mod?.healPct ?? 10,
+        };
+        s.log.push(`…and the domain HOLDS. It will erupt again.`);
+      }
     }
 
     fired.push(self.cardId);
@@ -895,6 +928,36 @@ export function applyAction(
   if (me.sealTurns && me.sealTurns > 0) {
     me.sealTurns -= 1;
     if (me.sealTurns === 0) s.log.push(`${me.username} can play supports again.`);
+  }
+  // ── THE ERUPTION ── a Mythic's armed second stage counts down with the
+  // dooms, and lands the same way: nothing above can cancel it. Every living
+  // enemy takes the share; the caster's LIVING line steadies.
+  for (const side of [me, foe]) {
+    if (!side.ascended) continue;
+    side.ascended.rounds -= 1;
+    if (side.ascended.rounds > 0) continue;
+    const other = side === me ? foe : me;
+    const caster = side.fighters.find((f) => f.cardId === side.ascended!.cardId);
+    // The caster may be dead by now — the domain erupts anyway, off the
+    // stored power and the caster's BASE-built atk if it still stands,
+    // else a floor of its printed attack. An eruption that fizzles when
+    // the caster falls would make focusing the mythic erase the whole tell.
+    const atkRef = caster?.atk ?? CARD_STATS.mythic.atk;
+    const hit = Math.max(1, Math.round((atkRef * side.ascended.power) / 100));
+    let struck = 0;
+    for (const f of other.fighters) {
+      if (f.hp <= 0) continue;
+      f.hp = Math.max(0, f.hp - hit);
+      struck++;
+      if (f.hp === 0) s.log.push(`${f.name} fell.`);
+    }
+    for (const f of side.fighters) {
+      if (f.hp <= 0) continue;
+      f.hp = Math.min(f.maxHp, f.hp + Math.max(1, Math.round((f.maxHp * side.ascended.healPct) / 100)));
+    }
+    s.log.push(`▲▲ ${side.ascended.name} ERUPTED — ${struck} card${struck === 1 ? "" : "s"} took ${hit}, and ${side.username}'s line steadied.`);
+    if (other.active >= 0 && other.fighters[other.active]?.hp <= 0) other.active = -1;
+    side.ascended = undefined;
   }
   for (const side of [me, foe]) {
     if (!side.doom) continue;

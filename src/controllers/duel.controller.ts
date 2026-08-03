@@ -261,7 +261,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },
-      select: { cardId: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true },
+      select: { cardId: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true },
     });
     if (ownedRows.filter((r) => deck.includes(r.cardId)).length !== deck.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that deck." });
@@ -280,7 +280,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     // upgrade would be a number on a card page that never reached a fight.
     const challengerRows = await prisma.userCard.findMany({
       where: { userId: duel.challengerId, cardId: { in: duel.challengerDeck } },
-      select: { cardId: true, foil: true, level: true, skillLevel: true, atkForge: true, hpForge: true },
+      select: { cardId: true, foil: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true },
     });
     const challengerLevels: Record<string, number> = {};
     for (const r of challengerRows) challengerLevels[r.cardId] = r.level || 1;
@@ -301,12 +301,17 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     const myAtkF: Record<string, number> = {};
     const myHpF: Record<string, number> = {};
     for (const r of ownedRows) { myAtkF[r.cardId] = (r as any).atkForge || 0; myHpF[r.cardId] = (r as any).hpForge || 0; }
+    // Mythic rolls ride into the fight the same way forge ranks do.
+    const chAffix: Record<string, string> = {}; const chMod: Record<string, string> = {};
+    for (const r of challengerRows) { if ((r as any).mythAffix) chAffix[r.cardId] = (r as any).mythAffix; if ((r as any).mythMod) chMod[r.cardId] = (r as any).mythMod; }
+    const myAffix: Record<string, string> = {}; const myMod: Record<string, string> = {};
+    for (const r of ownedRows) { if ((r as any).mythAffix) myAffix[r.cardId] = (r as any).mythAffix; if ((r as any).mythMod) myMod[r.cardId] = (r as any).mythMod; }
 
     const stateObj: DuelState = {
       a: makeSide(duel.challengerId, duel.challengerName, duel.challengerDeck,
-        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels, challengerSkills, challengerAtkF, challengerHpF),
+        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels, challengerSkills, challengerAtkF, challengerHpF, chAffix, chMod),
       b: makeSide(duel.opponentId, duel.opponentName, deck,
-        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels, mySkills, myAtkF, myHpF),
+        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels, mySkills, myAtkF, myHpF, myAffix, myMod),
       turn: duel.challengerId, // challenger moves first
       log: [`${duel.opponentName} accepted the challenge.`],
       round: 1,

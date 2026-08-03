@@ -12,7 +12,7 @@
 // blocks a determined collector, and none of that touches AP.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export type CardRarity = "common" | "rare" | "epic" | "legendary" | "event";
+export type CardRarity = "common" | "rare" | "epic" | "legendary" | "event" | "mythic";
 
 // Each motif is a DIFFERENT procedurally-drawn scene on the client. This is
 // what stops 39 cards looking like 39 recolours of one shape.
@@ -144,6 +144,22 @@ export const CARDS: Record<string, CardDef> = {
   card_mirror:      { id: "card_mirror",      name: "Mirror",               rarity: "legendary", set: "Covenant", hue: 200, motif: "ripple", flavor: "It gives back everything you offer, and keeps a little for itself.", support: { kind: "mirror", power: 0.15 } },
   card_arise:       { id: "card_arise",       name: "Arise",                rarity: "legendary", set: "Covenant", hue: 275, motif: "comet",  flavor: "The dead heard their name spoken like an order — and obeyed.", support: { kind: "arise", power: 0.1 } },
 
+  // ═══ SET · MYTHOS — the ★5 tier. NEVER pulled, only SYNTHESIZED ═══════════
+  // Exactly five legendaries are fusion-eligible; every unique pair of them
+  // makes exactly one Mythic. 5 choose 2 = 10 — this set is closed by math.
+  // Each carries an ASCENDED domain: it fires like any domain, then erupts a
+  // second time two rounds later if the fight is still standing.
+  myth_lockedblade:    { id: "myth_lockedblade",    name: "The Locked Blade",             rarity: "mythic", set: "Mythos", hue: 20,  motif: "blade",    flavor: "A sword the door refused to release. It cuts what cannot be opened." },
+  myth_seagate:        { id: "myth_seagate",        name: "The Sunken Door",              rarity: "mythic", set: "Mythos", hue: 195, motif: "gate",     flavor: "It stands open at the bottom of everything, and the water holds its breath." },
+  myth_hourdoor:       { id: "myth_hourdoor",       name: "The Hour Door",                rarity: "mythic", set: "Mythos", hue: 268, motif: "comet",    flavor: "Knock once. It opens on the day you cannot avoid." },
+  myth_doordream:      { id: "myth_doordream",      name: "The Door That Dreams",         rarity: "mythic", set: "Mythos", hue: 285, motif: "eye",      flavor: "It does not lead anywhere. It imagines where you arrive." },
+  myth_leviathansaint: { id: "myth_leviathansaint", name: "The Saint Below",              rarity: "mythic", set: "Mythos", hue: 185, motif: "leviathan",flavor: "It took a vow in the deep, and the deep keeps vows." },
+  myth_endronin:       { id: "myth_endronin",       name: "The Ronin at the End of Time", rarity: "mythic", set: "Mythos", hue: 8,   motif: "path",     flavor: "Every dawn that will ever come, and one blade drawn at all of them." },
+  myth_bladebeyond:    { id: "myth_bladebeyond",    name: "The Blade Beyond",             rarity: "mythic", set: "Mythos", hue: 320, motif: "storm",    flavor: "Drawn somewhere outside the sky. The cut arrives before the sword." },
+  myth_tideofages:     { id: "myth_tideofages",     name: "The Tide of Ages",             rarity: "mythic", set: "Mythos", hue: 200, motif: "sea",      flavor: "It comes in once an era, and takes the era with it." },
+  myth_drownedgod:     { id: "myth_drownedgod",     name: "The Drowned God",              rarity: "mythic", set: "Mythos", hue: 175, motif: "tendril",  flavor: "It did not die in the water. The water is what it wears." },
+  myth_lasttomorrow:   { id: "myth_lasttomorrow",   name: "The Last Tomorrow",            rarity: "mythic", set: "Mythos", hue: 350, motif: "dawn",     flavor: "After it, the calendar simply stops arguing." },
+
   card_lastlight:  { id: "card_lastlight",  name: "Last Light",       rarity: "common", set: "Succour", hue: 52,  motif: "dawn",   flavor: "Enough to see by. Not enough to rest.", support: { kind: "heal", power: 15 } },
   card_emberward:  { id: "card_emberward",  name: "Ember Ward",       rarity: "common", set: "Succour", hue: 20,  motif: "ember",  flavor: "Hold the coal. It will hold you back.", support: { kind: "shield" } },
   card_tidecall:   { id: "card_tidecall",   name: "Tidecall",         rarity: "rare",   set: "Succour", hue: 188, motif: "sea",    flavor: "The water remembers everyone who stood in it.", support: { kind: "mend", power: 8 } },
@@ -199,7 +215,8 @@ export const CARDS: Record<string, CardDef> = {
 };
 
 // Normal packs can roll everything EXCEPT event cards.
-const PACK_POOL = Object.values(CARDS).filter((c) => c.rarity !== "event");
+// Mythics are NEVER pulled — they exist only through the Synthesis Lab.
+const PACK_POOL = Object.values(CARDS).filter((c) => c.rarity !== "event" && c.rarity !== "mythic");
 
 export const PACK_PRICE = 250;   // AP — reachable even for sub-500 balances
 export const PACK_SIZE = 4;
@@ -226,7 +243,7 @@ export const PACK_SIZE = 4;
  * Weights are floats now — the roll multiplies Math.random() by the sum, so
  * nothing anywhere assumes integers.
  */
-export const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event">, number> = {
+export const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event" | "mythic">, number> = {
   common: 64,
   rare: 27.4,
   epic: 8,
@@ -237,13 +254,13 @@ export const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event">, number> = {
 // chosen card). Craft costs MORE than dust returns at the same rarity — recycling
 // is a grind, not an exploit, so you can't dust-and-craft your way to profit.
 export const DUST_VALUE: Record<CardRarity, number> = {
-  common: 5, rare: 15, epic: 40, legendary: 120, event: 0, // event cards can't be dusted
+  common: 5, rare: 15, epic: 40, legendary: 120, event: 0, mythic: 400, // event cards can't be dusted
 };
 export const CRAFT_COST: Record<CardRarity, number> = {
   // Legendary 1000 → 1500 alongside the pull-rate squeeze: the deterministic
   // path gets longer in step with the lucky one, or crafting becomes the
   // obvious bypass and the squeeze does nothing.
-  common: 40, rare: 120, epic: 340, legendary: 1500, event: 0, // event can't be crafted
+  common: 40, rare: 120, epic: 340, legendary: 1500, event: 0, mythic: 0, // event & mythic can't be crafted
 };
 
 /**
@@ -289,7 +306,7 @@ export function levelMult(level: number): number {
  */
 export function upgradeCost(rarity: CardRarity, level: number): number {
   const base: Record<CardRarity, number> = {
-    common: 30, rare: 70, epic: 160, legendary: 380, event: 300,
+    common: 30, rare: 70, epic: 160, legendary: 380, event: 300, mythic: 600,
   };
   const l = Math.max(1, Math.floor(level || 1));
   return Math.round((base[rarity] ?? 30) * Math.pow(1.35, l - 1));
@@ -302,7 +319,7 @@ export function upgradeCost(rarity: CardRarity, level: number): number {
  * relevant to veterans who already own most of the set.
  */
 export const WAKE_COST: Record<CardRarity, number> = {
-  common: 15, rare: 45, epic: 120, legendary: 340, event: 200,
+  common: 15, rare: 45, epic: 120, legendary: 340, event: 200, mythic: 600,
 };
 
 // Roll one pack → a list of card ids. Uses Math.random (fine on the server).
@@ -339,7 +356,7 @@ export const TOTAL_CARDS = Object.keys(CARDS).length;
 //               Bought with shards, not AP, so a patient collector can convert
 //               grinding into targeted luck.
 export const FOIL_COST: Record<CardRarity, number> = {
-  common: 60, rare: 150, epic: 400, legendary: 900, event: 500,
+  common: 60, rare: 150, epic: 400, legendary: 900, event: 500, mythic: 2000,
 };
 export const RELIC_PACK_SHARDS = 500;
 
@@ -378,6 +395,9 @@ export const SET_REWARDS: Record<string, SetReward> = {
   Requiem:   { set: "Requiem",   ap: 8000, shards: 1500, title: "The Requiem Made Whole" },
   // Six legendary supports, no padding — the second-longest chase.
   Covenant:  { set: "Covenant",  ap: 6000, shards: 1200, title: "Signatory of the Covenant" },
+  // Ten Mythics, all synthesis-born. Completing this means fusing every
+  // pair of the five eligible legendaries — the longest project in the game.
+  Mythos:    { set: "Mythos",    ap: 12000, shards: 2500, title: "The Mythos Entire" },
 };
 
 // Distinct card ids belonging to a set (for completion checks).
@@ -648,6 +668,63 @@ export const DOMAINS: Record<string, DomainDef> = {
     name: "The Tide Comes In", kind: "floodtide", base: 65, step: 20,
     text: (p) => `The flood takes ${p}% ATK from the card opposite and feeds every card you have.`,
   },
+
+  // ── ASCENDED DOMAINS — the Mythos tier. Same kinds the engines already
+  // know, at ascended power — and every one of these ERUPTS AGAIN two
+  // rounds after casting if the fight is still standing (see the ascended
+  // second-stage in both engines). The eruption is the ★5 signature.
+  myth_lockedblade:    { name: "Nothing Stays Sheathed",   kind: "shatter",      base: 90,  step: 25, text: (p) => `Shatter every protection the other side holds, then strike for ${p}% ATK. Erupts again two rounds on.` },
+  myth_seagate:        { name: "The Door Under the Water", kind: "nullify",      base: 2,   step: 1,  text: (p) => `Nothing reaches you for ${p} turn${p === 1 ? "" : "s"}. Two rounds on, the door erupts.` },
+  myth_hourdoor:       { name: "The Appointed Hour",       kind: "inevitability",base: 280, step: 90, text: (p) => `A doom of ${p}% ATK that lands no matter what. Two rounds on, the hour strikes again.` },
+  myth_doordream:      { name: "The Dream Holds the Door", kind: "revival",      base: 55,  step: 20, text: (p) => `Every card you have lost stands back up at ${p}% health. Two rounds on, the dream erupts.` },
+  myth_leviathansaint: { name: "The Vow of the Deep",      kind: "judgement",    base: 2,   step: 1,  text: (p) => `Fell the ${p} weakest enem${p === 1 ? "y" : "ies"} standing. No roll. Two rounds on, the vow erupts.` },
+  myth_endronin:       { name: "Every Dawn at Once",       kind: "ascend",       base: 42,  step: 14, text: (p) => `Your whole line gains ${p}% ATK for the rest of the duel. Two rounds on, the dawn erupts.` },
+  myth_bladebeyond:    { name: "The Cut Arrives First",    kind: "massacre",     base: 95,  step: 30, text: (p) => `Strike every enemy card for ${p}% ATK at once. Two rounds on, the blade erupts.` },
+  myth_tideofages:     { name: "An Era Goes Out",          kind: "siphon",       base: 45,  step: 18, text: (p) => `Take ${p}% of every enemy card's health and keep it. Two rounds on, the tide erupts.` },
+  myth_drownedgod:     { name: "What It Wears",            kind: "abyss",        base: 3,   step: 1,  text: (p) => `For the enemy's next ${p} attacks, half of what they deal returns. Two rounds on, the god erupts.` },
+  myth_lasttomorrow:   { name: "The Calendar Concedes",    kind: "terror",       base: 45,  step: 15, text: (p) => `The card opposite loses ${p}% of its CURRENT health. Two rounds on, tomorrow erupts.` },
+};
+
+// ═══ MYTHIC SYNTHESIS ═══════════════════════════════════════════════════════
+// Exactly these five legendaries can enter the machine, and every unique
+// pair of them resolves to exactly one Mythic — the pair DECIDES the card;
+// only the affix roll is luck. Keys are the two parent ids sorted and
+// joined with "+", so lookup order can never matter.
+export const FUSION_ELIGIBLE = [
+  "card_gatekey", "card_lastronin", "card_leviathan", "card_longmorrow", "card_outergod",
+];
+export const FUSIONS: Record<string, string> = {
+  "card_gatekey+card_lastronin":    "myth_lockedblade",
+  "card_gatekey+card_leviathan":    "myth_seagate",
+  "card_gatekey+card_longmorrow":   "myth_hourdoor",
+  "card_gatekey+card_outergod":     "myth_doordream",
+  "card_lastronin+card_leviathan":  "myth_leviathansaint",
+  "card_lastronin+card_longmorrow": "myth_endronin",
+  "card_lastronin+card_outergod":   "myth_bladebeyond",
+  "card_leviathan+card_longmorrow": "myth_tideofages",
+  "card_leviathan+card_outergod":   "myth_drownedgod",
+  "card_longmorrow+card_outergod":  "myth_lasttomorrow",
+};
+export const SYNTH_COST_AP = 5000;
+export const SYNTH_COST_SHARDS = 800;
+/** Base odds the reaction holds. Failure returns ONE parent — never both lost. */
+export const SYNTH_BASE_CHANCE = 85;
+/** Extra shards per +5% success, up to a guaranteed 100%. */
+export const SYNTH_BOOST_STEP = 150;
+/** The roll: a stat affix, applied on top of level/foil/forge in BOTH engines. */
+export const MYTHIC_AFFIXES: Record<string, { label: string; atkPct: number; hpPct: number }> = {
+  keen:     { label: "Keen Edge · +10% ATK",            atkPct: 10, hpPct: 0 },
+  stone:    { label: "Stoneheart · +14% HP",            atkPct: 0,  hpPct: 14 },
+  even:     { label: "Even Hand · +6% ATK & HP",        atkPct: 6,  hpPct: 6 },
+  glass:    { label: "Glass Fury · +16% ATK, −6% HP",   atkPct: 16, hpPct: -6 },
+  roots:    { label: "Deep Roots · +20% HP, −4% ATK",   atkPct: -4, hpPct: 20 },
+};
+/** The other roll: HOW the ascended second stage behaves. */
+export const MYTHIC_MODS: Record<string, { label: string; delay: number; powerMult: number; healPct: number }> = {
+  swift:    { label: "Swift Eruption · second stage one round sooner",      delay: 1, powerMult: 1,   healPct: 10 },
+  patient:  { label: "Patient Eruption · a round later, 40% stronger",      delay: 3, powerMult: 1.4, healPct: 10 },
+  brutal:   { label: "Brutal Eruption · second stage hits 30% harder",      delay: 2, powerMult: 1.3, healPct: 10 },
+  tender:   { label: "Sustaining Eruption · second stage heals double",     delay: 2, powerMult: 1,   healPct: 20 },
 };
 
 export function domainFor(cardId: string): DomainDef | null {
@@ -683,7 +760,7 @@ export const FORGE_MAX = 5;
 export const FORGE_ATK_STEP = 1; // flat ATK per rank
 export const FORGE_HP_STEP = 2;  // flat HP per rank
 const FORGE_RARITY_MULT: Record<CardRarity, number> = {
-  common: 1, rare: 1.3, epic: 1.7, legendary: 2.2, event: 1.8,
+  common: 1, rare: 1.3, epic: 1.7, legendary: 2.2, event: 1.8, mythic: 3,
 };
 export function forgeCost(stat: "atk" | "hp", rarity: CardRarity, rank: number): number {
   const base = stat === "atk" ? 300 : 200;

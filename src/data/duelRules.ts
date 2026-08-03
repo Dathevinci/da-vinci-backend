@@ -38,12 +38,14 @@ export function forfeitFine(stake: number): number {
 // Foil (x1.2) and levels (up to x1.63) stack on top, so an INVESTED card still
 // pulls far ahead. That gap is earned rather than drawn from a pack.
 export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
-  mythic: { hp: 34, atk: 15 },
   common:    { hp: 18, atk: 7 },
   rare:      { hp: 20, atk: 8 },
   epic:      { hp: 23, atk: 9 },
   legendary: { hp: 26, atk: 10 },
   event:     { hp: 24, atk: 9 },
+  // The ★5 premium: costs two consumed legendaries, so it must clearly
+  // outrank one — without one card deciding every duel.
+  mythic:    { hp: 30, atk: 12 },
 };
 
 // Foil copies fight ~20% harder — a real reason to spend shards on one.

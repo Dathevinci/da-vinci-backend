@@ -81,10 +81,23 @@ export const CARD_STATS_BY_ID: Record<string, { hp: number; atk: number }> = {
  */
 export const ROLL_SPREAD = 0.15;
 
+/**
+ * What this card is PRINTED at, before any roll, level, foil or forge.
+ *
+ * The precedence — per-card table, then the Pantheon's flat line, then rarity —
+ * was written out by hand in three places (rollStats, buildFighter, and now the
+ * merge maths). Three copies of a fallback chain is three chances for them to
+ * drift, and a merge that computed its step off a different base than the roll
+ * it raises would quietly break the band the roll promises to stay inside.
+ */
+export function printedStats(def: { id: string; rarity: CardRarity; set: string }): { hp: number; atk: number } {
+  return CARD_STATS_BY_ID[def.id] ?? (def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity]);
+}
+
 export function rollStats(def: { id: string; rarity: CardRarity; set: string; support?: unknown; ground?: unknown }):
   { hp: number; atk: number } | null {
   if (def.support || def.ground) return null;
-  const base = CARD_STATS_BY_ID[def.id] ?? (def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity]);
+  const base = printedStats(def);
   const jitter = (n: number) => {
     const delta = n * ROLL_SPREAD;
     return Math.max(1, Math.round(n - delta + Math.random() * delta * 2));
@@ -133,6 +146,11 @@ export interface Fighter {
   skillLevel?: number;
   /** A Mythic's rolled eruption mod (key into MYTHIC_MODS). */
   mythMod?: string;
+  /** Has this card swung yet? Read only by the `edge` support, whose whole
+   *  promise is "the FIRST strike rings" — without per-fighter memory that
+   *  card would either buff every swing or none. Set on the first attack and
+   *  never cleared, so falling and being revived does not re-arm it. */
+  struck?: boolean;
 }
 
 export interface Side {
@@ -172,6 +190,20 @@ export interface Side {
   /** Mirror: `pct` percent of what lands returns to the attacker AND heals
    *  the card it landed on. Lasting — the sliver is small on purpose. */
   mirror?: { pct: number };
+  // ── THE KNIGHT SET ── standing effects, unlike everything above.
+  // The rest of this block is spent on use; these hold for the fight, which
+  // is exactly why they are separate fields rather than more `shield` flags.
+  /** Flat damage shaved off every incoming blow, for the whole duel. */
+  flatGuard?: number;
+  /** Flat damage added to each of this side's cards' FIRST swing only. */
+  edgeFlat?: number;
+  /** Chance (0-1) that an incoming attack is ignored outright. */
+  veilPct?: number;
+  /** The Saint King's aura: `flat` off each enemy blow for `turns` more. */
+  aegis?: { flat: number; turns: number };
+  /** Ground cards already laid this duel, by card id — one each, and they
+   *  do NOT count against the support limit. A ground is not a support. */
+  usedGrounds?: string[];
   /** A Mythic's armed second stage: `rounds` ticks after the cast it ERUPTS —
    *  every living enemy takes `power`% of the caster's ATK and this side's
    *  living line recovers `healPct`% of max HP. The rolled mod shapes it. */
@@ -205,7 +237,7 @@ export function buildFighter(
   // Precedence: this COPY's roll, then the per-card table, then rarity. The
   // roll has to land here rather than only on the card page — a rolled stat
   // that didn't fight would be a number pretending to matter.
-  const printed = CARD_STATS_BY_ID[def.id] ?? (def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity]);
+  const printed = printedStats(def);
   const base = {
     hp: typeof rolledHp === "number" && rolledHp > 0 ? rolledHp : printed.hp,
     atk: typeof rolledAtk === "number" && rolledAtk > 0 ? rolledAtk : printed.atk,
@@ -253,15 +285,27 @@ export function makeSide(
   hpForges: Record<string, number> = {},
   // Mythic rolls: cardId -> affix key / mod key. Absent = not a mythic.
   affixes: Record<string, string> = {},
-  mythMods: Record<string, string> = {}
+  mythMods: Record<string, string> = {},
+  /**
+   * THE PULL ROLL, per owned copy: cardId -> rolled HP / ATK.
+   *
+   * These were the missing link. rollStats() has been stamping every pulled
+   * copy since the Knight set landed and buildFighter has accepted the numbers
+   * the whole time, but nothing ever carried them from the row to the fighter —
+   * so every duel quietly rebuilt from printed stats and the randomisation was
+   * invisible everywhere. Absent still means printed, so an in-flight duel or a
+   * copy pulled before rolls existed builds exactly as it used to.
+   */
+  rolledHps: Record<string, number> = {},
+  rolledAtks: Record<string, number> = {}
 ): Side {
   const fighters = deck
-    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1, skillLevels[id] || 1, atkForges[id] || 0, hpForges[id] || 0, affixes[id] || "", mythMods[id] || ""))
+    .map((id) => buildFighter(id, foils.has(id), levels[id] || 1, skillLevels[id] || 1, atkForges[id] || 0, hpForges[id] || 0, affixes[id] || "", mythMods[id] || "", rolledHps[id] ?? null, rolledAtks[id] ?? null))
     .filter((f): f is Fighter => !!f);
   // active = -1 means NOBODY is on the field yet. The arena opens empty and
   // your first move is genuinely choosing who walks in, instead of the engine
   // having silently already picked for you.
-  return { userId, username, fighters, active: -1, items, shield: false, focus: false, usedSupports: [], usedAbilities: [] };
+  return { userId, username, fighters, active: -1, items, shield: false, focus: false, usedSupports: [], usedAbilities: [], usedGrounds: [] };
 }
 
 function livingIndex(side: Side): number {
@@ -357,6 +401,44 @@ export function applyAction(
   // the once-per-duel rule, so a card you own is never spent — only its use.
   if (action.type === "support") {
     const def = CARDS[action.cardId];
+
+    /* ── LAYING A GROUND ────────────────────────────────────────────────────
+     *
+     * Grounds ride the support ACTION because the plumbing is identical — the
+     * caller has already proved ownership — but they are accounted for
+     * separately on purpose. A ground is not a support: it does not count
+     * against SUPPORTS_PER_DUEL, it is not stopped by a seal, and it holds the
+     * whole board instead of touching one card.
+     *
+     * The `set` scope is the balancing lever. A Fitting End lifts Knights and
+     * nothing else, so splashing it into a mixed deck buys you nothing — the
+     * card is a reward for committing to a set rather than a neutral stat
+     * stick every deck would auto-include.
+     */
+    if (def?.ground) {
+      const g = def.ground;
+      const laid: string[] = me.usedGrounds || (me.usedGrounds = []);
+      if (laid.includes(action.cardId)) return { state, finished: false };
+      if (g.kind !== "bulwark") return { state, finished: false };
+
+      // Only the living, and only its own set. Raising a corpse's ceiling
+      // would be a no-op the player paid a card for.
+      const lifted = me.fighters.filter((f) => f.hp > 0 && CARDS[f.cardId]?.set === g.set);
+      if (lifted.length === 0) return { state, finished: false };
+
+      laid.push(action.cardId);
+      const gain = Math.max(1, Math.round(g.power * levelMult((action as any).level || 1)));
+      for (const f of lifted) {
+        // Both ceiling AND current, so it reads as ground being consecrated
+        // under them rather than a wound being opened to make room.
+        f.maxHp += gain;
+        f.hp += gain;
+      }
+      s.log.push(`${me.username} laid ${def.name} — ${lifted.length} ${g.set} card${lifted.length === 1 ? "" : "s"} gained ${gain} HP, and the ground holds.`);
+      if (s.log.length > 60) s.log = s.log.slice(-60);
+      return { state: s, finished: false };
+    }
+
     const eff = def?.support;
     if (!eff) return { state, finished: false };
     // Held in a local so the narrowing survives — `usedSupports` is optional on
@@ -488,6 +570,35 @@ export function applyAction(
       const bonus = Math.min(40, Math.round(20 * supMult));
       me.atkBonus = Math.max(me.atkBonus || 0, bonus);
       s.log.push(`${me.username} played ${def.name} — ARISE. ${fallen.length} fallen stood back up, angrier.`);
+
+    /* ── THE KNIGHT SUPPORTS ── standing, not spent ──────────────────────
+     *
+     * Everything above fires once and is gone. These three hold for the rest
+     * of the duel, which is the whole reason they are their own kinds: "halve
+     * the next blow" and "take 3 less from every blow" are different promises
+     * and folding them together would make the card text a lie.
+     *
+     * All three take the BETTER of old and new rather than summing. Two
+     * shields stacking to 9 flat off every hit would end attacking as a
+     * concept, and you only get three supports a duel to spend on it.
+     */
+    } else if (eff.kind === "guard") {
+      used.push(action.cardId);
+      const flat = Math.max(1, Math.round(eff.power * supMult));
+      me.flatGuard = Math.max(me.flatGuard || 0, flat);
+      s.log.push(`${me.username} played ${def.name} — every blow from here lands ${me.flatGuard} lighter.`);
+    } else if (eff.kind === "edge") {
+      used.push(action.cardId);
+      const flat = Math.max(1, Math.round(eff.power * supMult));
+      me.edgeFlat = Math.max(me.edgeFlat || 0, flat);
+      s.log.push(`${me.username} played ${def.name} — each card's FIRST strike carries ${me.edgeFlat} extra.`);
+    } else if (eff.kind === "veil") {
+      used.push(action.cardId);
+      // Capped well short of 1: a card that can simply not be hit is not a
+      // card, it is a stalemate button.
+      const pct = Math.min(0.6, eff.power * supMult);
+      me.veilPct = Math.max(me.veilPct || 0, pct);
+      s.log.push(`${me.username} played ${def.name} — ${Math.round(me.veilPct * 100)}% of what comes finds nobody there.`);
     } else {
       return { state, finished: false };
     }
@@ -618,6 +729,33 @@ export function applyAction(
         const gain = Math.max(1, Math.round((self.atk * p) / 100));
         self.atk += gain;
         s.log.push(`${self.name} used ${ability.def.name} — its attack rose to ${self.atk}, permanently.`);
+      } else if (k === "sweep") {
+        // The Great Sword — the whole line, not the card in front. Deliberately
+        // NOT gated on foe.active: a swing this wide does not care whether
+        // anyone has stepped forward, and gating it there would let an empty
+        // field refuse the once-per-duel use.
+        const living = foe.fighters.filter((f) => f.hp > 0);
+        if (living.length === 0) return { state, finished: false };
+        const each = Math.max(1, Math.round(self.atk * (p / 100)));
+        for (const f of living) {
+          f.hp = Math.max(0, f.hp - each);
+          if (f.hp === 0) s.log.push(`${f.name} fell.`);
+        }
+        s.log.push(`${self.name} used ${ability.def.name} — ${each} to all ${living.length} card${living.length === 1 ? "" : "s"} opposite.`);
+      } else if (k === "aegis") {
+        // FLAT reduction, and it stacks by taking the better of the two rather
+        // than summing: two Saint Kings should not add up to immunity.
+        const turns = 2;
+        // Built in a LOCAL first, then assigned. Reading me.aegis.flat back out
+        // of the optional field right after writing it relies on control-flow
+        // narrowing surviving to the next statement, and narrowing on optional
+        // properties is exactly what has broken this build before.
+        const aura = {
+          flat: Math.max(me.aegis?.flat || 0, Math.max(1, p)),
+          turns: Math.max(me.aegis?.turns || 0, turns),
+        };
+        me.aegis = aura;
+        s.log.push(`${self.name} used ${ability.def.name} — every blow against ${me.username} lands ${aura.flat} lighter for ${turns} turns.`);
       } else {
         return { state, finished: false };
       }
@@ -891,6 +1029,26 @@ export function applyAction(
       if (s.log.length > 60) s.log = s.log.slice(-60);
       return { state: s, finished: false };
     }
+    /**
+     * The Cloak — a standing CHANCE the blow finds nobody. Not consumed: the
+     * cloak does not fall off because it worked once.
+     *
+     * Decorrelated from the damage roll rather than reusing it directly. The
+     * engine is handed exactly one 0..1 number to stay pure, and reading it
+     * twice would tie "did it hit" to "how hard" — every veil would then dodge
+     * precisely the softest blows and eat every hard one, which is the exact
+     * opposite of what the card is for.
+     */
+    if (foe.veilPct && foe.veilPct > 0) {
+      const veilRoll = (roll * 7919) % 1;
+      if (veilRoll < foe.veilPct) {
+        s.log.push(`${mine.name} swung, and there was nobody inside the cloak.`);
+        s.turn = foe.userId;
+        s.round += 1;
+        if (s.log.length > 60) s.log = s.log.slice(-60);
+        return { state: s, finished: false };
+      }
+    }
     // Damage: base attack, +/-15% variance, focus bonus, shield reduction.
     let dmg = mine.atk * (0.85 + roll * 0.3);
     // Ascend is a lasting, side-wide multiplier, so it applies before the
@@ -920,6 +1078,15 @@ export function applyAction(
     // A lasting guard, on top of any one-shot ward. Capped at 75% where it is
     // set, so this can never reach zero.
     if (foe.guardPct) dmg *= 1 - foe.guardPct / 100;
+    /* ── FLAT MODIFIERS ── after every multiplier, on purpose.
+     *
+     * A flat point that got multiplied would not be flat. Running them last
+     * also keeps the two flat systems honestly different from the percentage
+     * ones: the Sword of Crystal's +10 is +10 whether you are hitting a
+     * Squire or a Saint King, and the Saint King's aura eats a fixed 10 no
+     * matter how hard the blow was — brutal against a flurry, nearly nothing
+     * against one enormous swing.
+     */
     // Nullify beats everything, including the Math.max(1) floor below: the
     // domain says nothing reaches you, so nothing does.
     if (foe.nullifyTurns && foe.nullifyTurns > 0) {
@@ -929,6 +1096,24 @@ export function applyAction(
       s.round += 1;
       if (s.log.length > 60) s.log = s.log.slice(-60);
       return { state: s, finished: false };
+    }
+    /* Applied BELOW the nullify bail on purpose, unlike the multipliers above.
+     * Everything here is CONSUMED — an aegis turn, a card's one first strike —
+     * so running it before a branch that returns without landing a blow would
+     * spend both on an attack that never happened. Same rule the bulwark and
+     * block checks follow further up: what is spent must survive being turned
+     * aside. The multipliers above are safe there because they only shape a
+     * number that then gets discarded. */
+    if (me.edgeFlat && !mine.struck) dmg += me.edgeFlat;
+    // Marked whether the edge bonus existed or not: "first strike" has to mean
+    // this card's first strike of the duel, not the first one after somebody
+    // happened to play a sword.
+    mine.struck = true;
+    if (foe.flatGuard) dmg -= foe.flatGuard;
+    if (foe.aegis && foe.aegis.turns > 0) {
+      dmg -= foe.aegis.flat;
+      foe.aegis.turns -= 1;
+      if (foe.aegis.turns <= 0) foe.aegis = undefined;
     }
     const dealt = Math.max(1, Math.round(dmg));
     theirs.hp = Math.max(0, theirs.hp - dealt);

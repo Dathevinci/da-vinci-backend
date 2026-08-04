@@ -433,6 +433,13 @@ model UserCard {
   // something shards can close rather than a permanent loss.
   rolledHp   Int?
   rolledAtk  Int?
+  // How many times this copy has been MERGED — a spare of the same rank fed
+  // into it, plus shards, to raise its roll permanently. Capped at MERGE_MAX
+  // in the catalog. Stored rather than derived because the roll it raises is
+  // written straight into rolledHp/rolledAtk: without this counter there is
+  // nothing left to say how much of that number was pulled and how much was
+  // paid for, and the cap could be walked past forever.
+  merges     Int      @default(0)
   // ── Dungeon Dispatch condition ── deliberately separate from `hibernating`
   // (the duel sleep): a card asleep from a lost duel can still raid, and a
   // card dead in a dungeon can still duel. Two modes, two bodies.

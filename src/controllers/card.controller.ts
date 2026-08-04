@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { heldCardIds } from "../lib/showcase";
 import { getRole } from "../utils/economy";
-import { CARD_STATS, FOIL_MULT, rollStats } from "../data/duelRules";
+import { CARD_STATS, CARD_STATS_BY_ID, FOIL_MULT, rollStats, printedStats } from "../data/duelRules";
 import {
   CARDS,
   PACK_PRICE,
@@ -44,6 +44,9 @@ import {
   SYNTH_BOOST_STEP,
   MYTHIC_AFFIXES,
   MYTHIC_MODS,
+  MERGE_MAX,
+  MERGE_STEP,
+  mergeCost,
 } from "../data/cardCatalog";
 import {
   mintPrints,
@@ -115,10 +118,31 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
             .map((r) => [r, Array.from({ length: FORGE_MAX }, (_, i) => forgeCost("hp", r, i))])),
         },
         relicPackShards: RELIC_PACK_SHARDS,
+        /**
+         * MERGING — feed a spare of the same rank in to raise a copy's roll.
+         * The whole cost ladder ships so the button can name the price before
+         * the finger commits, and so the client never grows its own copy of
+         * the doubling curve to drift out of step with mergeCost().
+         */
+        merge: {
+          max: MERGE_MAX,
+          step: MERGE_STEP,
+          cost: Object.fromEntries((["common", "rare", "epic", "legendary", "event", "mythic"] as const)
+            .map((r) => [r, Array.from({ length: MERGE_MAX }, (_, i) => mergeCost(r, i))])),
+        },
         setRewards: SET_REWARDS,
         // Combat stats ship with the catalog so the UI can show what a card
         // DOES without duplicating the table and letting it drift.
         cardStats: CARD_STATS,
+        /**
+         * PER-CARD stats, which outrank the rarity table above.
+         *
+         * The Knight set is authored card by card — the Squire is 9/4 and the
+         * Jester 13/1, numbers a rarity table cannot express. Without this the
+         * client fell back to the common line for both and displayed 18/7 on
+         * every Knight, so the face advertised stats no fight would ever use.
+         */
+        cardStatsById: CARD_STATS_BY_ID,
         foilMult: FOIL_MULT,
         maxSkillLevel: MAX_SKILL_LEVEL,
         maxDomainLevel: MAX_DOMAIN_LEVEL,
@@ -322,7 +346,11 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
   try {
     const userId = req.params.userId as string;
     const [owned, user, prints] = await Promise.all([
-      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true } }),
+      // rolledHp/rolledAtk/merges ride along so the binder can show what THIS
+      // copy actually is. Without them every surface fell back to the printed
+      // line and the pull roll was invisible outside a duel — which read, from
+      // the outside, exactly like the randomisation never shipped.
+      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true, rolledHp: true, rolledAtk: true, merges: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
       // Legendary print identities — serial + condition per held copy. Best
       // condition first, then oldest serial, so the first entry is always
@@ -1366,6 +1394,171 @@ export const upgradeCard = async (req: Request, res: Response, next: NextFunctio
       if (e?.message === "RACE") {
         return res.status(409).json({ success: false, message: "That upgrade already went through." });
       }
+      throw e;
+    }
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/cards/merge  body { userId, cardId, fodderCardId }
+ *
+ * Feed a spare of the SAME RANK into a card, plus shards, and the copy you keep
+ * gets permanently stronger. The other one is gone.
+ *
+ * Why same rank: the fodder has to cost about what the target is worth, or this
+ * becomes a laundry — a shelf of commons washed into a legendary's stat line.
+ * Rank is the only honest exchange rate the game already has.
+ *
+ * The gain is written straight into the copy's PULL ROLL rather than kept as a
+ * separate multiplier. Two reasons. Every surface that already shows rolled
+ * stats shows the merge for free, with no new plumbing to forget. And it makes
+ * the feature mean what it says: the card itself changed, rather than acquiring
+ * a modifier that follows it around.
+ *
+ * `merges` is capped at MERGE_MAX because the roll's promise — the tier you
+ * pulled is the tier you got — has to survive this. Five merges is +40%, held
+ * deliberately under the gap to the next rarity.
+ */
+export const mergeCards = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId, cardId, fodderCardId } = (req.body || {}) as {
+      userId?: string; cardId?: string; fodderCardId?: string;
+    };
+    if (!ownerGuard(req, res, userId)) return;
+    if (!cardId || !fodderCardId) {
+      return res.status(400).json({ success: false, message: "Pick a card to keep and a card to feed it." });
+    }
+
+    const def = CARDS[cardId];
+    const fodderDef = CARDS[fodderCardId];
+    if (!def) return res.status(404).json({ success: false, message: "No such card." });
+    if (!fodderDef) return res.status(404).json({ success: false, message: "No such card to merge in." });
+
+    // Supports and grounds have no stat line to raise — rollStats returns null
+    // for them precisely because their printed effect IS the card. Merging one
+    // would take a copy and shards and change nothing at all.
+    if (def.support || def.ground) {
+      return res.status(400).json({ success: false, message: `${def.name} has no stat line to strengthen.` });
+    }
+    if (fodderDef.rarity !== def.rarity) {
+      return res.status(400).json({
+        success: false,
+        message: `${fodderDef.name} is ${fodderDef.rarity}, and ${def.name} is ${def.rarity}. Merging needs two cards of the same rank.`,
+      });
+    }
+
+    const printed = printedStats(def);
+    // Read BEFORE the transaction, like every other paid action here: it hits
+    // the global client rather than `tx`, so awaiting it mid-transaction would
+    // hold the row lock open across an unrelated connection.
+    const free = await isLeadDevFree(userId!);
+
+    try {
+      const out = await prisma.$transaction(async (tx) => {
+        const target = await tx.userCard.findUnique({
+          where: { userId_cardId: { userId: userId!, cardId } },
+          select: { count: true, merges: true, rolledHp: true, rolledAtk: true, hibernating: true },
+        });
+        if (!target) throw new CardError(404, `You don't own ${def.name}.`);
+        if (target.hibernating) throw new CardError(400, `${def.name} is asleep. Wake it first.`);
+
+        const merges = target.merges || 0;
+        if (merges >= MERGE_MAX) {
+          throw new CardError(400, `${def.name} has been merged ${MERGE_MAX} times. That's as far as it goes.`);
+        }
+
+        // Same card as fodder means eating one of your OWN duplicates, which
+        // needs two copies — otherwise the card consumes itself and vanishes.
+        const same = fodderCardId === cardId;
+        const fodder = same
+          ? target
+          : await tx.userCard.findUnique({
+              where: { userId_cardId: { userId: userId!, cardId: fodderCardId } },
+              select: { count: true, merges: true, rolledHp: true, rolledAtk: true, hibernating: true },
+            });
+        if (!fodder) throw new CardError(404, `You don't own ${fodderDef.name}.`);
+        if (same && fodder.count < 2) {
+          throw new CardError(400, `You only have one ${def.name}. Merging it into itself would leave you nothing.`);
+        }
+
+        /**
+         * SHOWCASE AND ESCROW SAFETY. A copy pinned to a profile is still
+         * owned, so it may be fed — but a card whose LAST copy is about to
+         * disappear must not stay pinned to a showcase that will then render a
+         * card the player no longer holds. That is the exact bug that stranded
+         * a synthesised legendary on a profile with no way to remove it.
+         */
+        const losingLast = !same && fodder.count <= 1;
+
+        const cost = mergeCost(def.rarity, merges);
+        if (!free) {
+          const paid = await tx.user.updateMany({
+            where: { id: userId, shards: { gte: cost } },
+            data: { shards: { decrement: cost } },
+          });
+          if (paid.count === 0) throw new CardError(402, `Merging ${def.name} costs ${cost} shards.`);
+        }
+
+        // ── CONSUME THE FODDER ── guarded on the count we read, so two fast
+        // clicks can't both spend the same spare copy.
+        const eaten = await tx.userCard.updateMany({
+          where: { userId, cardId: fodderCardId, count: fodder.count },
+          data: { count: { decrement: 1 } },
+        });
+        if (eaten.count === 0) throw new CardError(409, "Your copies just changed — try again.");
+        if (losingLast) {
+          await tx.userCard.deleteMany({ where: { userId, cardId: fodderCardId, count: { lte: 0 } } });
+        }
+        // Legendaries carry per-copy print identities. A count that moves
+        // without its prints moving leaves a serial owned by nobody and the
+        // mint permanently out of step with the shelf.
+        if (isLegendary(fodderCardId)) {
+          await burnWorstPrints(tx, userId!, fodderCardId, 1);
+        }
+
+        // ── RAISE THE ROLL ── off PRINTED stats, never off the current rolled
+        // value. Compounding on the running total would make merge five worth
+        // far more than merge one and blow straight through the +40% ceiling.
+        const stepHp = Math.max(1, Math.round(printed.hp * MERGE_STEP));
+        const stepAtk = Math.max(1, Math.round(printed.atk * MERGE_STEP));
+        // A copy pulled before rolls existed has no roll to raise. Seed it from
+        // printed so it starts level with everyone else rather than being
+        // rebuilt from zero.
+        const baseHp = typeof target.rolledHp === "number" && target.rolledHp > 0 ? target.rolledHp : printed.hp;
+        const baseAtk = typeof target.rolledAtk === "number" && target.rolledAtk > 0 ? target.rolledAtk : printed.atk;
+
+        const bumped = await tx.userCard.updateMany({
+          where: { userId, cardId, merges },
+          data: { rolledHp: baseHp + stepHp, rolledAtk: baseAtk + stepAtk, merges: { increment: 1 } },
+        });
+        if (bumped.count === 0) throw new CardError(409, "That merge already went through.");
+
+        const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
+        return {
+          cardId,
+          fodderCardId,
+          spent: free ? 0 : cost,
+          shards: u?.shards ?? 0,
+          merges: merges + 1,
+          rolledHp: baseHp + stepHp,
+          rolledAtk: baseAtk + stepAtk,
+          gainedHp: stepHp,
+          gainedAtk: stepAtk,
+          nextCost: merges + 1 >= MERGE_MAX ? null : mergeCost(def.rarity, merges + 1),
+        };
+      });
+
+      // No showcase prune here on purpose. Profiles render through
+      // liveShowcase(), which drops pins the player no longer holds at READ
+      // time — so a fed-away last copy stops showing on its own. Writing a
+      // prune here as well would be a second source of truth for the same
+      // question, which is how the stranded-legendary bug happened the first
+      // time.
+      res.json({ success: true, data: out });
+    } catch (e) {
+      if (e instanceof CardError) return res.status(e.code).json({ success: false, message: e.message });
       throw e;
     }
   } catch (error) {

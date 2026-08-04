@@ -545,7 +545,17 @@ export function cardsInSet(set: string): string[] {
 
 export type SkillKind =
   | "burst" | "drain" | "guard" | "rally" | "execute"
-  | "pierce" | "cleave" | "venom" | "stagger" | "bulwark" | "mendself" | "sap" | "empower";
+  | "pierce" | "cleave" | "venom" | "stagger" | "bulwark" | "mendself" | "sap" | "empower"
+  // ── added for the Knight set ──
+  // `sweep` hits the WHOLE enemy line, which no skill did before — cleave
+  // reaches exactly two. It is deliberately close to the `massacre` domain and
+  // deliberately weaker: a domain rewrites the fight, a skill just lands.
+  | "sweep"
+  // `aegis` is the only FLAT damage reduction in the game. `guard` sheds a
+  // percentage, which scales with how hard you are hit; the Saint King's aura
+  // subtracts a fixed number, so it is strongest against a flurry of small
+  // blows and nearly irrelevant against one enormous one. Different card.
+  | "aegis";
 
 export interface SkillDef {
   name: string;
@@ -561,7 +571,12 @@ export interface SkillDef {
 export const MAX_SKILL_LEVEL = 5;
 
 export const SKILLS: Record<string, SkillDef> = {
-  // EPIC ONLY — legendaries carry a DOMAIN instead.
+  // Originally EPIC ONLY, because legendaries carried a DOMAIN instead. The
+  // Knight set broke that rule on purpose: every Knight UNIT names its attack,
+  // from the Squire's stick to the Saint King's aura, so the tier a card sits
+  // in decides how HARD its skill hits rather than whether it has one at all.
+  // The Saint King is a legendary with a skill and no domain — abilityFor
+  // checks DOMAINS first and falls through, so that resolves correctly.
   //
   // THIRTEEN CARDS, THIRTEEN VERBS. The first pass gave four of these "guard"
   // and three of them "rally", so half the tier was the same move at a
@@ -619,6 +634,46 @@ export const SKILLS: Record<string, SkillDef> = {
     name: "Where Something Ended", kind: "empower", base: 25, step: 8,
     text: (p) => `This card's attack rises ${p}% permanently. It keeps it if it falls and returns.`,
   },
+
+  /* ── THE KNIGHT SET ── every unit names its attack ──────────────────────
+   *
+   * No two share a verb, same rule as above. The numbers are tuned against
+   * CARD_STATS_BY_ID rather than the rarity table, because this set is
+   * authored card by card — the Jester hits for 1, so a percentage-of-ATK
+   * skill on it would round to nothing, which is why it debuffs instead.
+   */
+  card_squire: {
+    name: "Wooden Sword Slash", kind: "burst", base: 140, step: 20,
+    text: (p) => `Deal ${p}% ATK to the card opposite. It is a stick, and he means it.`,
+  },
+  card_jester: {
+    name: "The Laughing Strike", kind: "stagger", base: 45, step: 11,
+    text: (p) => `The other side's next attack lands ${p}% weaker. Nobody swings well while being laughed at.`,
+  },
+  card_knightradiant: {
+    name: "Radiant Slash", kind: "cleave", base: 95, step: 14,
+    text: (p) => `Deal ${p}% ATK to the card opposite AND half that to the next one behind it.`,
+  },
+  card_royalknight: {
+    name: "Righteous Sword", kind: "execute", base: 24, step: 5,
+    text: (p) => `Finish any card already below ${p}% health outright.`,
+  },
+  card_sunknight: {
+    name: "Sunlight", kind: "pierce", base: 110, step: 16,
+    text: (p) => `Deal ${p}% ATK straight through wards, guards and shields. Nothing has a shadow at noon.`,
+  },
+  card_crimsonknight: {
+    name: "Bloody Sword", kind: "drain", base: 105, step: 15,
+    text: (p) => `Deal ${p}% ATK and keep half of what it costs them as your own health.`,
+  },
+  card_gloriousone: {
+    name: "Great Sword", kind: "sweep", base: 70, step: 12,
+    text: (p) => `Deal ${p}% ATK to EVERY enemy card on the board at once.`,
+  },
+  card_saintking: {
+    name: "Saint Aura", kind: "aegis", base: 10, step: 3,
+    text: (p) => `Every enemy attack lands ${p} damage lighter for the next 2 turns.`,
+  },
 };
 
 export function skillFor(cardId: string): SkillDef | null {
@@ -643,9 +698,47 @@ export function skillPower(def: SkillDef, level: number): number {
  * levels lower, so a skill is a project rather than an afternoon of dusting.
  */
 export function skillUpgradeCost(level: number, rarity: CardRarity = "legendary"): number {
-  const base: Partial<Record<CardRarity, number>> = { epic: 200, legendary: 500 };
+  // Common and rare were absent until the Knight set gave those tiers skills;
+  // they fell through to the 200 default, which priced a Squire's stick like an
+  // epic's signature move. Cheap on purpose — the cards you pull constantly
+  // should be the ones you can afford to actually invest in.
+  const base: Partial<Record<CardRarity, number>> = {
+    common: 60, rare: 120, epic: 200, legendary: 500,
+  };
   const l = Math.max(1, Math.floor(level || 1));
   return Math.round((base[rarity] ?? 200) * Math.pow(1.6, l - 1));
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * MERGING — two cards of the same rank become one stronger card.
+ *
+ * The duplicate sink this game was missing. Dusting a spare turns it into
+ * shards; merging spends BOTH a spare and shards to permanently raise the
+ * copy you keep. Same rank only, so a shelf of commons can never be laundered
+ * into a legendary — the fodder has to hurt as much as the target is worth.
+ *
+ * The gain is written into the copy's PULL ROLL, which is why this is a
+ * different axis from levelling rather than a second helping of it: a level
+ * multiplies whatever the card is, a merge changes what the card IS. It also
+ * means a bad roll is recoverable, which was the point of banding the roll in
+ * the first place.
+ *
+ * Capped at five merges — +40% over printed, held deliberately below the ~2:1
+ * gap between neighbouring rarities so a fully merged common still loses to a
+ * legendary. The roll promises the tier you pulled is the tier you got, and
+ * merging is not allowed to make a liar of it.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+export const MERGE_MAX = 5;
+
+/** Each merge adds this share of the card's PRINTED stats, floored at +1. */
+export const MERGE_STEP = 0.08;
+
+/** Shards per merge, doubling each time so five is a real project. */
+export function mergeCost(rarity: CardRarity, merges: number): number {
+  const base: Partial<Record<CardRarity, number>> = {
+    common: 150, rare: 250, epic: 400, legendary: 700, event: 500, mythic: 900,
+  };
+  return Math.round((base[rarity] ?? 250) * Math.pow(2, Math.max(0, merges)));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -2,7 +2,7 @@ import { Router } from "express";
 import {
   getCatalog, getCollection, getCollectors, openPack, dustCard, craftCard,
   foilCard, openRelicPack, claimSet, getLadder, setShowcase, wakeCard, upgradeCard, upgradeSkill, attuneCard, forgeCard,
-  getPullStats, getTitles, setTitles, dustAllDupes, grantAllCards, maxCard,
+  getPullStats, getTitles, setTitles, dustAllDupes, grantAllCards, maxCard, mergeCards,
 } from "../controllers/card.controller";
 
 const router = Router();
@@ -32,6 +32,9 @@ router.post("/wake", wakeCard);
 router.post("/upgrade", upgradeCard);
 router.post("/forge", forgeCard);
 router.post("/upgrade-skill", upgradeSkill);
+// Two cards of the same rank in, one stronger card out. The spare is consumed
+// and shards are spent, so this is a POST and never an idempotent one.
+router.post("/merge", mergeCards);
 router.post("/attune", attuneCard);
 
 export default router;

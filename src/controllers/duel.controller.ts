@@ -76,7 +76,13 @@ function deckProblem(deck: any): string | null {
     const def = CARDS[id];
     if (!def) return "There's a card in that deck that doesn't exist.";
     if (def.support) {
-      return `${def.name} is a support card — it's played during a duel, not fielded. Pick three fighters.`;
+      return `${def.name} is a support card — it's played during a duel, not fielded. Pick ${DECK_SIZE} fighters.`;
+    }
+    // Grounds are dropped by buildFighter for the same reason supports are, so
+    // they strand a duel in exactly the same way. This check has to name them
+    // separately or a deck of grounds passes here and dies silently later.
+    if (def.ground) {
+      return `${def.name} is a ground card — it's laid during a duel, not fielded. Pick ${DECK_SIZE} fighters.`;
     }
   }
   return null;
@@ -261,7 +267,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
 
     const ownedRows = await prisma.userCard.findMany({
       where: { userId, cardId: { in: [...deck, ...duel.challengerDeck] } },
-      select: { cardId: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true },
+      select: { cardId: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true, rolledHp: true, rolledAtk: true },
     });
     if (ownedRows.filter((r) => deck.includes(r.cardId)).length !== deck.length) {
       return res.status(400).json({ success: false, message: "You don't own every card in that deck." });
@@ -280,7 +286,7 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     // upgrade would be a number on a card page that never reached a fight.
     const challengerRows = await prisma.userCard.findMany({
       where: { userId: duel.challengerId, cardId: { in: duel.challengerDeck } },
-      select: { cardId: true, foil: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true },
+      select: { cardId: true, foil: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true, rolledHp: true, rolledAtk: true },
     });
     const challengerLevels: Record<string, number> = {};
     for (const r of challengerRows) challengerLevels[r.cardId] = r.level || 1;
@@ -306,12 +312,27 @@ export const acceptDuel = async (req: Request, res: Response, next: NextFunction
     for (const r of challengerRows) { if ((r as any).mythAffix) chAffix[r.cardId] = (r as any).mythAffix; if ((r as any).mythMod) chMod[r.cardId] = (r as any).mythMod; }
     const myAffix: Record<string, string> = {}; const myMod: Record<string, string> = {};
     for (const r of ownedRows) { if ((r as any).mythAffix) myAffix[r.cardId] = (r as any).mythAffix; if ((r as any).mythMod) myMod[r.cardId] = (r as any).mythMod; }
+    // THE PULL ROLL — the per-copy HP/ATK stamped when the card was pulled.
+    // Read for both sides for exactly the reason levels are: a rolled stat that
+    // never reached a fight would be a number pretending to matter. Nulls are
+    // skipped rather than coerced, so a copy pulled before rolls existed keeps
+    // its printed line instead of being rebuilt as a zero.
+    const chRollHp: Record<string, number> = {}; const chRollAtk: Record<string, number> = {};
+    for (const r of challengerRows) {
+      if (typeof (r as any).rolledHp === "number") chRollHp[r.cardId] = (r as any).rolledHp;
+      if (typeof (r as any).rolledAtk === "number") chRollAtk[r.cardId] = (r as any).rolledAtk;
+    }
+    const myRollHp: Record<string, number> = {}; const myRollAtk: Record<string, number> = {};
+    for (const r of ownedRows) {
+      if (typeof (r as any).rolledHp === "number") myRollHp[r.cardId] = (r as any).rolledHp;
+      if (typeof (r as any).rolledAtk === "number") myRollAtk[r.cardId] = (r as any).rolledAtk;
+    }
 
     const stateObj: DuelState = {
       a: makeSide(duel.challengerId, duel.challengerName, duel.challengerDeck,
-        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels, challengerSkills, challengerAtkF, challengerHpF, chAffix, chMod),
+        new Set(challengerRows.filter((r) => r.foil).map((r) => r.cardId)), {}, challengerLevels, challengerSkills, challengerAtkF, challengerHpF, chAffix, chMod, chRollHp, chRollAtk),
       b: makeSide(duel.opponentId, duel.opponentName, deck,
-        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels, mySkills, myAtkF, myHpF, myAffix, myMod),
+        new Set(ownedRows.filter((r) => r.foil).map((r) => r.cardId)), {}, myLevels, mySkills, myAtkF, myHpF, myAffix, myMod, myRollHp, myRollAtk),
       turn: duel.challengerId, // challenger moves first
       log: [`${duel.opponentName} accepted the challenge.`],
       round: 1,
@@ -495,7 +516,13 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
       act = { type: "attack", index: Number.isInteger(index) ? Number(index) : undefined };
     } else if (action === "support") {
       const def = cardId ? CARDS[cardId] : undefined;
-      if (!def?.support) return res.status(400).json({ success: false, message: "That isn't a support card." });
+      // Grounds ride this same action. They are a different card CLASS with
+      // different accounting inside the engine, but the gate here is identical:
+      // do you own it. Rejecting them at this line was why A Fitting End could
+      // be held and never laid.
+      if (!def?.support && !def?.ground) {
+        return res.status(400).json({ success: false, message: "That isn't a support or ground card." });
+      }
       // You must OWN the card to play it. Ownership is the only gate — the
       // card is never consumed, so nothing is deducted here; the engine
       // enforces once-per-duel.
@@ -545,11 +572,14 @@ export const makeMove = async (req: Request, res: Response, next: NextFunction) 
       } else if (act.type === "deploy") {
         why = "That card can't be sent in.";
       } else if (act.type === "support") {
-        const used = meSide.usedSupports || [];
-        why = used.length >= SUPPORTS_PER_DUEL
-          ? `You've already played ${SUPPORTS_PER_DUEL} support cards this duel.`
-          : used.includes(act.cardId)
+        const isGround = !!CARDS[act.cardId]?.ground;
+        const used = (isGround ? meSide.usedGrounds : meSide.usedSupports) || [];
+        why = used.includes(act.cardId)
           ? "You've already played that one this duel."
+          : isGround
+          ? "No living card of that set is on your side to hold the ground."
+          : used.length >= SUPPORTS_PER_DUEL
+          ? `You've already played ${SUPPORTS_PER_DUEL} support cards this duel.`
           : "That card wouldn't do anything right now.";
       }
       return res.status(400).json({ success: false, message: why });

@@ -57,6 +57,15 @@ export const CARD_STATS_BY_ID: Record<string, { hp: number; atk: number }> = {
   card_crimsonknight: { hp: 18, atk: 9 },
   card_gloriousone:   { hp: 22, atk: 5 },
   card_saintking:     { hp: 25, atk: 10 },
+
+  // ── Sorcerer ── as specified, card by card. The Fallen Spell is the shape to
+  // notice: 20 ATK on 10 HP makes the game's hardest hitter also its most
+  // fragile, so it is a card you must protect rather than one you simply play.
+  card_witchhorror:   { hp: 8,  atk: 15 },
+  card_icemage:       { hp: 11, atk: 12 },
+  card_inkmage:       { hp: 15, atk: 8 },
+  card_poisonmage:    { hp: 17, atk: 10 },
+  card_fallenspell:   { hp: 10, atk: 20 },
 };
 
 /**
@@ -204,6 +213,21 @@ export interface Side {
   /** Ground cards already laid this duel, by card id — one each, and they
    *  do NOT count against the support limit. A ground is not a support. */
   usedGrounds?: string[];
+
+  // ── THE SORCERER SET ── effects that live across turns rather than in one.
+  /** The Fallen Spell's remaining hits, largest first. Ticks one per turn on
+   *  the side holding it and is spent when empty — the spell gives everything
+   *  at once and then has less to give. */
+  decayQueue?: { hits: number[]; from: string };
+  /** Gu Raising. `base` never changes; `tick` counts up and the multiplier is
+   *  derived from it, so the poison compounds without the stored number
+   *  drifting. Capped at 3 — the card says it stops growing, so it stops. */
+  venomGrow?: { base: number; tick: number; from: string };
+  /** Healing Orb. Restores this much to the active card every turn, standing. */
+  regen?: number;
+  /** The Loop Grimoire's unspent charge: the next attack from a COMMON or RARE
+   *  card on this side lands twice. One per duel. */
+  loopCharge?: boolean;
   /** A Mythic's armed second stage: `rounds` ticks after the cast it ERUPTS —
    *  every living enemy takes `power`% of the caster's ATK and this side's
    *  living line recovers `healPct`% of max HP. The rolled mod shapes it. */
@@ -592,6 +616,20 @@ export function applyAction(
       const flat = Math.max(1, Math.round(eff.power * supMult));
       me.edgeFlat = Math.max(me.edgeFlat || 0, flat);
       s.log.push(`${me.username} played ${def.name} — each card's FIRST strike carries ${me.edgeFlat} extra.`);
+    } else if (eff.kind === "regen") {
+      used.push(action.cardId);
+      // Standing, and takes the better of old and new rather than summing —
+      // same rule as the Knight three. Two orbs should not out-heal a duel.
+      me.regen = Math.max(me.regen || 0, Math.max(1, Math.round(eff.power * supMult)));
+      s.log.push(`${me.username} played ${def.name} — ${me.regen} HP back at the end of every turn from here.`);
+    } else if (eff.kind === "loop") {
+      used.push(action.cardId);
+      // Refused rather than wasted when the charge is already held: the card
+      // grants ONE extra strike per duel, and burning its only use to set a
+      // flag that is already set would spend a support for nothing.
+      if (me.loopCharge) return { state, finished: false };
+      me.loopCharge = true;
+      s.log.push(`${me.username} played ${def.name} — the next common or rare to swing will swing twice.`);
     } else if (eff.kind === "veil") {
       used.push(action.cardId);
       // Capped well short of 1: a card that can simply not be hit is not a
@@ -742,6 +780,35 @@ export function applyAction(
           if (f.hp === 0) s.log.push(`${f.name} fell.`);
         }
         s.log.push(`${self.name} used ${ability.def.name} — ${each} to all ${living.length} card${living.length === 1 ? "" : "s"} opposite.`);
+      } else if (k === "decay") {
+        // Everything now, then half, then a quarter. The first hit lands in
+        // this turn; the rest are queued on the FOE and tick down there, so
+        // they arrive even if the caster falls in the meantime.
+        if (!target) return { state, finished: false };
+        const first = Math.max(1, p);
+        target.hp = Math.max(0, target.hp - first);
+        foe.decayQueue = {
+          hits: [Math.max(1, Math.round(p / 2)), Math.max(1, Math.round(p / 4))],
+          from: ability.def.name,
+        };
+        s.log.push(`${self.name} used ${ability.def.name} — ${first} now, and it is not finished.`);
+        if (target.hp === 0) s.log.push(`${target.name} fell.`);
+      } else if (k === "escalate") {
+        // Starts small and compounds while they survive it. Never DOWNGRADES an
+        // existing poison — the bloodmoon lesson: re-casting a weaker spell
+        // over a stronger one must not undo the stronger one.
+        if ((foe.venomGrow?.base ?? 0) < p) {
+          foe.venomGrow = { base: p, tick: 0, from: ability.def.name };
+        }
+        s.log.push(`${self.name} used ${ability.def.name} — something is growing, and it feeds on time.`);
+      } else if (k === "echo") {
+        // The shadow. Two strikes of the same size, resolved together so the
+        // log reads as one action rather than implying two turns.
+        if (!target) return { state, finished: false };
+        const each = Math.max(1, p);
+        target.hp = Math.max(0, target.hp - each * 2);
+        s.log.push(`${self.name} used ${ability.def.name} — ${each}, and the shadow answered with ${each}.`);
+        if (target.hp === 0) s.log.push(`${target.name} fell.`);
       } else if (k === "aegis") {
         // FLAT reduction, and it stacks by taking the better of the two rather
         // than summing: two Saint Kings should not add up to immunity.
@@ -1140,9 +1207,26 @@ export function applyAction(
       foe.aegis.turns -= 1;
       if (foe.aegis.turns <= 0) foe.aegis = undefined;
     }
-    const dealt = Math.max(1, Math.round(dmg));
+    let dealt = Math.max(1, Math.round(dmg));
+    /**
+     * THE LOOP GRIMOIRE. One extra strike, and only for the tier it was
+     * written for — a common or a rare. Spent here rather than at play time so
+     * the charge waits for a card that qualifies instead of evaporating on
+     * whoever happened to be standing there when the book was opened.
+     */
+    let looped = false;
+    if (me.loopCharge) {
+      const tier = CARDS[mine.cardId]?.rarity;
+      if (tier === "common" || tier === "rare") {
+        me.loopCharge = false;
+        looped = true;
+        dealt *= 2;
+      }
+    }
     theirs.hp = Math.max(0, theirs.hp - dealt);
-    s.log.push(`${mine.name} struck ${theirs.name} for ${dealt}.`);
+    s.log.push(looped
+      ? `${mine.name} struck twice — ${dealt} in total. The page turned back.`
+      : `${mine.name} struck ${theirs.name} for ${dealt}.`);
 
     if (theirs.hp === 0) {
       s.log.push(`${theirs.name} fell.`);
@@ -1210,6 +1294,51 @@ export function applyAction(
   if (me.sealTurns && me.sealTurns > 0) {
     me.sealTurns -= 1;
     if (me.sealTurns === 0) s.log.push(`${me.username} can play supports again.`);
+  }
+
+  /* ── SORCERER TICKS ── the three effects that resolve on the clock.
+   *
+   * All three sit alongside the bleed tick and follow its rule: they land at
+   * the END of the acting player's turn, so "each turn" in the card text is
+   * literally what happens rather than firing twice per round. */
+  if (foe.venomGrow) {
+    const v = foe.active >= 0 ? foe.fighters[foe.active] : undefined;
+    if (v && v.hp > 0) {
+      // 1.0x, then 1.5x, then 1.7x — and no further. The card promises the
+      // third turn is the ceiling, so the multiplier table simply ends.
+      const MULT = [1, 1.5, 1.7];
+      const g = foe.venomGrow;
+      const hit = Math.max(1, Math.round(g.base * MULT[Math.min(g.tick, MULT.length - 1)]));
+      g.tick += 1;
+      v.hp = Math.max(0, v.hp - hit);
+      s.log.push(`${v.name} lost ${hit} to ${g.from}. It is still growing.`);
+      if (v.hp === 0) { s.log.push(`${v.name} fell.`); foe.active = -1; }
+    }
+  }
+  if (foe.decayQueue) {
+    const q = foe.decayQueue;
+    const next = q.hits.shift();
+    const v = foe.active >= 0 ? foe.fighters[foe.active] : foe.fighters.find((f) => f.hp > 0);
+    if (typeof next === "number" && v && v.hp > 0) {
+      v.hp = Math.max(0, v.hp - next);
+      s.log.push(`${v.name} took ${next} more from ${q.from}.`);
+      if (v.hp === 0) {
+        s.log.push(`${v.name} fell.`);
+        if (foe.active >= 0 && foe.fighters[foe.active]?.hp <= 0) foe.active = -1;
+      }
+    }
+    // Cleared once spent, so a finished spell cannot tick forever on an empty
+    // queue and leave a dead field pointing at nothing.
+    if (q.hits.length === 0) foe.decayQueue = undefined;
+  }
+  // The orb gives back at the end of YOUR turn, to whoever is standing.
+  for (const side of [me, foe]) {
+    if (!side.regen) continue;
+    const t = side.active >= 0 ? side.fighters[side.active] : undefined;
+    if (!t || t.hp <= 0 || t.hp >= t.maxHp) continue;
+    const before = t.hp;
+    t.hp = Math.min(t.maxHp, t.hp + side.regen);
+    if (t.hp > before) s.log.push(`${t.name} recovered ${t.hp - before} HP.`);
   }
   // ── THE ERUPTION ── a Mythic's armed second stage counts down with the
   // dooms, and lands the same way: nothing above can cancel it. Every living

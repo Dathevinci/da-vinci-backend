@@ -46,7 +46,13 @@ export type SupportEffect =
   // every turn" are different promises and would read wrong on the card.
   | { kind: "guard"; power: number }       // take `power` FLAT less damage, every turn
   | { kind: "edge"; power: number }        // +`power` flat damage on each card's FIRST attack only
-  | { kind: "veil"; power: number };       // `power` (0-1) chance to ignore a turn's damage entirely
+  | { kind: "veil"; power: number }        // `power` (0-1) chance to ignore a turn's damage entirely
+  // ── the Sorcerer set ──
+  // Both are STANDING like the Knight three, but they act on the clock rather
+  // than on a number: one gives back every turn, the other buys a whole extra
+  // action. Kept separate from `heal` and `focus` because those fire once.
+  | { kind: "regen"; power: number }       // restore `power` HP to the active card EVERY turn
+  | { kind: "loop"; power: number };       // a common/rare card strikes twice, once per duel
 
 /**
  * GROUND — a third card class, alongside units and supports.
@@ -264,6 +270,23 @@ const RAW_CARDS: Record<string, CardDef> = {
 
   // Ground — holds the board, and only for its own set.
   card_fittingend:    { id: "card_fittingend",    name: "A Fitting End",          rarity: "legendary", set: "Knight", hue: 15,  motif: "gate",   flavor: "Ground consecrated for one kind of death, and one kind of knight.", ground: { kind: "bulwark", power: 20, set: "Knight" } },
+
+  // ══ THE SORCERER SET ══ five units and two supports. Where Knight fights in
+  // straight lines, Sorcerer fights across TURNS: a spell that fades, a poison
+  // that grows, a shadow that doubles a blow. Stats live in duelRules.
+  //
+  // The two rares carry no skill. Skills are an epic-and-above privilege now,
+  // so the Witch and the Ice Mage are pure stat lines — and deliberately good
+  // ones, since that is all they have.
+  card_witchhorror:   { id: "card_witchhorror",   name: "The Witch of Horror",    rarity: "rare",      set: "Sorcerer", hue: 285, motif: "moth",    flavor: "She does not enter your dreams. She waits in the one you already had." },
+  card_icemage:       { id: "card_icemage",       name: "The Ice Mage",           rarity: "rare",      set: "Sorcerer", hue: 195, motif: "peak",    flavor: "A dozen blades, hung in the air, waiting to be told which way to fall." },
+  card_inkmage:       { id: "card_inkmage",       name: "The Ink Mage",           rarity: "epic",      set: "Sorcerer", hue: 250, motif: "scroll",  flavor: "He painted himself once, and now there are two of him at every door." },
+  card_poisonmage:    { id: "card_poisonmage",    name: "The Poisonous Mage",     rarity: "epic",      set: "Sorcerer", hue: 130, motif: "tendril", flavor: "He feeds the jar every day. Whatever is left at the end is the weapon." },
+  card_fallenspell:   { id: "card_fallenspell",   name: "The Fallen Spell",       rarity: "legendary", set: "Sorcerer", hue: 320, motif: "seal",    flavor: "Everything it knows, it gives at once — and then it has less to give." },
+
+  // Supports — played, never fielded.
+  card_loopgrimoire:  { id: "card_loopgrimoire",  name: "The Loop Grimoire",      rarity: "epic",      set: "Sorcerer", hue: 40,  motif: "wheel",   flavor: "The same page, read twice, by someone who was not finished.",  support: { kind: "loop",  power: 1 } },
+  card_healingorb:    { id: "card_healingorb",    name: "Healing Orb",            rarity: "legendary", set: "Sorcerer", hue: 160, motif: "lotus",   flavor: "It asks nothing and keeps giving, which is how you know it is old.", support: { kind: "regen", power: 10 } },
 };
 
 /**
@@ -293,7 +316,7 @@ const RAW_CARDS: Record<string, CardDef> = {
 // declaration in the same block is TS2448 — and on this backend one type
 // error kills the whole API deploy, not just this module.
 export const STARTER_SET = "Foundation";
-const KEPT_SETS = new Set([STARTER_SET, "Knight"]);
+const KEPT_SETS = new Set([STARTER_SET, "Knight", "Sorcerer"]);
 const isKept = (c: CardDef) => c.rarity === "epic" || KEPT_SETS.has(c.set);
 const RETIRED_IDS = new Set(
   Object.values(RAW_CARDS).filter((c) => !isKept(c)).map((c) => c.id)
@@ -533,6 +556,9 @@ export interface SetReward {
 export const SET_REWARDS: Record<string, SetReward> = {
   [STARTER_SET]: { set: STARTER_SET, ap: 3000, shards: 500, title: "Keeper of the Foundation" },
   Knight: { set: "Knight", ap: 5000, shards: 1200, title: "Knight of the Realm" },
+  // Seven cards to Knight's fifteen, so it completes sooner and pays less —
+  // but it still holds two legendaries, which is why it is not cheap either.
+  Sorcerer: { set: "Sorcerer", ap: 3500, shards: 800, title: "Keeper of the Forbidden Page" },
 };
 
 // Distinct card ids belonging to a set (for completion checks).
@@ -568,7 +594,12 @@ export type SkillKind =
   // percentage, which scales with how hard you are hit; the Saint King's aura
   // subtracts a fixed number, so it is strongest against a flurry of small
   // blows and nearly irrelevant against one enormous one. Different card.
-  | "aegis";
+  | "aegis"
+  // ── the Sorcerer set — three verbs that live across TURNS ──
+  // `decay` front-loads: everything at once, then less, then less again.
+  // `escalate` is its mirror — it starts small and compounds while you survive.
+  // `echo` is neither; it doubles a single blow in the turn it is cast.
+  | "decay" | "escalate" | "echo";
 
 export interface SkillDef {
   name: string;
@@ -655,26 +686,17 @@ export const SKILLS: Record<string, SkillDef> = {
    * authored card by card — the Jester hits for 1, so a percentage-of-ATK
    * skill on it would round to nothing, which is why it debuffs instead.
    */
-  card_squire: {
-    name: "Wooden Sword Slash", kind: "burst", base: 140, step: 20,
-    text: (p) => `Deal ${p}% ATK to the card opposite. It is a stick, and he means it.`,
-  },
-  card_jester: {
-    name: "The Laughing Strike", kind: "stagger", base: 45, step: 11,
-    text: (p) => `The other side's next attack lands ${p}% weaker. Nobody swings well while being laughed at.`,
-  },
-  card_knightradiant: {
-    name: "Radiant Slash", kind: "cleave", base: 95, step: 14,
-    text: (p) => `Deal ${p}% ATK to the card opposite AND half that to the next one behind it.`,
-  },
-  card_royalknight: {
-    name: "Righteous Sword", kind: "execute", base: 24, step: 5,
-    text: (p) => `Finish any card already below ${p}% health outright.`,
-  },
-  card_sunknight: {
-    name: "Sunlight", kind: "pierce", base: 110, step: 16,
-    text: (p) => `Deal ${p}% ATK straight through wards, guards and shields. Nothing has a shadow at noon.`,
-  },
+  /* SKILLS ARE AN EPIC-AND-ABOVE PRIVILEGE.
+   *
+   * The Squire, the Jester, the Knight of Radiance, the Royal Knight and the
+   * Sun Knight briefly carried one and no longer do. A skill is most of what
+   * makes pulling an epic feel different from pulling a common, and handing
+   * one to every card in a set spent that distinction for flavour. Their
+   * printed ATK/HP still make them worth fielding — the Sun Knight hits for 11
+   * off a rare stat line — they simply do not also get a button.
+   *
+   * The rule is enforced by what is in this map, so any new common or rare
+   * belongs in the catalogue above and nowhere in here. */
   card_crimsonknight: {
     name: "Bloody Sword", kind: "drain", base: 105, step: 15,
     text: (p) => `Deal ${p}% ATK and keep half of what it costs them as your own health.`,
@@ -686,6 +708,27 @@ export const SKILLS: Record<string, SkillDef> = {
   card_saintking: {
     name: "Saint Aura", kind: "aegis", base: 10, step: 3,
     text: (p) => `Every enemy attack lands ${p} damage lighter for the next 2 turns.`,
+  },
+
+  /* ── THE SORCERER SET ── epic and legendary only, by the rule above.
+   *
+   * These are FLAT numbers, not percentages of ATK, because the cards were
+   * specified that way — 20 then 10 then 5 means exactly that. `base`/`step`
+   * still drive the shard track: a rank raises the opening number and the
+   * curve is derived from it, so levelling a spell makes it hit harder without
+   * changing the shape that gives the card its identity.
+   */
+  card_fallenspell: {
+    name: "Forbidden Knowledge", kind: "decay", base: 20, step: 4,
+    text: (p) => `Deal ${p} now, ${Math.round(p / 2)} next turn, ${Math.round(p / 4)} the turn after. It gives everything first.`,
+  },
+  card_inkmage: {
+    name: "Shadow Painting", kind: "echo", base: 8, step: 2,
+    text: (p) => `Strike for ${p}, and the shadow strikes for ${p} again — ${p * 2} in one turn.`,
+  },
+  card_poisonmage: {
+    name: "Gu Raising", kind: "escalate", base: 10, step: 2,
+    text: (p) => `Poison for ${p}, then ${Math.round(p * 1.5)}, then ${Math.round(p * 1.7)}. It stops growing after the third turn.`,
   },
 };
 

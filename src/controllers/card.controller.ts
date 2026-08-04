@@ -1402,14 +1402,21 @@ export const upgradeCard = async (req: Request, res: Response, next: NextFunctio
 };
 
 /**
- * POST /api/cards/merge  body { userId, cardId, fodderCardId }
+ * POST /api/cards/merge  body { userId, cardId }
  *
- * Feed a spare of the SAME RANK into a card, plus shards, and the copy you keep
- * gets permanently stronger. The other one is gone.
+ * Feed a DUPLICATE OF THE SAME CARD into itself, plus shards, and the copy you
+ * keep gets permanently stronger. The spare is gone.
  *
- * Why same rank: the fodder has to cost about what the target is worth, or this
- * becomes a laundry — a shelf of commons washed into a legendary's stat line.
- * Rank is the only honest exchange rate the game already has.
+ * SAME CARD, not merely the same rank. An earlier pass allowed any card of the
+ * matching rarity as fodder, which quietly made every common interchangeable
+ * with every other common — a card you chased was worth exactly as much fed
+ * into something else as the filler you opened beside it. Requiring the same
+ * name means strengthening a card is gated on pulling THAT card again, so the
+ * chase and the upgrade are the same activity.
+ *
+ * It also removes a whole class of edge case: the target and the fodder are one
+ * row, so there is no second card that can hit zero copies, vanish from a deck,
+ * or strand a showcase pin mid-transaction.
  *
  * The gain is written straight into the copy's PULL ROLL rather than kept as a
  * separate multiplier. Two reasons. Every surface that already shows rolled
@@ -1427,26 +1434,32 @@ export const mergeCards = async (req: Request, res: Response, next: NextFunction
       userId?: string; cardId?: string; fodderCardId?: string;
     };
     if (!ownerGuard(req, res, userId)) return;
-    if (!cardId || !fodderCardId) {
-      return res.status(400).json({ success: false, message: "Pick a card to keep and a card to feed it." });
+    if (!cardId) {
+      return res.status(400).json({ success: false, message: "Pick a card to strengthen." });
     }
 
     const def = CARDS[cardId];
-    const fodderDef = CARDS[fodderCardId];
     if (!def) return res.status(404).json({ success: false, message: "No such card." });
-    if (!fodderDef) return res.status(404).json({ success: false, message: "No such card to merge in." });
+
+    /**
+     * `fodderCardId` is still accepted so an older client that sends it keeps
+     * working, but it may now only ever name the SAME card. Refused loudly
+     * rather than ignored: silently merging the wrong thing would eat a copy
+     * the player did not offer.
+     */
+    if (fodderCardId && fodderCardId !== cardId) {
+      const other = CARDS[fodderCardId];
+      return res.status(400).json({
+        success: false,
+        message: `Merging needs two copies of the same card. ${other?.name ?? "That card"} can't be fed into ${def.name}.`,
+      });
+    }
 
     // Supports and grounds have no stat line to raise — rollStats returns null
     // for them precisely because their printed effect IS the card. Merging one
     // would take a copy and shards and change nothing at all.
     if (def.support || def.ground) {
       return res.status(400).json({ success: false, message: `${def.name} has no stat line to strengthen.` });
-    }
-    if (fodderDef.rarity !== def.rarity) {
-      return res.status(400).json({
-        success: false,
-        message: `${fodderDef.name} is ${fodderDef.rarity}, and ${def.name} is ${def.rarity}. Merging needs two cards of the same rank.`,
-      });
     }
 
     const printed = printedStats(def);
@@ -1469,28 +1482,19 @@ export const mergeCards = async (req: Request, res: Response, next: NextFunction
           throw new CardError(400, `${def.name} has been merged ${MERGE_MAX} times. That's as far as it goes.`);
         }
 
-        // Same card as fodder means eating one of your OWN duplicates, which
-        // needs two copies — otherwise the card consumes itself and vanishes.
-        const same = fodderCardId === cardId;
-        const fodder = same
-          ? target
-          : await tx.userCard.findUnique({
-              where: { userId_cardId: { userId: userId!, cardId: fodderCardId } },
-              select: { count: true, merges: true, rolledHp: true, rolledAtk: true, hibernating: true },
-            });
-        if (!fodder) throw new CardError(404, `You don't own ${fodderDef.name}.`);
-        if (same && fodder.count < 2) {
-          throw new CardError(400, `You only have one ${def.name}. Merging it into itself would leave you nothing.`);
-        }
-
         /**
-         * SHOWCASE AND ESCROW SAFETY. A copy pinned to a profile is still
-         * owned, so it may be fed — but a card whose LAST copy is about to
-         * disappear must not stay pinned to a showcase that will then render a
-         * card the player no longer holds. That is the exact bug that stranded
-         * a synthesised legendary on a profile with no way to remove it.
+         * TWO COPIES MINIMUM. The fodder is a duplicate of this same card, so
+         * the count must survive the meal — at one copy the card would eat
+         * itself and leave nothing behind.
+         *
+         * Because target and fodder are the SAME ROW, the count can never
+         * reach zero here: it goes N to N-1 with N >= 2. That is why there is
+         * no last-copy deletion and no showcase rescue in this path — a pinned
+         * card cannot be made to vanish by merging it.
          */
-        const losingLast = !same && fodder.count <= 1;
+        if (target.count < 2) {
+          throw new CardError(400, `You only have one ${def.name}. Merging needs a spare copy of the same card.`);
+        }
 
         const cost = mergeCost(def.rarity, merges);
         if (!free) {
@@ -1501,21 +1505,19 @@ export const mergeCards = async (req: Request, res: Response, next: NextFunction
           if (paid.count === 0) throw new CardError(402, `Merging ${def.name} costs ${cost} shards.`);
         }
 
-        // ── CONSUME THE FODDER ── guarded on the count we read, so two fast
-        // clicks can't both spend the same spare copy.
+        // ── CONSUME THE SPARE ── guarded on the count we read, so two fast
+        // clicks can't both spend the same duplicate.
         const eaten = await tx.userCard.updateMany({
-          where: { userId, cardId: fodderCardId, count: fodder.count },
+          where: { userId, cardId, count: target.count },
           data: { count: { decrement: 1 } },
         });
         if (eaten.count === 0) throw new CardError(409, "Your copies just changed — try again.");
-        if (losingLast) {
-          await tx.userCard.deleteMany({ where: { userId, cardId: fodderCardId, count: { lte: 0 } } });
-        }
         // Legendaries carry per-copy print identities. A count that moves
         // without its prints moving leaves a serial owned by nobody and the
-        // mint permanently out of step with the shelf.
-        if (isLegendary(fodderCardId)) {
-          await burnWorstPrints(tx, userId!, fodderCardId, 1);
+        // mint permanently out of step with the shelf. Burns the WORST copy,
+        // so merging costs you your scruffiest print and never your best.
+        if (isLegendary(cardId)) {
+          await burnWorstPrints(tx, userId!, cardId, 1);
         }
 
         // ── RAISE THE ROLL ── off PRINTED stats, never off the current rolled
@@ -1538,7 +1540,9 @@ export const mergeCards = async (req: Request, res: Response, next: NextFunction
         const u = await tx.user.findUnique({ where: { id: userId }, select: { shards: true } });
         return {
           cardId,
-          fodderCardId,
+          // What the shelf looks like AFTER the meal, so the client doesn't have
+          // to re-derive it and briefly show a count that no longer exists.
+          count: target.count - 1,
           spent: free ? 0 : cost,
           shards: u?.shards ?? 0,
           merges: merges + 1,

@@ -289,6 +289,10 @@ const RAW_CARDS: Record<string, CardDef> = {
  * the catalogue AND matched by RETIRED_CARD_IDS, which the boot migration
  * feeds straight into deleteMany. The new set would be deleted on first boot.
  */
+// Declared HERE, above its first use. A const referenced before its
+// declaration in the same block is TS2448 — and on this backend one type
+// error kills the whole API deploy, not just this module.
+export const STARTER_SET = "Foundation";
 const KEPT_SETS = new Set([STARTER_SET, "Knight"]);
 const isKept = (c: CardDef) => c.rarity === "epic" || KEPT_SETS.has(c.set);
 const RETIRED_IDS = new Set(
@@ -306,7 +310,6 @@ const RETIRED_IDS = new Set(
  * common, rare or legendary and went with the wipe, so "all supports" is no
  * longer a thing that can be honoured without undoing it.
  */
-export const STARTER_SET = "Foundation";
 export const CARDS: Record<string, CardDef> = Object.fromEntries(
   Object.entries(RAW_CARDS)
     .filter(([, c]) => isKept(c))

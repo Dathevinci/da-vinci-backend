@@ -125,7 +125,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     // the same block is a tsc error, and on this backend one type error
     // takes the entire API deploy down.
     const COMMENT_INCLUDE = {
-      user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
+      user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, role: true, purchasedTags: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
       votes: true,
       poll: { include: { options: { orderBy: { order: "asc" as const } }, votes: true } },
     };
@@ -237,7 +237,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
           const replies = await prisma.comment.findMany({
             where: { parentId: { in: currentParents } },
             include: {
-              user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
+              user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, role: true, purchasedTags: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
               votes: true,
             }
           });
@@ -254,7 +254,39 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     // Callback params are annotated because `allComments` is any[] (the two
     // fetch branches for top vs chronological produce the same shape but not the
     // same inferred type). Without these, noImplicitAny rejects the build.
-    const formattedComments = allComments.map((comment: any) => shapeComment(comment, userId));
+    /**
+     * The commenter's own score for this title, so a media comment can show
+     * "8/10" beside its author. Ratings are keyed (userId, targetKey) and have
+     * no commentId, so this is a join rather than a column — one extra query,
+     * scoped to the authors actually on this page, and skipped entirely when
+     * the caller sends no targetKey (the forum never does).
+     *
+     * Honest limitation: this is the author's CURRENT rating, not the one they
+     * held when they wrote the comment. An author who never rated shows no pill.
+     */
+    const ratingKey = req.query.targetKey as string | undefined;
+    let authorRatings = new Map<string, number>();
+    if (ratingKey) {
+      const authorIds = Array.from(
+        new Set(allComments.map((c: any) => c.userId).filter(Boolean))
+      ) as string[];
+      if (authorIds.length > 0) {
+        const rows = await prisma.rating.findMany({
+          where: { targetKey: ratingKey, userId: { in: authorIds } },
+          select: { userId: true, value: true },
+        });
+        // Tuple assertion is load-bearing: without it the entries infer as
+        // (string | number)[][] and strict tsc rejects the Map constructor.
+        authorRatings = new Map<string, number>(
+          rows.map((r) => [r.userId, r.value] as [string, number])
+        );
+      }
+    }
+
+    const formattedComments = allComments.map((comment: any) => ({
+      ...shapeComment(comment, userId),
+      authorRating: authorRatings.get(comment.userId) ?? null,
+    }));
 
     res.json({ success: true, data: formattedComments });
   } catch (error) {
@@ -452,11 +484,23 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
 export const voteComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { userId, value } = req.body;
+    // Token identity wins; req.body.userId stays only so sessions issued
+    // before this still work. This was the last comment endpoint trusting the
+    // body outright.
+    const actor = await resolveActor(req);
+    const userId: string | undefined = actor?.id || (req.body?.userId as string | undefined);
+    const raw = Number(req.body?.value);
 
-    if (!userId || typeof value !== 'number') {
+    if (!userId || !Number.isFinite(raw)) {
       return res.status(400).json({ success: false, message: "Invalid payload" });
     }
+
+    // CLAMPED, because the global ranking is a SUM of these. The old check was
+    // `typeof value === 'number'` and the value was written verbatim, so a
+    // single crafted request with value: 9999 outranked every comment on the
+    // site permanently — and showed up in neither the like nor the dislike
+    // tally, since those count exactly 1 and -1.
+    const value = raw > 0 ? 1 : raw < 0 ? -1 : 0;
 
     const comment = await prisma.comment.findUnique({ where: { id } });
     if (!comment) return res.status(404).json({ success: false, message: "Comment not found" });
@@ -658,7 +702,10 @@ export const editComment = async (req: Request, res: Response, next: NextFunctio
         ...(typeof tag === "string" && FORUM_TAGS.includes(tag) ? { tag } : {}),
       },
       include: {
-        user: { select: { id: true, username: true, avatar: true, arisePoints: true } },
+        // Same badge fields as the read paths: the client swaps the edited
+        // node in wholesale, so a thinner select here makes a user's badges
+        // vanish the moment they fix a typo.
+        user: { select: { id: true, username: true, avatar: true, arisePoints: true, role: true, purchasedTags: true } },
         votes: true
       }
     });
@@ -705,6 +752,9 @@ export const getCommentById = async (req: Request, res: Response, next: NextFunc
 
     const USER_SELECT = {
       id: true, username: true, avatar: true, arisePoints: true, xp: true,
+      // role and purchasedTags drive the STAFF / LEAD DEV / DONOR badges from
+      // real account data rather than a hardcoded username list.
+      role: true, purchasedTags: true,
       activeRole: true, activeTag: true, activeEffect: true, activeTheme: true,
       activeColor: true, activeFont: true, activeFrame: true,
     };

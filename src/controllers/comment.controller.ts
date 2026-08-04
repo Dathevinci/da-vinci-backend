@@ -5,6 +5,38 @@ import { payout } from "../utils/economy";
 import { resolveActor, requireStaff } from "../lib/staff";
 
 /**
+ * ONE author select, used by every path that returns a comment.
+ *
+ * This existed as FIVE hand-copied literals — the two read paths, the replies
+ * loop, the create echo and the edit echo — and they had already drifted apart
+ * in ways users could see. `editComment` selected six fields under a comment
+ * asserting it matched the read paths, so fixing a typo in your own comment
+ * blanked your badges, frame and effect until a refresh; `createComment`
+ * dropped role and purchasedTags, so a just-posted comment showed a different
+ * badge set than the same comment one reload later.
+ *
+ * Forum posts ARE comments here (a Comment row with a `tag`), so this one
+ * constant governs the forum and every media comment surface at once. Adding a
+ * field here reaches all of them; that is the entire point of hoisting it.
+ */
+const COMMENT_AUTHOR_SELECT = {
+  id: true, username: true, avatar: true, arisePoints: true, xp: true,
+  // role and purchasedTags drive the STAFF / LEAD DEV / DONOR badges from
+  // real account data rather than a hardcoded username list.
+  role: true, purchasedTags: true,
+  activeRole: true, activeTag: true, activeEffect: true, activeTheme: true,
+  activeColor: true, activeFont: true, activeFrame: true,
+  // WORN TITLES. Wearer-ordered, index 0 is the one they lead with. Until now
+  // no comment endpoint selected these at all, so titles existed on the
+  // profile and could not be shown anywhere else in the product. `cardTitle`
+  // rides along as the legacy fallback for accounts that earned a title before
+  // equippedTitles existed — the profile rack already falls back to it, and a
+  // surface that didn't would show them a title on one screen and not another.
+  equippedTitles: true,
+  cardTitle: true,
+};
+
+/**
  * ONE shape for a comment on the wire, so every path that returns one —
  * the feed, the pinned shelf, a single post — agrees on the fields the
  * client reads. Raw vote and poll-vote rows are collapsed into tallies
@@ -125,7 +157,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     // the same block is a tsc error, and on this backend one type error
     // takes the entire API deploy down.
     const COMMENT_INCLUDE = {
-      user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, role: true, purchasedTags: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
+      user: { select: COMMENT_AUTHOR_SELECT },
       votes: true,
       poll: { include: { options: { orderBy: { order: "asc" as const } }, votes: true } },
     };
@@ -237,7 +269,10 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
           const replies = await prisma.comment.findMany({
             where: { parentId: { in: currentParents } },
             include: {
-              user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, role: true, purchasedTags: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
+              // Same author select as the roots. This was a hand-copy that had
+              // already lost the poll include; sharing the select stops the
+              // replies drifting further from the comments above them.
+              user: { select: COMMENT_AUTHOR_SELECT },
               votes: true,
             }
           });
@@ -386,13 +421,10 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
        * with no rank colour, no frame, no effect and no score until a refresh.
        */
       include: {
-        user: {
-          select: {
-            id: true, username: true, avatar: true, arisePoints: true, xp: true,
-            activeRole: true, activeTag: true, activeEffect: true, activeTheme: true,
-            activeColor: true, activeFont: true, activeFrame: true,
-          },
-        },
+        // Shared with the read paths. This copy was missing role and
+        // purchasedTags, so a just-posted comment rendered without its author's
+        // staff or donor badge and only grew one on the next refresh.
+        user: { select: COMMENT_AUTHOR_SELECT },
         votes: true,
         poll: { include: { options: { orderBy: { order: "asc" as const } }, votes: true } },
       }
@@ -705,7 +737,12 @@ export const editComment = async (req: Request, res: Response, next: NextFunctio
         // Same badge fields as the read paths: the client swaps the edited
         // node in wholesale, so a thinner select here makes a user's badges
         // vanish the moment they fix a typo.
-        user: { select: { id: true, username: true, avatar: true, arisePoints: true, role: true, purchasedTags: true } },
+        //
+        // That is not hypothetical — this select really did carry six fields
+        // while claiming parity, so editing a comment dropped the author's
+        // rank colour, frame, effect and every cosmetic badge until a refresh.
+        // Sharing the constant is what makes the claim above true.
+        user: { select: COMMENT_AUTHOR_SELECT },
         votes: true
       }
     });
@@ -750,14 +787,10 @@ export const getCommentById = async (req: Request, res: Response, next: NextFunc
     const id = req.params.id as string;
     const userId = req.query.userId as string | undefined;
 
-    const USER_SELECT = {
-      id: true, username: true, avatar: true, arisePoints: true, xp: true,
-      // role and purchasedTags drive the STAFF / LEAD DEV / DONOR badges from
-      // real account data rather than a hardcoded username list.
-      role: true, purchasedTags: true,
-      activeRole: true, activeTag: true, activeEffect: true, activeTheme: true,
-      activeColor: true, activeFont: true, activeFrame: true,
-    };
+    // The shared author select — this local copy was the closest to correct of
+    // the five, which is exactly why it is worth deleting: "closest to correct"
+    // is how the other four drifted without anyone noticing.
+    const USER_SELECT = COMMENT_AUTHOR_SELECT;
 
     const post: any = await prisma.comment.findUnique({
       where: { id },

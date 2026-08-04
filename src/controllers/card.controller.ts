@@ -127,9 +127,13 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
         printConditions: CONDITION_META,
         // The Synthesis Lab's whole rulebook, served so the client can only
         // ever OFFER what the machine will accept.
+        // RETIRED with the card wipe. Served as empty rather than dropped so
+        // an older cached client still parses it — the forge page guards
+        // every read behind `synth?.`, so an empty rulebook simply offers
+        // nothing to fuse instead of throwing.
         synthesis: {
-          eligible: FUSION_ELIGIBLE,
-          fusions: FUSIONS,
+          eligible: [] as string[],
+          fusions: {} as Record<string, string>,
           ap: SYNTH_COST_AP,
           shards: SYNTH_COST_SHARDS,
           baseChance: SYNTH_BASE_CHANCE,

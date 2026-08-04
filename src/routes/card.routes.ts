@@ -15,7 +15,10 @@ router.post("/open-pack", openPack);
 router.post("/dust", dustCard);
 router.post("/dust-all", dustAllDupes);
 router.post("/grant-all", grantAllCards);
-router.post("/synthesize", synthesizeMythic);
+// RETIRED with the card wipe: FUSIONS mapped legendary pairs to Mythics and
+// every card on both sides is gone. The route is removed so the endpoint is
+// unreachable rather than throwing on a catalogue that no longer has them.
+// router.post("/synthesize", synthesizeMythic);
 router.post("/max", maxCard);
 router.post("/craft", craftCard);
 router.post("/foil", foilCard);

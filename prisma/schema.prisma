@@ -70,6 +70,8 @@ model User {
   triggeredNotifications Notification[] @relation("actorNotifications")
   comments     Comment[]
   commentVotes CommentVote[]
+  ratings        Rating[]
+  commentReports CommentReport[]
   pointLogs    PointLog[]
   conversationsAsUser1 Conversation[] @relation("ConversationUser1")
   conversationsAsUser2 Conversation[] @relation("ConversationUser2")
@@ -144,6 +146,7 @@ model Comment {
   parent    Comment?      @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
   replies   Comment[]     @relation("CommentReplies")
   votes     CommentVote[]
+  reports   CommentReport[]
 }
 
 model CommentVote {
@@ -156,6 +159,42 @@ model CommentVote {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([commentId, userId])
+}
+
+/// A member's 1-10 score for one thing. `targetKey` is a single opaque
+/// string rather than four nullable columns, so anime, manhwa series,
+/// manhwa chapters, novels and episodes all rate through one table:
+///   anime:21 · anime:21:ep:5 · manhwa:<slug> · manhwa:<slug>:<chapterId>
+///   novel:<id>
+/// One row per member per target — rating again UPDATES, never stacks.
+model Rating {
+  id        String   @id @default(uuid())
+  userId    String
+  targetKey String
+  value     Int      // 1..10
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, targetKey])
+  @@index([targetKey])
+}
+
+/// A member flagging one comment. Unique per member so a single person
+/// can't inflate a report count by tapping twice.
+model CommentReport {
+  id        String   @id @default(uuid())
+  commentId String
+  userId    String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, userId])
+  @@index([commentId])
 }
 
 model Follow {

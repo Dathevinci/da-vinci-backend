@@ -177,10 +177,17 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     const formattedComments = allComments.map((comment: any) => {
       const score = comment.votes.reduce((acc: number, vote: any) => acc + vote.value, 0);
       const userVote = userId ? comment.votes.find((v: any) => v.userId === userId)?.value || 0 : 0;
-      
+      // Separate tallies as well as the net score: the UI shows a like count
+      // AND a dislike count, and a single net number renders as a negative
+      // beside a heart the moment dislikes outweigh likes.
+      const upvotes = comment.votes.filter((v: any) => v.value === 1).length;
+      const downvotes = comment.votes.filter((v: any) => v.value === -1).length;
+
       return {
         ...comment,
         score,
+        upvotes,
+        downvotes,
         userVote,
         votes: undefined // hide raw votes array to save bandwidth
       };
@@ -285,7 +292,7 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
     const commentLink = animeId ? `/community?view=${animeId}&tab=discussions` : `/community`;
     await processMentions(content, userId, commentLink);
 
-    res.status(201).json({ success: true, data: { ...comment, score: 0, userVote: 0, votes: undefined } });
+    res.status(201).json({ success: true, data: { ...comment, score: 0, upvotes: 0, downvotes: 0, userVote: 0, votes: undefined } });
   } catch (error) {
     next(error);
   }
@@ -576,6 +583,127 @@ export const togglePinComment = async (req: Request, res: Response, next: NextFu
 };
 
 
+
+// ── POST /api/comments/:id/report ─────────────────────────────────────────
+// Flag a comment. One row per member per comment (unique), so tapping twice
+// can't inflate the count; staff read the counts straight from the table.
+export const reportComment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    // Identity from the VERIFIED token, never req.body.userId — the whole
+    // point of the unique row is "one report per member", and a body-supplied
+    // id can be rotated through every user id the public feed hands out,
+    // filing reports under innocent names.
+    const actor = await resolveActor(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const userId = actor.id;
+    const reason = typeof req.body?.reason === "string" ? req.body.reason.slice(0, 300) : null;
+
+    const comment = await prisma.comment.findUnique({ where: { id }, select: { id: true, userId: true } });
+    if (!comment) return res.status(404).json({ success: false, message: "Comment not found" });
+    if (comment.userId === userId) {
+      return res.status(400).json({ success: false, message: "You can't report your own comment" });
+    }
+
+    await prisma.commentReport.upsert({
+      where: { commentId_userId: { commentId: id, userId } },
+      update: { reason },
+      create: { commentId: id, userId, reason },
+    });
+
+    const count = await prisma.commentReport.count({ where: { commentId: id } });
+    res.json({ success: true, message: "Reported. Thanks — staff will take a look.", count });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── GET /api/ratings?targetKey=&userId= ───────────────────────────────────
+// The community's average score for one thing, plus the caller's own score.
+// targetKey is opaque: "anime:21", "manhwa:<slug>:<chapterId>", "novel:<id>".
+export const getRating = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const targetKey = req.query.targetKey as string | undefined;
+    const userId = req.query.userId as string | undefined;
+    if (!targetKey) return res.status(400).json({ success: false, message: "targetKey is required" });
+
+    const agg = await prisma.rating.aggregate({
+      where: { targetKey },
+      _avg: { value: true },
+      _count: { _all: true },
+    });
+
+    let mine: number | null = null;
+    if (userId) {
+      const row = await prisma.rating.findUnique({
+        where: { userId_targetKey: { userId, targetKey } },
+        select: { value: true },
+      });
+      mine = row ? row.value : null;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        average: agg._avg.value != null ? Math.round(agg._avg.value * 10) / 10 : null,
+        count: agg._count._all,
+        mine,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/ratings ─────────────────────────────────────────────────────
+// Score something 1-10. Rating again REPLACES your score rather than adding
+// another row, so the average can never be stuffed by one member.
+export const setRating = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Verified identity only. "One score per member" is the entire defence
+    // against a stuffed average, and it's worthless if the caller picks the
+    // member — real user ids are readable from any public comment feed.
+    const actor = await resolveActor(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to rate." });
+    }
+    const userId = actor.id;
+    const targetKey = req.body?.targetKey as string | undefined;
+    const raw = Number(req.body?.value);
+    if (!targetKey) {
+      return res.status(400).json({ success: false, message: "targetKey is required" });
+    }
+    if (!Number.isFinite(raw) || raw < 1 || raw > 10) {
+      return res.status(400).json({ success: false, message: "value must be 1-10" });
+    }
+    const value = Math.round(raw);
+
+    await prisma.rating.upsert({
+      where: { userId_targetKey: { userId, targetKey } },
+      update: { value },
+      create: { userId, targetKey, value },
+    });
+
+    const agg = await prisma.rating.aggregate({
+      where: { targetKey },
+      _avg: { value: true },
+      _count: { _all: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        average: agg._avg.value != null ? Math.round(agg._avg.value * 10) / 10 : null,
+        count: agg._count._all,
+        mine: value,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 // ── GET /api/comments/topics ──────────────────────────────────────────────
 // Post counts per topic for the forum sidebar. A groupBy is one query; the

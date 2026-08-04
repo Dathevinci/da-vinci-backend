@@ -24,9 +24,13 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     if (animeId) where.animeId = parseInt(animeId);
     if (mangaId) where.mangaId = mangaId;
     if (chapterId) where.chapterId = chapterId;
-    if (novelId) where.novelId = novelId; // novel comments are novel-level (no chapters)
-    if (!animeId && mangaId && !chapterId) {
-      where.chapterId = null; // When viewing manhwa top-level, exclude chapter-specific comments
+    if (novelId) where.novelId = novelId;
+    // Series-level views must EXCLUDE chapter chatter. This used to apply to
+    // manhwa only — novels had no chapter comments to exclude. The novel
+    // reader now has its own per-chapter threads, so without widening this,
+    // every chapter's comments spilled into the series Discussions tab.
+    if (!animeId && (mangaId || novelId) && !chapterId) {
+      where.chapterId = null;
     }
     
     if (search) where.content = { contains: search, mode: 'insensitive' };

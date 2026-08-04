@@ -509,17 +509,30 @@ export interface SetReward {
   title: string;   // shown on the profile once claimed
 }
 /**
- * ONE SET, ONE REWARD. Every old set is gone with the tiers it was built from:
- * Requiem and Covenant were legendary chases, Mythos and Pantheon were
+ * A REWARD PER LIVING SET. Every old set is gone with the tiers it was built
+ * from: Requiem and Covenant were legendary chases, Mythos and Pantheon were
  * synthesis-only, and the rest lost most of their cards to the wipe.
  *
  * They are removed rather than left with empty card lists on purpose. An
  * entry here whose cardsInSet() returns nothing is the exploit that pays out
  * for owning nothing — claimSet refuses empty sets now, but not defining them
  * is the stronger guarantee.
+ *
+ * KNIGHT WAS SHIPPED WITHOUT ONE. Fifteen cards could be completed to 15/15
+ * and the set paid nothing and granted no title — the panel just said
+ * COMPLETE and stopped. Since ownership of a title is DERIVED from
+ * claimedSets through this map, a set with no entry here is also a set whose
+ * title can never be worn, so the omission quietly capped the entire title
+ * system at one title for the whole game.
+ *
+ * Knight pays more than Foundation because it is harder in a way the card
+ * count hides: Foundation is thirteen cards of one tier, while Knight spans
+ * common to legendary and holds TWO legendaries at the 0.4% pull rate, plus a
+ * ground card. Completing it is a genuinely longer chase.
  */
 export const SET_REWARDS: Record<string, SetReward> = {
   [STARTER_SET]: { set: STARTER_SET, ap: 3000, shards: 500, title: "Keeper of the Foundation" },
+  Knight: { set: "Knight", ap: 5000, shards: 1200, title: "Knight of the Realm" },
 };
 
 // Distinct card ids belonging to a set (for completion checks).

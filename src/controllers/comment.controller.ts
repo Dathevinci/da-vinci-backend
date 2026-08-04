@@ -267,7 +267,7 @@ export const FORUM_TAGS = ["General", "Discussion", "Art", "Theory", "News", "Qu
 
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl, title, tag, poll } = req.body;
+    const { userId, animeId, animeTitle, episodeNo, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl, title, tag, poll } = req.body;
 
     /**
      * An attached poll. Validated here rather than trusted: at least two
@@ -314,6 +314,14 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
         content,
         animeId: animeId ? parseInt(animeId) : null,
         animeTitle: animeTitle ? animeTitle : null,
+        // Coerced and sanity-checked here, not trusted: the client sends a
+        // number but a bad one would produce a link to an episode that
+        // doesn't exist. Anything non-positive or non-finite stores as null
+        // and falls back to the series page.
+        episodeNo: (() => {
+          const n = Number(episodeNo);
+          return Number.isInteger(n) && n > 0 && n < 100000 ? n : null;
+        })(),
         mangaId: mangaId || null,
         mangaTitle: mangaTitle || null,
         chapterId: chapterId ? String(chapterId) : null,

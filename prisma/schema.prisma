@@ -119,7 +119,12 @@ model Comment {
   userId    String
   animeId   Int?     // Optional: for tying discussions to specific anime
   animeTitle String? // Denormalized title for rendering in global feed
-  
+  // The episode a comment was left on, so the global feed can link back to
+  // that exact episode rather than the series. Null on every comment made
+  // before this shipped, and on comments left from the series page — both
+  // are legitimately series-level and fall back to the anime page.
+  episodeNo  Int?
+
   // Manhwa support
   mangaId      String?  // The AsuraScans slug (e.g. 'standard-of-reincarnation')
   mangaTitle   String?  // Title for global feed rendering

@@ -117,6 +117,22 @@ export const getCatalog = async (_req: Request, res: Response, next: NextFunctio
           hpCost: Object.fromEntries((["common", "rare", "epic", "legendary", "event"] as const)
             .map((r) => [r, Array.from({ length: FORGE_MAX }, (_, i) => forgeCost("hp", r, i))])),
         },
+        /**
+         * THE REAL PULL ODDS, as percentages derived from RARITY_WEIGHTS.
+         *
+         * Served here because the banner paints before /pull-stats resolves,
+         * and it was filling that gap with hardcoded literals — which drifted
+         * the moment the odds were retuned. The page advertised 0.6/8/27.4/64
+         * while the server rolled 0.4/4.6/17/78. Misstated odds on the screen
+         * where players spend currency is the one number in this product that
+         * has to come from the same place the roll does.
+         */
+        pullRates: (() => {
+          const total = Object.values(RARITY_WEIGHTS).reduce((a, b) => a + b, 0);
+          return Object.fromEntries(
+            Object.entries(RARITY_WEIGHTS).map(([r, w]) => [r, Number(((w / total) * 100).toFixed(2))])
+          );
+        })(),
         relicPackShards: RELIC_PACK_SHARDS,
         /**
          * MERGING — feed a spare of the same rank in to raise a copy's roll.

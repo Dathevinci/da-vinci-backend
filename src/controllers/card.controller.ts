@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
+import { heldCardIds } from "../lib/showcase";
 import { getRole } from "../utils/economy";
 import { CARD_STATS, FOIL_MULT } from "../data/duelRules";
 import {
@@ -1023,13 +1024,13 @@ export const setShowcase = async (req: Request, res: Response, next: NextFunctio
     if (!Array.isArray(cardIds) || cardIds.length > 4) {
       return res.status(400).json({ success: false, message: "Pick up to four cards." });
     }
-    const unique = [...new Set(cardIds)];
+    // Same definition of "yours" the profile read uses — a card escrowed in
+    // your own ACTIVE listing is still pinnable, or listing a showcased card
+    // would blank it AND brick every later save.
+    const unique = [...new Set(cardIds)].filter((id) => typeof id === "string" && id.length > 0 && id.length < 64);
     if (unique.length) {
-      const owned = await prisma.userCard.findMany({
-        where: { userId, cardId: { in: unique } },
-        select: { cardId: true },
-      });
-      if (owned.length !== unique.length) {
+      const held = await heldCardIds(userId, unique);
+      if (held.size !== unique.length) {
         return res.status(400).json({ success: false, message: "You can only showcase cards you own." });
       }
     }

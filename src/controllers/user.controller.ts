@@ -10,6 +10,7 @@ import {
 } from "../utils/economy";
 import { sanitizeOwnUser, sanitizePublicUser, sanitizePublicUsers } from "../utils/sanitizeUser";
 import { signToken, getActorId } from "../lib/jwt";
+import { liveShowcase } from "../lib/showcase";
 
 
 export const createUser = async (req: Request, res: Response, next: NextFunction) => {
@@ -88,7 +89,9 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
       },
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
-    res.json({ success: true, data: sanitizePublicUser(user) });
+    // Drop pins for cards that are no longer this user's — see lib/showcase.ts.
+    const showcaseCards = await liveShowcase(user.id, user.showcaseCards);
+    res.json({ success: true, data: sanitizePublicUser({ ...user, showcaseCards }) });
   } catch (error) {
     next(error);
   }
@@ -387,12 +390,18 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
       }
     }
 
-    res.json({ success: true, data: sanitizePublicUser(user) });
+    // Spread rather than mutate: `user` is the Prisma result whose relations
+    // sanitizePublicUser rewrites, and the pins must be filtered before it runs.
+    const showcaseCards = await liveShowcase(user.id, user.showcaseCards);
+    res.json({ success: true, data: sanitizePublicUser({ ...user, showcaseCards }) });
   } catch (error) {
     next(error);
   }
 };
 
+// getAllUsers deliberately does NOT filter showcases: nothing renders a
+// showcase from the community list, and doing it there would mean a query per
+// user for no visible gain.
 export const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const users = await prisma.user.findMany({

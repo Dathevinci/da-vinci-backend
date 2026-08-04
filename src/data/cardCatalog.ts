@@ -336,9 +336,27 @@ const RETIRED_IDS = new Set(
 export const CARDS: Record<string, CardDef> = Object.fromEntries(
   Object.entries(RAW_CARDS)
     .filter(([, c]) => isKept(c))
-    // Survivors of the old game collapse into one bundle; the Knight set keeps
-    // its own name, because it IS a set rather than a leftover.
-    .map(([id, c]) => [id, c.set === "Knight" ? c : { ...c, set: STARTER_SET }])
+    /**
+     * Survivors of the old game collapse into one bundle; a card belonging to
+     * a REAL named set keeps its own name, because it is a set rather than a
+     * leftover.
+     *
+     * Keyed on KEPT_SETS, not on a hardcoded "Knight". It was the literal
+     * before, which meant adding Sorcerer to KEPT_SETS kept its cards ALIVE
+     * while this line quietly relabelled all seven as Foundation — so the set
+     * existed, and then appeared inside somebody else's bundle.
+     *
+     * The knock-on was worse than the label. cardsInSet() reads these rewritten
+     * values, so Sorcerer resolved to zero cards (its reward would have been
+     * refused as a retired set) AND Foundation grew seven cards nobody could
+     * have been holding, which would have made the Foundation reward
+     * unclaimable for everyone who had already completed it.
+     *
+     * STARTER_SET is itself in KEPT_SETS, so a Foundation card matches and is
+     * passed through untouched. Any set added to KEPT_SETS from now on is
+     * handled correctly in both places at once, which is the point.
+     */
+    .map(([id, c]) => [id, KEPT_SETS.has(c.set) ? c : { ...c, set: STARTER_SET }])
 );
 /** Ids that used to exist, for cleanup jobs that must recognise an old id. */
 export const RETIRED_CARD_IDS: string[] = Array.from(RETIRED_IDS);

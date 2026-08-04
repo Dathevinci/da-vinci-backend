@@ -56,7 +56,7 @@ export interface CardDef {
 
 // The base set. `event` cards are NOT in the normal pack pool (see PACK_POOL) —
 // they drop only from event packs the Lead Dev opens up, so they stay rare.
-export const CARDS: Record<string, CardDef> = {
+const RAW_CARDS: Record<string, CardDef> = {
   // ── Common (the volume; easy set-completion wins) ──
   card_watcher:    { id: "card_watcher",    name: "The Watcher",        rarity: "common", set: "Ascension", hue: 265, motif: "eye", flavor: "Every journey begins by simply paying attention." },
   card_firstlight: { id: "card_firstlight", name: "First Light",        rarity: "common", set: "Ascension", hue: 45,  motif: "dawn", flavor: "The first heartbeat of a new cultivator." },
@@ -222,6 +222,32 @@ export const CARDS: Record<string, CardDef> = {
   // ── Event (limited; NOT in normal packs) ──
   card_founder:    { id: "card_founder",    name: "The Founder's Seal", rarity: "event", set: "Genesis", hue: 290, motif: "seal", flavor: "Given to those who were here at the beginning." },
 };
+
+/**
+ * THE CARD RESET — only epic survives.
+ *
+ * Common, rare, legendary, mythic (which includes the Pantheon gods — they
+ * are rarity "mythic" with set "Pantheon", not a rarity of their own) and the
+ * single event card are all retired. 89 of 102.
+ *
+ * The definitions are FILTERED rather than deleted from the literal above.
+ * That is deliberate and not laziness: every consumer in the app derives from
+ * CARDS, so one filter retires them everywhere at once, and it stays trivially
+ * reversible while the rebuild is in flight. Deleting 89 literals by hand is
+ * how you typo a surviving card's id and silently orphan someone's collection.
+ * They can be physically removed later, in a pass that does nothing else.
+ *
+ * Holders were paid out before this shipped — see lib/cardResetRefund.ts.
+ */
+const KEPT_RARITIES = new Set(["epic"]);
+const RETIRED_IDS = new Set(
+  Object.values(RAW_CARDS).filter((c) => !KEPT_RARITIES.has(c.rarity)).map((c) => c.id)
+);
+export const CARDS: Record<string, CardDef> = Object.fromEntries(
+  Object.entries(RAW_CARDS).filter(([, c]) => KEPT_RARITIES.has(c.rarity))
+);
+/** Ids that used to exist, for cleanup jobs that must recognise an old id. */
+export const RETIRED_CARD_IDS: string[] = Array.from(RETIRED_IDS);
 
 // Normal packs can roll everything EXCEPT event cards.
 // Mythics are NEVER pulled — they exist only through the Synthesis Lab.

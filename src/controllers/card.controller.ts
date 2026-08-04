@@ -910,6 +910,13 @@ export const claimSet = async (req: Request, res: Response, next: NextFunction) 
         if (!user) throw new CardError(404, "User not found.");
         if ((user.claimedSets || []).includes(set!)) throw new CardError(409, "You've already claimed this set's reward.");
 
+        // A set whose cards were retired has an EMPTY required list, and
+        // `0 < 0` is false — so the gate below would swing OPEN and pay the
+        // full reward to anyone who asked. Across the retired sets that was
+        // 46,000 AP and 9,200 shards claimable per user. Refuse outright.
+        if (required.length === 0) {
+          throw new CardError(410, "That set was retired while the card game is reworked.");
+        }
         const owned = await tx.userCard.findMany({ where: { userId, cardId: { in: required } }, select: { cardId: true } });
         if (owned.length < required.length) {
           throw new CardError(400, `You need all ${required.length} cards in ${set} — you have ${owned.length}.`);

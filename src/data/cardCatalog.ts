@@ -349,11 +349,28 @@ export const PACK_SIZE = 4;
  * Weights are floats now — the roll multiplies Math.random() by the sum, so
  * nothing anywhere assumes integers.
  */
+/**
+ * PULL ODDS, tightened for the rebuilt game.
+ *
+ * Rare, epic and legendary all get scarcer; commons absorb the difference.
+ * The point is that a rare should feel like something rather than the second
+ * card in every pack.
+ *
+ *              was      now
+ *   common     64       78
+ *   rare       27.4     17
+ *   epic        8        4.6
+ *   legendary   0.6      0.4
+ *
+ * Legendary moves least on purpose. It was already a chase at 0.6, and the
+ * Knight set has exactly two — a much harsher number would mean most players
+ * never see either, which is a different feeling from rare.
+ */
 export const RARITY_WEIGHTS: Record<Exclude<CardRarity, "event" | "mythic">, number> = {
-  common: 64,
-  rare: 27.4,
-  epic: 8,
-  legendary: 0.6,
+  common: 78,
+  rare: 17,
+  epic: 4.6,
+  legendary: 0.4,
 };
 
 // Dust value (shards you get for one duplicate) and craft cost (shards to make a

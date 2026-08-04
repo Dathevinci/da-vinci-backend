@@ -4,6 +4,7 @@ import { backfillLegendaryPrints } from "./lib/printBackfill";
 import { pruneOrphanedShowcases } from "./lib/showcaseBackfill";
 import { refundWipedCards } from "./lib/cardResetRefund";
 import { resetCardProgress } from "./lib/cardResetProgress";
+import { settleStrandedDuels } from "./lib/duelSettlement";
 
 const PORT = env.PORT || 5000;
 
@@ -20,5 +21,10 @@ app.listen(PORT as number, "0.0.0.0", () => {
   // side: both touch the same users and the refund is the one that must land
   // first — clearing a profile before paying for it would be unrecoverable.
   // Both idempotent; see cardResetRefund.ts and cardResetProgress.ts.
-  void refundWipedCards().then(() => resetCardProgress());
+  void refundWipedCards()
+    .then(() => resetCardProgress())
+    // Last: duels holding a retired card can never resolve, and their stakes
+    // are escrowed with no path back. Runs after the wipe so it settles
+    // against the same retired list everything else used.
+    .then(() => settleStrandedDuels());
 });

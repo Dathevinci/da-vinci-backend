@@ -72,6 +72,7 @@ model User {
   commentVotes CommentVote[]
   ratings        Rating[]
   commentReports CommentReport[]
+  pollVotes      PollVote[]
   pointLogs    PointLog[]
   conversationsAsUser1 Conversation[] @relation("ConversationUser1")
   conversationsAsUser2 Conversation[] @relation("ConversationUser2")
@@ -147,6 +148,55 @@ model Comment {
   replies   Comment[]     @relation("CommentReplies")
   votes     CommentVote[]
   reports   CommentReport[]
+  poll      Poll?
+}
+
+/// A poll attached to one forum post. Optional and one-per-post: a post
+/// either asks a question or it doesn't. Deleting the post takes the poll,
+/// its options and every vote with it.
+model Poll {
+  id        String   @id @default(uuid())
+  commentId String   @unique
+  question  String
+  /// null = never closes. Past this moment the server refuses new votes,
+  /// so a closed poll is closed for everyone rather than just hidden.
+  closesAt  DateTime?
+  createdAt DateTime @default(now())
+
+  comment   Comment      @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  options   PollOption[]
+  votes     PollVote[]
+}
+
+model PollOption {
+  id     String @id @default(uuid())
+  pollId String
+  text   String
+  /// Preserves the order the author typed them in; without it the options
+  /// come back in whatever order the database feels like.
+  order  Int
+
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes  PollVote[]
+
+  @@index([pollId])
+}
+
+/// One vote per member per poll — changing your mind UPDATES the row, so
+/// the tallies can't be stuffed by voting repeatedly.
+model PollVote {
+  id        String   @id @default(uuid())
+  pollId    String
+  optionId  String
+  userId    String
+  createdAt DateTime @default(now())
+
+  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, userId])
+  @@index([optionId])
 }
 
 model CommentVote {

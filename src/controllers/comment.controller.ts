@@ -4,6 +4,51 @@ import { processMentions } from "../utils/mentions";
 import { payout } from "../utils/economy";
 import { resolveActor, requireStaff } from "../lib/staff";
 
+/**
+ * ONE shape for a comment on the wire, so every path that returns one —
+ * the feed, the pinned shelf, a single post — agrees on the fields the
+ * client reads. Raw vote and poll-vote rows are collapsed into tallies
+ * and dropped; sending them all would leak who voted for what.
+ */
+function shapeComment(comment: any, userId?: string) {
+  const score = comment.votes.reduce((acc: number, vote: any) => acc + vote.value, 0);
+  const userVote = userId ? comment.votes.find((v: any) => v.userId === userId)?.value || 0 : 0;
+  // Separate tallies as well as the net score: the UI shows a like count
+  // AND a dislike count, and a single net number renders as a negative
+  // beside a heart the moment dislikes outweigh likes.
+  const upvotes = comment.votes.filter((v: any) => v.value === 1).length;
+  const downvotes = comment.votes.filter((v: any) => v.value === -1).length;
+
+  let poll: any;
+  if (comment.poll) {
+    const all = comment.poll.votes || [];
+    const mine = userId ? all.find((v: any) => v.userId === userId) : undefined;
+    poll = {
+      id: comment.poll.id,
+      question: comment.poll.question,
+      closesAt: comment.poll.closesAt,
+      closed: !!comment.poll.closesAt && new Date(comment.poll.closesAt).getTime() <= Date.now(),
+      totalVotes: all.length,
+      myOptionId: mine ? mine.optionId : null,
+      options: (comment.poll.options || []).map((o: any) => ({
+        id: o.id,
+        text: o.text,
+        votes: all.filter((v: any) => v.optionId === o.id).length,
+      })),
+    };
+  }
+
+  return {
+    ...comment,
+    score,
+    upvotes,
+    downvotes,
+    userVote,
+    poll,
+    votes: undefined, // hide raw votes array to save bandwidth
+  };
+}
+
 export const getComments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const animeId = req.query.animeId as string | undefined;
@@ -76,10 +121,31 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
        where.parentId = null;
     }
 
+    // Declared BEFORE any branch that reads it — a `const` used earlier in
+    // the same block is a tsc error, and on this backend one type error
+    // takes the entire API deploy down.
     const COMMENT_INCLUDE = {
       user: { select: { id: true, username: true, avatar: true, arisePoints: true, xp: true, activeRole: true, activeTag: true, activeEffect: true, activeTheme: true, activeColor: true, activeFont: true, activeFrame: true } },
       votes: true,
+      poll: { include: { options: { orderBy: { order: "asc" as const } }, votes: true } },
     };
+
+    /**
+     * `pinned=true` returns ONLY pinned posts, unpaginated and newest-pinned
+     * first. The forum's pinned shelf uses this instead of filtering whatever
+     * happened to land in page one: a pin that fell outside the first 30 rows,
+     * or that the active tag filtered out, silently vanished from the shelf.
+     */
+    if (String(req.query.pinned || "") === "true") {
+      where.isPinned = true;
+      const pinnedRows: any[] = await prisma.comment.findMany({
+        where,
+        orderBy: { updatedAt: "desc" },
+        take: 8,
+        include: COMMENT_INCLUDE,
+      });
+      return res.json({ success: true, data: pinnedRows.map((c: any) => shapeComment(c, userId)) });
+    }
 
     /**
      * `top` cannot be expressed as a Prisma orderBy: score is the SUM of
@@ -178,24 +244,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     // Callback params are annotated because `allComments` is any[] (the two
     // fetch branches for top vs chronological produce the same shape but not the
     // same inferred type). Without these, noImplicitAny rejects the build.
-    const formattedComments = allComments.map((comment: any) => {
-      const score = comment.votes.reduce((acc: number, vote: any) => acc + vote.value, 0);
-      const userVote = userId ? comment.votes.find((v: any) => v.userId === userId)?.value || 0 : 0;
-      // Separate tallies as well as the net score: the UI shows a like count
-      // AND a dislike count, and a single net number renders as a negative
-      // beside a heart the moment dislikes outweigh likes.
-      const upvotes = comment.votes.filter((v: any) => v.value === 1).length;
-      const downvotes = comment.votes.filter((v: any) => v.value === -1).length;
-
-      return {
-        ...comment,
-        score,
-        upvotes,
-        downvotes,
-        userVote,
-        votes: undefined // hide raw votes array to save bandwidth
-      };
-    });
+    const formattedComments = allComments.map((comment: any) => shapeComment(comment, userId));
 
     res.json({ success: true, data: formattedComments });
   } catch (error) {
@@ -208,7 +257,30 @@ export const FORUM_TAGS = ["General", "Discussion", "Art", "Theory", "News", "Qu
 
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl, title, tag } = req.body;
+    const { userId, animeId, animeTitle, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl, title, tag, poll } = req.body;
+
+    /**
+     * An attached poll. Validated here rather than trusted: at least two
+     * non-empty options (a one-option poll is a statement), capped at 6 so
+     * the card stays readable, and a duration in hours that can't be
+     * negative. `closesInHours` of 0 / missing means it never closes.
+     */
+    let pollData: { question: string; closesAt: Date | null; options: string[] } | null = null;
+    if (poll && typeof poll.question === "string" && poll.question.trim()) {
+      const options = Array.isArray(poll.options)
+        ? poll.options.map((o: any) => String(o || "").trim()).filter((o: string) => o.length > 0).slice(0, 6)
+        : [];
+      if (options.length >= 2) {
+        const hours = Number(poll.closesInHours);
+        pollData = {
+          question: poll.question.trim().slice(0, 200),
+          closesAt: Number.isFinite(hours) && hours > 0
+            ? new Date(Date.now() + Math.min(hours, 24 * 365) * 3600 * 1000)
+            : null,
+          options: options.map((o: string) => o.slice(0, 120)),
+        };
+      }
+    }
 
     /**
      * A post needs an author and SOMETHING to show — text or media, not
@@ -221,8 +293,9 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
     const hasText = typeof content === "string" && content.trim().length > 0;
     const hasMedia = typeof mediaUrl === "string" && mediaUrl.trim().length > 0;
 
-    if (!userId || (!hasText && !hasMedia)) {
-      return res.status(400).json({ success: false, message: "Write something or attach an image." });
+    // A poll on its own is a post too — the question IS the content.
+    if (!userId || (!hasText && !hasMedia && !pollData)) {
+      return res.status(400).json({ success: false, message: "Write something, attach an image, or add a poll." });
     }
 
     const comment = await prisma.comment.create({
@@ -244,6 +317,17 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
         // headline from becoming a second body.
         title: typeof title === "string" && title.trim() ? title.trim().slice(0, 30) : null,
         tag: FORUM_TAGS.includes(tag) ? tag : null,
+        ...(pollData
+          ? {
+              poll: {
+                create: {
+                  question: pollData.question,
+                  closesAt: pollData.closesAt,
+                  options: { create: pollData.options.map((text, i) => ({ text, order: i })) },
+                },
+              },
+            }
+          : {}),
       },
       /**
        * Must mirror getComments' shape exactly. The client prepends this object
@@ -260,6 +344,7 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
           },
         },
         votes: true,
+        poll: { include: { options: { orderBy: { order: "asc" as const } }, votes: true } },
       }
     });
 
@@ -296,7 +381,10 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
     const commentLink = animeId ? `/community?view=${animeId}&tab=discussions` : `/community`;
     await processMentions(content, userId, commentLink);
 
-    res.status(201).json({ success: true, data: { ...comment, score: 0, upvotes: 0, downvotes: 0, userVote: 0, votes: undefined } });
+    // Shaped exactly like the feed's rows — the client prepends this object
+    // straight into the list, so a differently-shaped reply renders a
+    // just-posted item with no poll and no tallies until a refresh.
+    res.status(201).json({ success: true, data: shapeComment(comment, userId) });
   } catch (error) {
     next(error);
   }
@@ -587,6 +675,110 @@ export const togglePinComment = async (req: Request, res: Response, next: NextFu
 };
 
 
+
+// ── GET /api/comments/:id ─────────────────────────────────────────────────
+// One post with its replies, for a permalink page. Without this a detail
+// route has to pull a whole feed page and hope its post is in it — which
+// fails for anything older than page one.
+export const getCommentById = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const userId = req.query.userId as string | undefined;
+
+    const USER_SELECT = {
+      id: true, username: true, avatar: true, arisePoints: true, xp: true,
+      activeRole: true, activeTag: true, activeEffect: true, activeTheme: true,
+      activeColor: true, activeFont: true, activeFrame: true,
+    };
+
+    const post: any = await prisma.comment.findUnique({
+      where: { id },
+      include: {
+        user: { select: USER_SELECT },
+        votes: true,
+        poll: { include: { options: { orderBy: { order: "asc" as const } }, votes: true } },
+      },
+    });
+    if (!post) return res.status(404).json({ success: false, message: "Post not found" });
+
+    // Replies, four generations deep — the same depth the feed hydrates.
+    const rows: any[] = [];
+    let parents: string[] = [post.id];
+    for (let i = 0; i < 4; i++) {
+      if (parents.length === 0) break;
+      const replies: any[] = await prisma.comment.findMany({
+        where: { parentId: { in: parents } },
+        include: {
+          user: { select: USER_SELECT },
+          votes: true,
+          poll: { include: { options: { orderBy: { order: "asc" as const } }, votes: true } },
+        },
+      });
+      if (replies.length === 0) break;
+      rows.push(...replies);
+      parents = replies.map((r: any) => r.id);
+    }
+
+    res.json({
+      success: true,
+      data: {
+        post: shapeComment(post, userId),
+        replies: rows.map((r: any) => shapeComment(r, userId)),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/polls/:id/vote ──────────────────────────────────────────────
+// Cast or change your vote. One row per member per poll (unique), so voting
+// again MOVES your vote rather than adding a second one.
+export const votePoll = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const pollId = req.params.id as string;
+    const optionId = req.body?.optionId as string | undefined;
+
+    // Verified identity only — a body-supplied id could be rotated through
+    // every user id the public feed hands out, which is exactly how you
+    // stuff a poll.
+    const actor = await resolveActor(req);
+    if (!actor) return res.status(401).json({ success: false, message: "Sign in again to vote." });
+    if (!optionId) return res.status(400).json({ success: false, message: "optionId is required" });
+
+    const poll: any = await prisma.poll.findUnique({
+      where: { id: pollId },
+      include: { options: true },
+    });
+    if (!poll) return res.status(404).json({ success: false, message: "Poll not found" });
+    if (poll.closesAt && new Date(poll.closesAt).getTime() <= Date.now()) {
+      return res.status(400).json({ success: false, message: "This poll has closed." });
+    }
+    if (!poll.options.some((o: any) => o.id === optionId)) {
+      return res.status(400).json({ success: false, message: "That option isn't on this poll." });
+    }
+
+    await prisma.pollVote.upsert({
+      where: { pollId_userId: { pollId, userId: actor.id } },
+      update: { optionId },
+      create: { pollId, optionId, userId: actor.id },
+    });
+
+    const votes = await prisma.pollVote.findMany({ where: { pollId }, select: { optionId: true, userId: true } });
+    res.json({
+      success: true,
+      data: {
+        totalVotes: votes.length,
+        myOptionId: optionId,
+        options: poll.options
+          .sort((a: any, b: any) => a.order - b.order)
+          .map((o: any) => ({ id: o.id, text: o.text, votes: votes.filter((v) => v.optionId === o.id).length })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
 
 // ── POST /api/comments/:id/report ─────────────────────────────────────────
 // Flag a comment. One row per member per comment (unique), so tapping twice

@@ -2,6 +2,7 @@ import app from "./app";
 import { env } from "./config/env";
 import { backfillLegendaryPrints } from "./lib/printBackfill";
 import { pruneOrphanedShowcases } from "./lib/showcaseBackfill";
+import { refundWipedCards } from "./lib/cardResetRefund";
 
 const PORT = env.PORT || 5000;
 
@@ -13,4 +14,8 @@ app.listen(PORT as number, "0.0.0.0", () => {
   // Clears showcase pins for cards their owner no longer has. Idempotent —
   // see showcaseBackfill.ts.
   void pruneOrphanedShowcases();
+  // Pays everyone out for the tiers about to be wiped. MUST complete before
+  // the catalogue wipe ships — after it, nothing can reconstruct who held
+  // what. Idempotent; see cardResetRefund.ts.
+  void refundWipedCards();
 });

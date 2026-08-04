@@ -55,6 +55,20 @@ import {
 } from "../lib/prints";
 
 /**
+ * PULLS ARE CLOSED for the card rework.
+ *
+ * Every path that MINTS a random card is refused: normal packs and relic
+ * packs alike. Enforced server-side rather than by hiding the buttons,
+ * because a hidden button is not a closed door — and a pack rolled from a
+ * catalogue mid-rework would mint cards that are about to stop existing.
+ *
+ * Nothing else is affected: dusting, crafting, trading, duelling and the
+ * workbench all keep working on what people already own. Flip this to false
+ * to reopen.
+ */
+const PULLS_CLOSED = true;
+
+/**
  * ARISE CARDS — collectible packs, dusting and crafting.
  *
  * The single AP touchpoint is opening a pack (the sink). Every currency debit
@@ -341,6 +355,16 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
   try {
     const { userId, count } = (req.body || {}) as { userId?: string; count?: number };
     if (!ownerGuard(req, res, userId)) return;
+
+    // PULLS ARE CLOSED for the card rework. Refused here, at the top, before
+    // any AP is touched — the client is not the gate, and a pack rolled from
+    // a catalogue mid-rework would mint cards that are about to stop existing.
+    if (PULLS_CLOSED) {
+      return res.status(503).json({
+        success: false,
+        message: "Pulls are closed while the card game is reworked. Your Arise Points are safe.",
+      });
+    }
 
     /**
      * Pull size is chosen by the player. Only these three exist — a free-form
@@ -822,6 +846,15 @@ export const openRelicPack = async (req: Request, res: Response, next: NextFunct
   try {
     const { userId } = (req.body || {}) as { userId?: string };
     if (!ownerGuard(req, res, userId)) return;
+
+    // A relic pack is a pull too — and its guaranteed-rarity roll indexes a
+    // filtered pool, which throws outright once that rarity is emptied.
+    if (PULLS_CLOSED) {
+      return res.status(503).json({
+        success: false,
+        message: "Relic packs are closed while the card game is reworked. Your shards are safe.",
+      });
+    }
 
     const pulls = rollRelicPack(PACK_SIZE);
 

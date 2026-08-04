@@ -66,7 +66,7 @@ import {
  * workbench all keep working on what people already own. Flip this to false
  * to reopen.
  */
-const PULLS_CLOSED = true;
+const PULLS_CLOSED = false;
 
 /**
  * ARISE CARDS — collectible packs, dusting and crafting.

@@ -38,7 +38,26 @@ export type SupportEffect =
   | { kind: "pact"; power: number }        // pay power (0-1) of current HP; hit far harder, guarded
   | { kind: "stone"; power: number }       // +power% ATK; next 2 enemy attacks find nothing
   | { kind: "mirror"; power: number }      // return power (0-1) of damage AND heal it
-  | { kind: "arise"; power: number };      // ALL fallen return at power (0-1) of max HP, emboldened
+  | { kind: "arise"; power: number }       // ALL fallen return at power (0-1) of max HP, emboldened
+  // ── the Knight set ──
+  // Standing effects, unlike everything above: those fire once and are spent,
+  // these hold for the fight. Kept as distinct kinds rather than folded into
+  // shield/focus precisely because "halve the next blow" and "take 3 less
+  // every turn" are different promises and would read wrong on the card.
+  | { kind: "guard"; power: number }       // take `power` FLAT less damage, every turn
+  | { kind: "edge"; power: number }        // +`power` flat damage on each card's FIRST attack only
+  | { kind: "veil"; power: number };       // `power` (0-1) chance to ignore a turn's damage entirely
+
+/**
+ * GROUND — a third card class, alongside units and supports.
+ *
+ * A support is spent on one card; a ground card holds the whole board and
+ * only answers to its own set, which is why it is a separate field rather
+ * than another SupportEffect kind. `set` scopes it: "A Fitting End" lifts
+ * Knights and nothing else, so a mixed deck gains nothing by splashing it.
+ */
+export type GroundEffect =
+  | { kind: "bulwark"; power: number; set: string };  // +power max HP to each card of `set` in the active spot
 
 export interface CardDef {
   id: string;
@@ -50,6 +69,8 @@ export interface CardDef {
   flavor: string;
   /** Units fight; support cards are played for an effect. Absent = unit. */
   support?: SupportEffect;
+  /** Ground cards hold the board for their own set. Absent = not a ground. */
+  ground?: GroundEffect;
   /** Overrides the rarity word on the card's plate — the Pantheon says GOD. */
   gradeLabel?: string;
 }
@@ -221,6 +242,28 @@ const RAW_CARDS: Record<string, CardDef> = {
 
   // ── Event (limited; NOT in normal packs) ──
   card_founder:    { id: "card_founder",    name: "The Founder's Seal", rarity: "event", set: "Genesis", hue: 290, motif: "seal", flavor: "Given to those who were here at the beginning." },
+
+  // ══ THE KNIGHT SET ══ the rebuilt game's first bundle: eight units, six
+  // supports and one ground. Stats live in duelRules; these are identities.
+  card_squire:        { id: "card_squire",        name: "The Squire",             rarity: "common",    set: "Knight", hue: 35,  motif: "dawn",   flavor: "Every blade begins as someone's second." },
+  card_jester:        { id: "card_jester",        name: "The Jester of Honor",    rarity: "common",    set: "Knight", hue: 300, motif: "moth",   flavor: "He laughs because someone has to, and it will not be the king." },
+  card_knightradiant: { id: "card_knightradiant", name: "Knight Of Radiance",     rarity: "rare",      set: "Knight", hue: 50,  motif: "dawn",   flavor: "Light is not mercy. Light is simply harder to hide from." },
+  card_royalknight:   { id: "card_royalknight",   name: "Royal Knight",           rarity: "rare",      set: "Knight", hue: 220, motif: "path",   flavor: "Sworn first to the crown, second to the truth, and never to himself." },
+  card_sunknight:     { id: "card_sunknight",     name: "The Sun Knight",         rarity: "rare",      set: "Knight", hue: 42,  motif: "ember",  flavor: "He strikes at noon, when nothing on the field has a shadow to hide in." },
+  card_crimsonknight: { id: "card_crimsonknight", name: "Crimson Knight",         rarity: "epic",      set: "Knight", hue: 355, motif: "heart",  flavor: "Every wound he opens, he keeps a little of." },
+  card_gloriousone:   { id: "card_gloriousone",   name: "The Glorious One",       rarity: "epic",      set: "Knight", hue: 195, motif: "storm",  flavor: "One swing, and the whole line remembers it." },
+  card_saintking:     { id: "card_saintking",     name: "The Saint King",         rarity: "legendary", set: "Knight", hue: 48,  motif: "seal",   flavor: "The realm knelt willingly. That was the frightening part." },
+
+  // Supports — spent on a card, not fielded.
+  card_swordsakura:   { id: "card_swordsakura",   name: "Sword Of Sakura",        rarity: "common",    set: "Knight", hue: 335, motif: "lotus",  flavor: "Petals on the edge. The cut is no gentler for it.",           support: { kind: "focus",   power: 1.05 } },
+  card_swordrose:     { id: "card_swordrose",     name: "Sword Of Rose",          rarity: "common",    set: "Knight", hue: 345, motif: "seed",   flavor: "Thorned both ways, as roses are.",                            support: { kind: "reflect", power: 0.05 } },
+  card_shieldradiant: { id: "card_shieldradiant", name: "Shield Of Radiance",     rarity: "common",    set: "Knight", hue: 52,  motif: "dawn",   flavor: "It does not stop the blow. It makes the blow matter less.",   support: { kind: "guard",   power: 3 } },
+  card_cloakinvis:    { id: "card_cloakinvis",    name: "Cloak Of Invisibility",  rarity: "rare",      set: "Knight", hue: 265, motif: "web",    flavor: "Not gone. Merely not worth swinging at.",                     support: { kind: "veil",    power: 0.25 } },
+  card_shieldlion:    { id: "card_shieldlion",    name: "Shield of the Lionheart", rarity: "rare",     set: "Knight", hue: 30,  motif: "heart",  flavor: "Held by someone who has already decided not to move.",        support: { kind: "guard",   power: 6 } },
+  card_swordcrystal:  { id: "card_swordcrystal",  name: "Sword Of Crystal",       rarity: "epic",      set: "Knight", hue: 190, motif: "peak",   flavor: "The first strike rings. Everything after is only steel.",     support: { kind: "edge",    power: 10 } },
+
+  // Ground — holds the board, and only for its own set.
+  card_fittingend:    { id: "card_fittingend",    name: "A Fitting End",          rarity: "legendary", set: "Knight", hue: 15,  motif: "gate",   flavor: "Ground consecrated for one kind of death, and one kind of knight.", ground: { kind: "bulwark", power: 20, set: "Knight" } },
 };
 
 /**
@@ -239,9 +282,17 @@ const RAW_CARDS: Record<string, CardDef> = {
  *
  * Holders were paid out before this shipped — see lib/cardResetRefund.ts.
  */
-const KEPT_RARITIES = new Set(["epic"]);
+/**
+ * WHAT SURVIVES. Retirement is by SET and rarity together, not rarity alone —
+ * and that distinction is load-bearing. The Knight set is mostly Common, Rare
+ * and Legendary; under a rarity-only rule those cards would be filtered out of
+ * the catalogue AND matched by RETIRED_CARD_IDS, which the boot migration
+ * feeds straight into deleteMany. The new set would be deleted on first boot.
+ */
+const KEPT_SETS = new Set([STARTER_SET, "Knight"]);
+const isKept = (c: CardDef) => c.rarity === "epic" || KEPT_SETS.has(c.set);
 const RETIRED_IDS = new Set(
-  Object.values(RAW_CARDS).filter((c) => !KEPT_RARITIES.has(c.rarity)).map((c) => c.id)
+  Object.values(RAW_CARDS).filter((c) => !isKept(c)).map((c) => c.id)
 );
 
 /**
@@ -258,8 +309,10 @@ const RETIRED_IDS = new Set(
 export const STARTER_SET = "Foundation";
 export const CARDS: Record<string, CardDef> = Object.fromEntries(
   Object.entries(RAW_CARDS)
-    .filter(([, c]) => KEPT_RARITIES.has(c.rarity))
-    .map(([id, c]) => [id, { ...c, set: STARTER_SET }])
+    .filter(([, c]) => isKept(c))
+    // Survivors of the old game collapse into one bundle; the Knight set keeps
+    // its own name, because it IS a set rather than a leftover.
+    .map(([id, c]) => [id, c.set === "Knight" ? c : { ...c, set: STARTER_SET }])
 );
 /** Ids that used to exist, for cleanup jobs that must recognise an old id. */
 export const RETIRED_CARD_IDS: string[] = Array.from(RETIRED_IDS);

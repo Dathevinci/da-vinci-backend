@@ -37,6 +37,28 @@ export function forfeitFine(stake: number): number {
 //
 // Foil (x1.2) and levels (up to x1.63) stack on top, so an INVESTED card still
 // pulls far ahead. That gap is earned rather than drawn from a pack.
+/**
+ * PER-CARD STATS, which outrank the per-rarity table below.
+ *
+ * The Knight set is authored card by card rather than by tier — two commons
+ * sit at 4/9 and 1/13, which a rarity table simply cannot say. Rarity still
+ * governs pull odds, dust value and upgrade cost; it just no longer dictates
+ * what a card does in a fight.
+ *
+ * Supports and grounds are absent on purpose: they are never fielded, so they
+ * have no HP or attack to give.
+ */
+export const CARD_STATS_BY_ID: Record<string, { hp: number; atk: number }> = {
+  card_squire:        { hp: 9,  atk: 4 },
+  card_jester:        { hp: 13, atk: 1 },
+  card_knightradiant: { hp: 15, atk: 8 },
+  card_royalknight:   { hp: 14, atk: 9 },
+  card_sunknight:     { hp: 12, atk: 11 },
+  card_crimsonknight: { hp: 18, atk: 9 },
+  card_gloriousone:   { hp: 22, atk: 5 },
+  card_saintking:     { hp: 25, atk: 10 },
+};
+
 export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
   common:    { hp: 18, atk: 7 },
   rare:      { hp: 20, atk: 8 },
@@ -145,7 +167,8 @@ export function buildFighter(
   // Support cards are played, never fielded — they have no stat line, so
   // letting one into a deck would field a fighter with undefined HP.
   if (!def || def.support) return null;
-  const base = def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity];
+  // A per-card entry wins over the rarity table — see CARD_STATS_BY_ID.
+  const base = CARD_STATS_BY_ID[def.id] ?? (def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity]);
   // Foil and level stack. Levels are shard-bought, so they have to show up
   // HERE — a level that only changed a number on the card page would be a
   // currency sink that sells nothing. The FORGE lands after the multipliers

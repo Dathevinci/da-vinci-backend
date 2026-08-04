@@ -24,6 +24,9 @@ const REFUND: Record<string, number> = {
   common: 0,
   rare: 50,
   legendary: 2000,
+  // The single event card. Never pullable and never craftable, so anyone
+  // holding one earned it — paid at the legendary rate rather than nothing.
+  event: 2000,
   mythic: 5000,
 };
 

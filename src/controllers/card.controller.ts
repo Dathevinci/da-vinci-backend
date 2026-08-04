@@ -545,7 +545,10 @@ export const maxCard = async (req: Request, res: Response, next: NextFunction) =
     // What's left, and what it costs — same formulas as the single steps.
     let cost = 0;
     for (let l = curLevel; l < MAX_CARD_LEVEL; l++) cost += upgradeCost(card.rarity, l);
-    const forgeable = !card.support;
+    // Same rule as forgeCard: grounds are never fielded, so their forge ranks
+    // are read by nothing. Without this the max-out bill quoted and charged a
+    // ground for all ten ranks in a single click.
+    const forgeable = !card.support && !card.ground;
     if (forgeable) {
       for (let r = curAtk; r < FORGE_MAX; r++) cost += forgeCost("atk", card.rarity, r);
       for (let r = curHp; r < FORGE_MAX; r++) cost += forgeCost("hp", card.rarity, r);
@@ -1100,7 +1103,17 @@ export const forgeCard = async (req: Request, res: Response, next: NextFunction)
     }
     const card = cardId ? CARDS[cardId] : undefined;
     if (!card) return res.status(404).json({ success: false, message: "No such card." });
-    if (card.support) return res.status(400).json({ success: false, message: "Support cards don't fight — nothing to forge." });
+    // Grounds are refused alongside supports. buildFighter returns null for
+    // both, so their forge ranks are read by nothing, anywhere — a forged
+    // ground was a pure shard sink that bought provably zero effect in any
+    // mode. A ground's only real scaling lever is its LEVEL, which the engine
+    // does apply when the ground is laid.
+    if (card.support || card.ground) {
+      return res.status(400).json({
+        success: false,
+        message: `${card.name} is never fielded — there's no stat line on the anvil to hammer.`,
+      });
+    }
 
     const owned = await prisma.userCard.findUnique({ where: { userId_cardId: { userId: userId!, cardId: cardId! } } });
     if (!owned) return res.status(400).json({ success: false, message: "You don't own that card." });

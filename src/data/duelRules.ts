@@ -869,8 +869,20 @@ export function applyAction(
         target.hp = Math.max(0, target.hp - total);
         s.log.push(`Three strikes in one breath — ${target.name} took ${total}.`);
       } else if (k === "shatter") {
-        const had = (foe.shield ? 1 : 0) + (foe.block ? 1 : 0) + (foe.bulwarks || 0) + ((foe.guardPct || 0) > 0 ? 1 : 0);
+        // EVERY protection, which now includes the three standing Knight ones.
+        // They were added after this branch was written, so a shatter left a
+        // 25% veil and a flat reduction untouched while the log claimed it had
+        // broken everything the other side held — worse than doing nothing,
+        // because the player then attacked believing the way was clear.
+        // edgeFlat is deliberately NOT here: it is an offensive first-strike
+        // bonus, not a protection.
+        const had = (foe.shield ? 1 : 0) + (foe.block ? 1 : 0) + (foe.bulwarks || 0)
+          + ((foe.guardPct || 0) > 0 ? 1 : 0)
+          + ((foe.flatGuard || 0) > 0 ? 1 : 0)
+          + ((foe.veilPct || 0) > 0 ? 1 : 0)
+          + (foe.aegis ? 1 : 0);
         foe.shield = false; foe.block = false; foe.bulwarks = 0; foe.guardPct = 0;
+        foe.flatGuard = 0; foe.veilPct = 0; foe.aegis = undefined;
         if (!target) { s.log.pop(); return { state, finished: false }; }
         const hit = Math.max(1, Math.round(self.atk * (p / 100)));
         target.hp = Math.max(0, target.hp - hit);
@@ -1049,6 +1061,32 @@ export function applyAction(
         return { state: s, finished: false };
       }
     }
+    /**
+     * NULLIFY — nothing reaches them, so nothing is spent getting there.
+     *
+     * This check belongs UP HERE with chain, bulwark, block and veil, not down
+     * among the damage maths where it used to sit. Everything below this line
+     * mutates state that does not come back: me.focus, me.focusMult, me.weaken,
+     * an eclipse turn off me.atkDown, and the defender's own foe.shield. The
+     * engine returns the CLONE on this path, so the controller persisted every
+     * one of those — a swing into a nullify burnt the attacker's 180-shard
+     * Focus AND the defender's Ward while dealing zero damage.
+     *
+     * Worse, it was symmetrically exploitable: weaken and atkDown are debuffs
+     * on the ATTACKER, so deliberately swinging into a known nullify scrubbed a
+     * stagger and burnt an eclipse turn for free.
+     *
+     * Same rule the bulwark and block checks already followed for exactly this
+     * reason — what is spent must survive being turned aside.
+     */
+    if (foe.nullifyTurns && foe.nullifyTurns > 0) {
+      foe.nullifyTurns -= 1;
+      s.log.push(`The blow found nothing to land on. ${foe.nullifyTurns} turns remain.`);
+      s.turn = foe.userId;
+      s.round += 1;
+      if (s.log.length > 60) s.log = s.log.slice(-60);
+      return { state: s, finished: false };
+    }
     // Damage: base attack, +/-15% variance, focus bonus, shield reduction.
     let dmg = mine.atk * (0.85 + roll * 0.3);
     // Ascend is a lasting, side-wide multiplier, so it applies before the
@@ -1087,23 +1125,10 @@ export function applyAction(
      * matter how hard the blow was — brutal against a flurry, nearly nothing
      * against one enormous swing.
      */
-    // Nullify beats everything, including the Math.max(1) floor below: the
-    // domain says nothing reaches you, so nothing does.
-    if (foe.nullifyTurns && foe.nullifyTurns > 0) {
-      foe.nullifyTurns -= 1;
-      s.log.push(`The blow found nothing to land on. ${foe.nullifyTurns} turns remain.`);
-      s.turn = foe.userId;
-      s.round += 1;
-      if (s.log.length > 60) s.log = s.log.slice(-60);
-      return { state: s, finished: false };
-    }
-    /* Applied BELOW the nullify bail on purpose, unlike the multipliers above.
-     * Everything here is CONSUMED — an aegis turn, a card's one first strike —
-     * so running it before a branch that returns without landing a blow would
-     * spend both on an attack that never happened. Same rule the bulwark and
-     * block checks follow further up: what is spent must survive being turned
-     * aside. The multipliers above are safe there because they only shape a
-     * number that then gets discarded. */
+    /* Everything from here down is CONSUMED — an aegis turn, a card's one
+     * first strike. That is safe now only because every branch that refuses an
+     * attack outright (chain, bulwark, block, veil, nullify) returns ABOVE the
+     * damage maths. Do not add another bail below this line. */
     if (me.edgeFlat && !mine.struck) dmg += me.edgeFlat;
     // Marked whether the edge bonus existed or not: "first strike" has to mean
     // this card's first strike of the duel, not the first one after somebody

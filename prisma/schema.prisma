@@ -73,6 +73,7 @@ model User {
   ratings        Rating[]
   commentReports CommentReport[]
   pollVotes      PollVote[]
+  gemVotes       GemVote[]
   pointLogs    PointLog[]
   conversationsAsUser1 Conversation[] @relation("ConversationUser1")
   conversationsAsUser2 Conversation[] @relation("ConversationUser2")
@@ -222,6 +223,33 @@ model CommentVote {
 ///   anime:21 · anime:21:ep:5 · manhwa:<slug> · manhwa:<slug>:<chapterId>
 ///   novel:<id>
 /// One row per member per target — rating again UPDATES, never stacks.
+// HIDDEN GEMS — one pick per person, per week, per mode. The community
+// nominates something underrated; the week's tally is the ranking.
+//
+// The week key is stored rather than derived at read time, so a vote stays in
+// the week it was cast no matter when it is counted. Title and cover are
+// denormalised because the series live in external sources (AsuraScans,
+// MangaDex, the novel sites) and there is no local row to join against — a
+// scrape that later drops a title must not blank the leaderboard behind it.
+model GemVote {
+  id        String   @id @default(uuid())
+  userId    String
+  mediaType String   // "manhwa" | "novel"
+  mediaId   String   // source id, e.g. a bare Asura slug or "mdx:<uuid>"
+  title     String
+  cover     String?
+  week      String   // ISO week key, e.g. "2026-W31"
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One pick per person per week per mode — changing your mind replaces the
+  // pick rather than adding a second. This uniqueness IS the anti-stuffing
+  // guarantee, so the endpoint must take identity from the token, never the body.
+  @@unique([userId, week, mediaType])
+  @@index([week, mediaType])
+}
+
 model Rating {
   id        String   @id @default(uuid())
   userId    String

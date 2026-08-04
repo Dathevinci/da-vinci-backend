@@ -14,6 +14,7 @@ import likesRoutes from "./routes/likes.routes";
 import commentRoutes from "./routes/comment.routes";
 import ratingRoutes from "./routes/rating.routes";
 import pollRoutes from "./routes/poll.routes";
+import gemRoutes from "./routes/gem.routes";
 import messageRoutes from "./routes/message.routes";
 import systemRoutes from "./routes/system.routes";
 import announcementRoutes from "./routes/announcement.routes";
@@ -66,7 +67,7 @@ app.use("/api", apiLimiter);
 // timeline recorder) is otherwise impossible to distinguish from the previous
 // deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "dungeon-dispatch", "dungeon-domains", "revive-scaling", "dungeon-supports", "forge", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "mythos", "mythic-dust-1k", "max-card", "mythic-op", "pantheon", "gods", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments"] });
+  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "dungeon-dispatch", "dungeon-domains", "revive-scaling", "dungeon-supports", "forge", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "mythos", "mythic-dust-1k", "max-card", "mythic-op", "pantheon", "gods", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems"] });
 });
 
 // Mount routers
@@ -80,6 +81,7 @@ app.use("/api/likes", likesRoutes);
 app.use("/api/comments", commentRoutes);
 app.use("/api/ratings", ratingRoutes);
 app.use("/api/polls", pollRoutes);
+app.use("/api/gems", gemRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/system", systemRoutes);
 app.use("/api/announcements", announcementRoutes);

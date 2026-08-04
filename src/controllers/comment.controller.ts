@@ -589,7 +589,10 @@ export const togglePinComment = async (req: Request, res: Response, next: NextFu
 // can't inflate the count; staff read the counts straight from the table.
 export const reportComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { id } = req.params;
+    // Cast, don't destructure: this Express version types req.params values
+    // as `string | string[]`, which Prisma's where/create inputs reject. The
+    // other handlers in this file all take the same shape.
+    const id = req.params.id as string;
     // Identity from the VERIFIED token, never req.body.userId — the whole
     // point of the unique row is "one report per member", and a body-supplied
     // id can be rotated through every user id the public feed hands out,

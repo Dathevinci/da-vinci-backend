@@ -243,8 +243,23 @@ const KEPT_RARITIES = new Set(["epic"]);
 const RETIRED_IDS = new Set(
   Object.values(RAW_CARDS).filter((c) => !KEPT_RARITIES.has(c.rarity)).map((c) => c.id)
 );
+
+/**
+ * ONE BUNDLE. The old sets — Ascension, Abyssal, Ronin, Requiem, Covenant,
+ * Mythos, Pantheon, Genesis, Succour, Vigil — were built around tiers that no
+ * longer exist, and what survived scattered across three of them with two or
+ * four cards each. A set you cannot finish is worse than no set at all, so
+ * everything that remains is collected under a single name.
+ *
+ * Support cards come along: the three epic ones. The other seventeen were
+ * common, rare or legendary and went with the wipe, so "all supports" is no
+ * longer a thing that can be honoured without undoing it.
+ */
+export const STARTER_SET = "Foundation";
 export const CARDS: Record<string, CardDef> = Object.fromEntries(
-  Object.entries(RAW_CARDS).filter(([, c]) => KEPT_RARITIES.has(c.rarity))
+  Object.entries(RAW_CARDS)
+    .filter(([, c]) => KEPT_RARITIES.has(c.rarity))
+    .map(([id, c]) => [id, { ...c, set: STARTER_SET }])
 );
 /** Ids that used to exist, for cleanup jobs that must recognise an old id. */
 export const RETIRED_CARD_IDS: string[] = Array.from(RETIRED_IDS);
@@ -420,23 +435,18 @@ export interface SetReward {
   shards: number;
   title: string;   // shown on the profile once claimed
 }
+/**
+ * ONE SET, ONE REWARD. Every old set is gone with the tiers it was built from:
+ * Requiem and Covenant were legendary chases, Mythos and Pantheon were
+ * synthesis-only, and the rest lost most of their cards to the wipe.
+ *
+ * They are removed rather than left with empty card lists on purpose. An
+ * entry here whose cardsInSet() returns nothing is the exploit that pays out
+ * for owning nothing — claimSet refuses empty sets now, but not defining them
+ * is the stronger guarantee.
+ */
 export const SET_REWARDS: Record<string, SetReward> = {
-  Succour:   { set: "Succour",   ap: 2500, shards: 600, title: "Keeper of the Quiet Hand" },
-  Ascension: { set: "Ascension", ap: 3000, shards: 500, title: "Archivist of Ascension" },
-  Abyssal:   { set: "Abyssal",   ap: 3000, shards: 500, title: "Sounder of the Abyss" },
-  Ronin:     { set: "Ronin",     ap: 3000, shards: 500, title: "Sword Without a Lord" },
-  Vigil:     { set: "Vigil",     ap: 3200, shards: 550, title: "Keeper of the Long Watch" },
-  Genesis:   { set: "Genesis",   ap: 1000, shards: 200, title: "Keeper of Genesis" },
-  // Seven legendaries, no padding — completing this is the longest chase in
-  // the game, and the payout is sized like it.
-  Requiem:   { set: "Requiem",   ap: 8000, shards: 1500, title: "The Requiem Made Whole" },
-  // Six legendary supports, no padding — the second-longest chase.
-  Covenant:  { set: "Covenant",  ap: 6000, shards: 1200, title: "Signatory of the Covenant" },
-  // Ten Mythics, all synthesis-born. Completing this means fusing every
-  // pair of the five eligible legendaries — the longest project in the game.
-  Mythos:    { set: "Mythos",    ap: 12000, shards: 2500, title: "The Mythos Entire" },
-  // Three gods, each costing two Mythics — which cost two legendaries each.
-  Pantheon:  { set: "Pantheon",  ap: 20000, shards: 4000, title: "The Pantheon Risen" },
+  [STARTER_SET]: { set: STARTER_SET, ap: 3000, shards: 500, title: "Keeper of the Foundation" },
 };
 
 // Distinct card ids belonging to a set (for completion checks).

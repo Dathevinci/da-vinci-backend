@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { heldCardIds } from "../lib/showcase";
 import { getRole } from "../utils/economy";
-import { CARD_STATS, FOIL_MULT } from "../data/duelRules";
+import { CARD_STATS, FOIL_MULT, rollStats } from "../data/duelRules";
 import {
   CARDS,
   PACK_PRICE,
@@ -404,9 +404,17 @@ export const openPack = async (req: Request, res: Response, next: NextFunction) 
         // failed grant can never leave an orphan print (or vice versa).
         const prints: PrintInfo[] = [];
         for (const cardId of pulls) {
+          // The roll is taken ONCE, on the copy that first opens this card.
+          // A duplicate increments the count and leaves the roll alone —
+          // re-rolling every dupe would quietly erase a good roll the owner
+          // had already sunk shards into.
+          const roll = rollStats(CARDS[cardId]);
           await tx.userCard.upsert({
             where: { userId_cardId: { userId: userId!, cardId } },
-            create: { userId: userId!, cardId, count: 1 },
+            create: {
+              userId: userId!, cardId, count: 1,
+              rolledHp: roll?.hp ?? null, rolledAtk: roll?.atk ?? null,
+            },
             update: { count: { increment: 1 }, hibernating: false },
           });
           if (isLegendary(cardId)) prints.push(...(await mintPrints(tx, userId!, cardId, 1)));
@@ -773,9 +781,17 @@ export const openRelicPack = async (req: Request, res: Response, next: NextFunct
 
         const prints: PrintInfo[] = [];
         for (const cardId of pulls) {
+          // The roll is taken ONCE, on the copy that first opens this card.
+          // A duplicate increments the count and leaves the roll alone —
+          // re-rolling every dupe would quietly erase a good roll the owner
+          // had already sunk shards into.
+          const roll = rollStats(CARDS[cardId]);
           await tx.userCard.upsert({
             where: { userId_cardId: { userId: userId!, cardId } },
-            create: { userId: userId!, cardId, count: 1 },
+            create: {
+              userId: userId!, cardId, count: 1,
+              rolledHp: roll?.hp ?? null, rolledAtk: roll?.atk ?? null,
+            },
             update: { count: { increment: 1 }, hibernating: false },
           });
           if (isLegendary(cardId)) prints.push(...(await mintPrints(tx, userId!, cardId, 1)));

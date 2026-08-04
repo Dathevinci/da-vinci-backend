@@ -59,6 +59,39 @@ export const CARD_STATS_BY_ID: Record<string, { hp: number; atk: number }> = {
   card_saintking:     { hp: 25, atk: 10 },
 };
 
+/**
+ * THE PULL ROLL — per-copy variance, banded so it stays fair.
+ *
+ * The band is a percentage of the CARD'S OWN printed stats, never a flat
+ * spread and never a re-roll across rarities. That is the whole point: a
+ * Squire rolls around a Squire and a Saint King rolls around a Saint King, so
+ * a lucky common can never out-roll into legendary territory, and a rare that
+ * was authored to hit hard (the Sun Knight at 11) keeps hitting hard.
+ *
+ * ±15%, floored at 1. Wide enough that two copies of the same card feel
+ * different and worth re-pulling; narrow enough that the tier you pulled is
+ * still the tier you got.
+ *
+ * SUPPORTS AND GROUNDS ARE NOT ROLLED. Their printed effect IS the card —
+ * "defend for 3 damage each turn" has to mean 3, or the text on the card is a
+ * lie. rollStats returns null for them and the printed effect stands.
+ *
+ * Shards close the gap deliberately: levels and forge ranks apply on top of
+ * the roll, so a poor roll is a slower start rather than a dead copy.
+ */
+export const ROLL_SPREAD = 0.15;
+
+export function rollStats(def: { id: string; rarity: CardRarity; set: string; support?: unknown; ground?: unknown }):
+  { hp: number; atk: number } | null {
+  if (def.support || def.ground) return null;
+  const base = CARD_STATS_BY_ID[def.id] ?? (def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity]);
+  const jitter = (n: number) => {
+    const delta = n * ROLL_SPREAD;
+    return Math.max(1, Math.round(n - delta + Math.random() * delta * 2));
+  };
+  return { hp: jitter(base.hp), atk: jitter(base.atk) };
+}
+
 export const CARD_STATS: Record<CardRarity, { hp: number; atk: number }> = {
   common:    { hp: 18, atk: 7 },
   rare:      { hp: 20, atk: 8 },
@@ -161,14 +194,22 @@ export interface DuelState {
 
 export function buildFighter(
   cardId: string, foil: boolean, level = 1, skillLevel = 1,
-  atkForge = 0, hpForge = 0, affix = "", mythMod = ""
+  atkForge = 0, hpForge = 0, affix = "", mythMod = "",
+  /** The owned copy's pull roll. Null/absent = printed stats. */
+  rolledHp?: number | null, rolledAtk?: number | null
 ): Fighter | null {
   const def = CARDS[cardId];
-  // Support cards are played, never fielded — they have no stat line, so
-  // letting one into a deck would field a fighter with undefined HP.
-  if (!def || def.support) return null;
-  // A per-card entry wins over the rarity table — see CARD_STATS_BY_ID.
-  const base = CARD_STATS_BY_ID[def.id] ?? (def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity]);
+  // Support and ground cards are played, never fielded — they have no stat
+  // line, so letting one into a deck would field a fighter with undefined HP.
+  if (!def || def.support || def.ground) return null;
+  // Precedence: this COPY's roll, then the per-card table, then rarity. The
+  // roll has to land here rather than only on the card page — a rolled stat
+  // that didn't fight would be a number pretending to matter.
+  const printed = CARD_STATS_BY_ID[def.id] ?? (def.set === "Pantheon" ? GOD_STATS : CARD_STATS[def.rarity]);
+  const base = {
+    hp: typeof rolledHp === "number" && rolledHp > 0 ? rolledHp : printed.hp,
+    atk: typeof rolledAtk === "number" && rolledAtk > 0 ? rolledAtk : printed.atk,
+  };
   // Foil and level stack. Levels are shard-bought, so they have to show up
   // HERE — a level that only changed a number on the card page would be a
   // currency sink that sells nothing. The FORGE lands after the multipliers

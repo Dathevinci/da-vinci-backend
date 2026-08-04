@@ -404,6 +404,12 @@ model CardListing {
 // one row that upserts on every pull.
 // NOTE: skillLevel below is on UserCard — a skill belongs to YOUR copy of a
 // legendary, not to the card in the abstract, exactly like level does.
+/**
+ * ROLLED STATS live on the owned copy, not the card: two people holding the
+ * same Squire hold different Squires. Nullable because every copy pulled
+ * before this existed has no roll and must keep falling back to the printed
+ * stats — a null here means "printed", never "zero".
+ */
 model UserCard {
   id        String   @id @default(uuid())
   userId    String
@@ -422,6 +428,13 @@ model UserCard {
   // than having the choice made for them. Meaningless on non-legendaries,
   // which have no skill in the catalog.
   skillLevel Int     @default(1)
+  // The per-copy roll, taken once when the copy is pulled. Null = printed
+  // stats, which is every copy that predates this and every support and
+  // ground card (their printed effect IS the card, so there is nothing to
+  // roll). Levels and forge ranks apply ON TOP of these, so a poor roll is
+  // something shards can close rather than a permanent loss.
+  rolledHp   Int?
+  rolledAtk  Int?
   // ── Dungeon Dispatch condition ── deliberately separate from `hibernating`
   // (the duel sleep): a card asleep from a lost duel can still raid, and a
   // card dead in a dungeon can still duel. Two modes, two bodies.

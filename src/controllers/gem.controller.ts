@@ -37,7 +37,14 @@ function weekKeyOffset(n: number, d: Date = new Date()): string {
   return weekKey(shifted);
 }
 
-const MODES = new Set(["manhwa", "novel"]);
+/**
+ * Which modes can run a weekly gem vote. Anime was excluded only because the
+ * feature shipped alongside the manhwa and novel home rebuilds — nothing about
+ * the vote is reading-specific. The GemVote row is keyed
+ * `@@unique([userId, week, mediaType])`, so a third mediaType needs no schema
+ * change and cannot collide with the existing two.
+ */
+const MODES = new Set(["anime", "manhwa", "novel"]);
 
 /**
  * GET /api/gems?mediaType=manhwa

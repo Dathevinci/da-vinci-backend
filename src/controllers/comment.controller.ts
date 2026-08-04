@@ -200,7 +200,17 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
        */
       comments = await prisma.comment.findMany({
         where,
-        orderBy: { createdAt: sort === 'oldest' ? 'asc' : 'desc' },
+        /**
+         * FORUM posts put pinned first on every sort — a pin there means
+         * "this stays on top", and the pinned card is also where the Unpin
+         * control lives, so a pin that sorted off page one could never be
+         * undone. Media comment threads keep strict chronology: a pinned
+         * comment weeks older than the newest one leading an explicitly
+         * chosen "New" is what made that sort look broken.
+         */
+        orderBy: forum
+          ? [{ isPinned: 'desc' as const }, { createdAt: sort === 'oldest' ? 'asc' as const : 'desc' as const }]
+          : { createdAt: sort === 'oldest' ? 'asc' : 'desc' },
         take: limit,
         skip,
         include: COMMENT_INCLUDE,

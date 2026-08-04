@@ -404,12 +404,10 @@ model CardListing {
 // one row that upserts on every pull.
 // NOTE: skillLevel below is on UserCard — a skill belongs to YOUR copy of a
 // legendary, not to the card in the abstract, exactly like level does.
-/**
- * ROLLED STATS live on the owned copy, not the card: two people holding the
- * same Squire hold different Squires. Nullable because every copy pulled
- * before this existed has no roll and must keep falling back to the printed
- * stats — a null here means "printed", never "zero".
- */
+// ROLLED STATS live on the owned copy, not the card: two people holding the
+// same Squire hold different Squires. Nullable because every copy pulled
+// before this existed has no roll and must keep falling back to the printed
+// stats — a null here means "printed", never "zero".
 model UserCard {
   id        String   @id @default(uuid())
   userId    String

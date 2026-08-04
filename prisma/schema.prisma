@@ -425,10 +425,6 @@ model UserCard {
   // ── Dungeon Dispatch condition ── deliberately separate from `hibernating`
   // (the duel sleep): a card asleep from a lost duel can still raid, and a
   // card dead in a dungeon can still duel. Two modes, two bodies.
-  dgnHp      Int?    // current dungeon HP carried between runs; null = full
-  dgnInjured Boolean @default(false) // came home under 40% — BLOCKS dispatch until healed
-  dgnDead    Boolean @default(false) // fell in a dungeon; revived with Arise Points, never deleted
-  dgnDeaths  Int     @default(0)     // lifetime death count — each one makes the NEXT revival dearer
   // ── THE FORGE ── flat stat training, bought with shards, deliberately
   // expensive: cost doubles per rank. Separate tracks so a player can shape
   // a card — glass cannon or anvil — instead of only raising the level dial.
@@ -450,21 +446,6 @@ model UserCard {
 // still count — the dungeon keeps what it takes either way). Follows the
 // Duel pattern: plain-string userId, no relation, status as a documented
 // string.
-model DungeonRun {
-  id           String    @id @default(uuid())
-  userId       String
-  dungeon      String    // id in DUNGEONS (dungeonRules.ts)
-  floor        Int       @default(0)  // floors CLEARED so far
-  status       String    @default("RUNNING") // RUNNING | RECALLED | WIPED | CLEARED
-  state        String    // JSON DungeonState: party hp/atk, unbanked earnings
-  apEarned     Int       @default(0)  // mirror of state for cheap reads
-  shardsEarned Int       @default(0)
-  createdAt    DateTime  @default(now())
-  finishedAt   DateTime?
-
-  @@index([userId, status])
-}
-
 // One physical COPY of a legendary card. UserCard.count stays the source of
 // truth for HOW MANY you own; a print is the identity of each copy — a global
 // serial in mint order plus the condition it was pulled in. Condition and

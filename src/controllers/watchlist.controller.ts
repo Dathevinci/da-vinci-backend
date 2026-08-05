@@ -72,9 +72,12 @@ export const addToWatchlist = async (req: Request, res: Response, next: NextFunc
       const addKey = `add:${createData.anilistId}`;
       const addedBefore = await prisma.pointLog.findFirst({ where: { userId, reason: addKey } });
       if (!addedBefore) {
-        await prisma.user.update({
+        // The update already returns the row, so the username costs no extra
+        // query — see the link below for why it is needed.
+        const paid = await prisma.user.update({
           where: { id: userId },
-          data: { arisePoints: { increment: 2 } }
+          data: { arisePoints: { increment: 2 } },
+          select: { username: true },
         });
         await prisma.pointLog.create({ data: { userId, amount: 2, reason: addKey } });
         await prisma.notification.create({
@@ -83,7 +86,20 @@ export const addToWatchlist = async (req: Request, res: Response, next: NextFunc
             actorId: userId,
             type: "ARISE_POINTS_WATCHLIST",
             message: `You earned 2 Arise Points for adding ${createData.title || 'an anime'} to your list!`,
-            link: `/profile`
+            /**
+             * `/profile` does not exist and never has. The app's own profile
+             * route is `/user/[username]`, so every one of these notifications
+             * has been a guaranteed 404 for as long as they have been sent —
+             * the notification is stored, so the dead link is also sitting in
+             * the database on every past one.
+             *
+             * Falls back to the anime that was added when the username is
+             * somehow missing: a real page about the thing the notification is
+             * about beats another dead end.
+             */
+            link: paid.username
+              ? `/user/${encodeURIComponent(paid.username)}`
+              : `/anime/${createData.anilistId}`,
           }
         });
       }

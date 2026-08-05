@@ -40,7 +40,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/rss-parser": "^2.1.2",
     "@types/torrent-stream": "^1.2.5",
     "nodemon": "^3.1.14"
   }

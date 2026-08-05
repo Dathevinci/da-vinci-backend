@@ -8,6 +8,7 @@ import dashboardRoutes from "./routes/dashboard.routes";
 import animeRoutes from "./routes/anime.routes";
 import searchRoutes from "./routes/search.routes";
 import calendarRoutes from "./routes/calendar.routes";
+import torrentRoutes from "./routes/torrent.routes";
 import userRoutes from "./routes/user.routes";
 import watchlistRoutes from "./routes/watchlist.routes";
 import likesRoutes from "./routes/likes.routes";
@@ -72,9 +73,10 @@ app.get("/health", (req, res) => {
 // Mount routers
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/anime", animeRoutes);
-app.use("/api/search", searchRoutes);
-app.use("/api/calendar", calendarRoutes);
-app.use("/api/users", userRoutes);
+app.use('/api/search', searchRoutes);
+app.use('/api/calendar', calendarRoutes);
+app.use('/api/torrent', torrentRoutes);
+app.use('/api/users', userRoutes);
 app.use("/api/watchlist", watchlistRoutes);
 app.use("/api/likes", likesRoutes);
 app.use("/api/comments", commentRoutes);

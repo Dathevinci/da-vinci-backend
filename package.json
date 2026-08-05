@@ -33,11 +33,15 @@
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.3",
     "prisma": "^6.0.0",
+    "rss-parser": "^3.13.0",
+    "torrent-stream": "^1.2.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/rss-parser": "^2.1.2",
+    "@types/torrent-stream": "^1.2.5",
     "nodemon": "^3.1.14"
   }
 }

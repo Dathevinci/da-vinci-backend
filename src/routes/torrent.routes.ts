@@ -103,6 +103,10 @@ router.get('/stream', (req: Request, res: Response) => {
     trackers: [
       'udp://tracker.opentrackr.org:1337/announce',
       'udp://tracker.openbittorrent.com:80/announce',
+      'udp://tracker.coppersurfer.tk:6969/announce',
+      'udp://tracker.leechers-paradise.org:6969/announce',
+      'udp://p4p.arenabg.com:1337/announce',
+      'udp://tracker.internetwarriors.net:1337/announce'
     ]
   });
 
@@ -129,7 +133,7 @@ router.get('/stream', (req: Request, res: Response) => {
     if (!range) {
       const head = {
         'Content-Length': file.length,
-        'Content-Type': 'video/mp4', // Most browsers will try to play mkv if served as mp4/webm or application/octet-stream
+        'Content-Type': 'video/webm', // WebM triggers Chromium's internal Matroska demuxer, enabling MKV playback
       };
       res.writeHead(200, head);
       file.createReadStream().pipe(res);
@@ -145,7 +149,7 @@ router.get('/stream', (req: Request, res: Response) => {
       'Content-Range': `bytes ${start}-${end}/${file.length}`,
       'Accept-Ranges': 'bytes',
       'Content-Length': chunksize,
-      'Content-Type': 'video/mp4',
+      'Content-Type': 'video/webm',
     };
 
     res.writeHead(206, head);

@@ -114,19 +114,23 @@ router.get('/search', async (req: Request, res: Response) => {
   });
   const bestItem = items[0];
 
-  // Construct a proper magnet URI from the info hash
-  let magnetLink: string;
-  if (bestItem.infoHash) {
-    magnetLink = `magnet:?xt=urn:btih:${bestItem.infoHash}&dn=${encodeURIComponent(bestItem.title || '')}`;
-  } else {
+  // Construct proper magnet URIs for all found items
+  const allMagnets: string[] = items
+    .filter((item: any) => item.infoHash)
+    .map((item: any) => `magnet:?xt=urn:btih:${item.infoHash}&dn=${encodeURIComponent(item.title || '')}`);
+
+  if (allMagnets.length === 0) {
     return res.status(404).json({ success: false, message: 'No magnet link available for this torrent.' });
   }
+
+  const magnetLink = allMagnets[0];
 
   return res.json({
     success: true,
     data: {
       title: bestItem.title,
       link: magnetLink,
+      allMagnets,
       size: bestItem.nyaaSize || bestItem.contentSnippet,
       seeders: bestItem.seeders || '0',
       quality: matchedQuality,
@@ -136,15 +140,24 @@ router.get('/search', async (req: Request, res: Response) => {
 
 /**
  * GET /api/torrent/resolve
- * Query params: magnet
+ * Query params: magnet OR magnets (JSON array of candidate magnet links)
  * Resolves a magnet link via Real-Debrid into a direct CDN URL.
- * Returns JSON { success, url, filename, filesize, mimeType }.
+ * Automatically cascades to alternative candidates if a magnet is DMCA blacklisted (infringing_file).
  */
 router.get('/resolve', async (req: Request, res: Response) => {
-  const magnet = req.query.magnet as string;
+  let magnetList: string[] = [];
+  if (req.query.magnets) {
+    try {
+      magnetList = JSON.parse(req.query.magnets as string);
+    } catch {
+      magnetList = [req.query.magnets as string];
+    }
+  } else if (req.query.magnet) {
+    magnetList = [req.query.magnet as string];
+  }
   
-  if (!magnet) {
-    return res.status(400).json({ success: false, message: 'Missing magnet link' });
+  if (magnetList.length === 0) {
+    return res.status(400).json({ success: false, message: 'Missing magnet link(s)' });
   }
 
   const apiKey = process.env.REAL_DEBRID_API_KEY;
@@ -153,73 +166,90 @@ router.get('/resolve', async (req: Request, res: Response) => {
   }
 
   const headers = { Authorization: `Bearer ${apiKey}` };
+  let lastError: any = null;
 
-  try {
-    // 1. Add Magnet to Real-Debrid
-    const addRes = await axios.post('https://api.real-debrid.com/rest/1.0/torrents/addMagnet', 
-      new URLSearchParams({ magnet }), 
-      { headers }
-    );
-    const torrentId = addRes.data.id;
+  for (let i = 0; i < magnetList.length; i++) {
+    const magnet = magnetList[i];
+    try {
+      // 1. Add Magnet to Real-Debrid
+      const addRes = await axios.post('https://api.real-debrid.com/rest/1.0/torrents/addMagnet', 
+        new URLSearchParams({ magnet }), 
+        { headers }
+      );
+      const torrentId = addRes.data.id;
 
-    // 2. Get Torrent Info to see available files
-    let infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
-    let info = infoRes.data;
+      // 2. Get Torrent Info to see available files
+      let infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
+      let info = infoRes.data;
 
-    // 3. Find the largest file (the main video)
-    if (!info.files || info.files.length === 0) {
-      return res.status(404).json({ success: false, message: 'No files found in this torrent.' });
-    }
-    const largestFile = info.files.reduce((prev: any, current: any) => (prev.bytes > current.bytes) ? prev : current);
+      // 3. Find the largest file (the main video)
+      if (!info.files || info.files.length === 0) {
+        continue;
+      }
+      const largestFile = info.files.reduce((prev: any, current: any) => (prev.bytes > current.bytes) ? prev : current);
 
-    // 4. Select ONLY the largest file
-    await axios.post(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, 
-      new URLSearchParams({ files: largestFile.id.toString() }), 
-      { headers }
-    );
+      // 4. Select ONLY the largest file
+      await axios.post(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, 
+        new URLSearchParams({ files: largestFile.id.toString() }), 
+        { headers }
+      );
 
-    // 5. Re-fetch info to check cache status
-    infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
-    info = infoRes.data;
+      // 5. Re-fetch info to check cache status
+      infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
+      info = infoRes.data;
 
-    if (info.status !== 'downloaded') {
-      return res.status(202).json({ 
-        success: false, 
-        message: 'Torrent is being cached on Real-Debrid. Please retry in a moment.',
-        status: info.status,
-        progress: info.progress 
+      if (info.status !== 'downloaded') {
+        return res.status(202).json({ 
+          success: false, 
+          message: 'Torrent is being cached on Real-Debrid. Please retry in a moment.',
+          status: info.status,
+          progress: info.progress 
+        });
+      }
+
+      if (!info.links || info.links.length === 0) {
+        continue;
+      }
+
+      // 6. Unrestrict the link to get the direct CDN URL
+      const unrestrictRes = await axios.post('https://api.real-debrid.com/rest/1.0/unrestrict/link', 
+        new URLSearchParams({ link: info.links[0] }), 
+        { headers }
+      );
+
+      const data = unrestrictRes.data;
+
+      return res.json({
+        success: true,
+        url: data.download,
+        filename: data.filename,
+        filesize: data.filesize,
+        mimeType: data.mimeType,
       });
+
+    } catch (error: any) {
+      lastError = error;
+      const rdError = error.response?.data;
+      const rdStatus = error.response?.status;
+      const isInfringing = rdStatus === 451 || rdError?.error === 'infringing_file' || rdError?.error_code === 35;
+
+      if (isInfringing && i < magnetList.length - 1) {
+        console.warn(`Magnet ${i + 1}/${magnetList.length} is DMCA blacklisted (infringing_file). Auto-trying next magnet...`);
+        continue;
+      }
+      
+      // If not an infringing file or no more candidates, break and return error
+      break;
     }
-
-    if (!info.links || info.links.length === 0) {
-      return res.status(404).json({ success: false, message: 'No valid video links found.' });
-    }
-
-    // 6. Unrestrict the link to get the direct CDN URL
-    const unrestrictRes = await axios.post('https://api.real-debrid.com/rest/1.0/unrestrict/link', 
-      new URLSearchParams({ link: info.links[0] }), 
-      { headers }
-    );
-
-    const data = unrestrictRes.data;
-
-    return res.json({
-      success: true,
-      url: data.download,
-      filename: data.filename,
-      filesize: data.filesize,
-      mimeType: data.mimeType,
-    });
-
-  } catch (error: any) {
-    const rdError = error.response?.data;
-    const rdStatus = error.response?.status;
-    console.error("Real-Debrid API Error:", rdStatus, rdError || error.message);
-    return res.status(500).json({ 
-      success: false, 
-      message: `Real-Debrid Error (${rdStatus || 'unknown'}): ${typeof rdError === 'string' ? rdError : JSON.stringify(rdError) || error.message}` 
-    });
   }
+
+  const rdError = lastError?.response?.data;
+  const rdStatus = lastError?.response?.status;
+  console.error("Real-Debrid API Error:", rdStatus, rdError || lastError?.message);
+  return res.status(500).json({ 
+    success: false, 
+    message: `Real-Debrid Error (${rdStatus || 'unknown'}): ${typeof rdError === 'string' ? rdError : JSON.stringify(rdError) || lastError?.message}` 
+  });
 });
 
 export default router;

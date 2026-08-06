@@ -20,14 +20,12 @@ router.get('/extract', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Spawn ffmpeg to extract the English subtitle stream or first subtitle stream
+  // Spawn ffmpeg to extract any available subtitle stream
   const ffmpegArgs = [
-    '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n',
     '-probesize', '10000000',
     '-analyzeduration', '10000000',
     '-i', videoUrl,
-    '-map', '0:s:m:language:eng?', // Prefer English subtitle track
-    '-map', '0:s:0?',             // Fallback to first subtitle track
+    '-map', '0:s?',                // Select subtitle streams if present
     '-c:s', 'webvtt',              // Convert to webvtt
     '-f', 'webvtt',                // Output format webvtt
     '-hide_banner',                // Suppress banner to keep stdout clean

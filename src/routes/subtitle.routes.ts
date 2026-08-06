@@ -8,7 +8,7 @@ const router = Router();
 /**
  * GET /api/subtitles/extract
  * Query params: videoUrl
- * Extracts the first subtitle stream (0:s:0) from the video URL, converts it to WebVTT, and streams it.
+ * Extracts the first subtitle stream from the video URL, converts it to WebVTT, and streams it.
  */
 router.get('/extract', (req: Request, res: Response) => {
   const { videoUrl } = req.query;
@@ -16,27 +16,28 @@ router.get('/extract', (req: Request, res: Response) => {
     return res.status(400).json({ success: false, message: 'Missing videoUrl' });
   }
 
-  // We need to set the proper content type for WebVTT
   res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Spawn ffmpeg to extract any available subtitle stream
+  // Spawn ffmpeg to extract the FIRST subtitle stream only
   const ffmpegArgs = [
-    '-probesize', '10000000',
-    '-analyzeduration', '10000000',
+    '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    '-probesize', '20000000',
+    '-analyzeduration', '20000000',
     '-i', videoUrl,
-    '-map', '0:s?',                // Select subtitle streams if present
-    '-c:s', 'webvtt',              // Convert to webvtt
-    '-f', 'webvtt',                // Output format webvtt
-    '-hide_banner',                // Suppress banner to keep stdout clean
-    '-loglevel', 'error',           // Only output errors to stderr
-    'pipe:1'                       // Output to stdout
+    '-map', '0:s:0',              // Select ONLY the first subtitle stream (not all)
+    '-c:s', 'webvtt',
+    '-f', 'webvtt',
+    '-hide_banner',
+    '-loglevel', 'error',
+    'pipe:1'
   ];
 
   try {
     const child = spawn(ffmpeg as string, ffmpegArgs);
+    let hasData = false;
 
-    // Pipe the ffmpeg stdout directly to the response
+    child.stdout.on('data', () => { hasData = true; });
     child.stdout.pipe(res);
 
     child.stderr.on('data', (data) => {
@@ -44,17 +45,18 @@ router.get('/extract', (req: Request, res: Response) => {
     });
 
     child.on('close', (code) => {
-      if (code !== 0) {
-        console.error(`ffmpeg process exited with code ${code}`);
+      if (code !== 0 || !hasData) {
+        console.error(`ffmpeg exited with code ${code}, hasData=${hasData}`);
         if (!res.headersSent) {
-          res.status(200).send('WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\n[Subtitles unavailable for this stream]\n\n');
+          // Return a valid but empty VTT so the player doesn't error
+          res.status(200).send('WEBVTT\n\n');
         } else {
           res.end();
         }
       }
     });
 
-    // If the client closes the connection (stops watching), kill the ffmpeg process
+    // Kill ffmpeg if the client disconnects
     req.on('close', () => {
       child.kill('SIGINT');
     });
@@ -62,7 +64,7 @@ router.get('/extract', (req: Request, res: Response) => {
   } catch (err) {
     console.error('Failed to spawn ffmpeg:', err);
     if (!res.headersSent) {
-      res.status(200).send('WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\n[Subtitle extraction error]\n\n');
+      res.status(200).send('WEBVTT\n\n');
     }
   }
 });

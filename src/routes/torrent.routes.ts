@@ -159,8 +159,13 @@ router.get('/resolve', async (req: Request, res: Response) => {
     });
 
   } catch (error: any) {
-    console.error("Real-Debrid API Error:", error.response?.data || error.message);
-    return res.status(500).json({ success: false, message: 'Error communicating with Real-Debrid API' });
+    const rdError = error.response?.data;
+    const rdStatus = error.response?.status;
+    console.error("Real-Debrid API Error:", rdStatus, rdError || error.message);
+    return res.status(500).json({ 
+      success: false, 
+      message: `Real-Debrid Error (${rdStatus || 'unknown'}): ${typeof rdError === 'string' ? rdError : JSON.stringify(rdError) || error.message}` 
+    });
   }
 });
 

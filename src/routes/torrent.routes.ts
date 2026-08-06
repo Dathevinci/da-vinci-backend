@@ -82,20 +82,21 @@ router.get('/search', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/torrent/stream
+ * GET /api/torrent/resolve
  * Query params: magnet
- * Streams the video file from the torrent.
+ * Resolves a magnet link via Real-Debrid into a direct CDN URL.
+ * Returns JSON { success, url, filename, filesize, mimeType }.
  */
-router.get('/stream', async (req: Request, res: Response) => {
+router.get('/resolve', async (req: Request, res: Response) => {
   const magnet = req.query.magnet as string;
   
   if (!magnet) {
-    return res.status(400).send('Missing magnet link');
+    return res.status(400).json({ success: false, message: 'Missing magnet link' });
   }
 
   const apiKey = process.env.REAL_DEBRID_API_KEY;
   if (!apiKey) {
-    return res.status(500).send('REAL_DEBRID_API_KEY is not configured on the backend.');
+    return res.status(500).json({ success: false, message: 'REAL_DEBRID_API_KEY is not configured on the backend.' });
   }
 
   const headers = { Authorization: `Bearer ${apiKey}` };
@@ -112,65 +113,54 @@ router.get('/stream', async (req: Request, res: Response) => {
     let infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
     let info = infoRes.data;
 
-    // 3. Find the largest file (assume it's the main video)
+    // 3. Find the largest file (the main video)
     if (!info.files || info.files.length === 0) {
-      return res.status(404).send('No files found in this torrent.');
+      return res.status(404).json({ success: false, message: 'No files found in this torrent.' });
     }
     const largestFile = info.files.reduce((prev: any, current: any) => (prev.bytes > current.bytes) ? prev : current);
 
-    // 4. Select ONLY the largest file to start caching/downloading
+    // 4. Select ONLY the largest file
     await axios.post(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, 
       new URLSearchParams({ files: largestFile.id.toString() }), 
       { headers }
     );
 
-    // 5. Get Torrent Info AGAIN to check if it's instantly cached now that files are selected
+    // 5. Re-fetch info to check cache status
     infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
     info = infoRes.data;
 
-    // If it's still downloading, tell the player it's not ready
     if (info.status !== 'downloaded') {
-      return res.status(503).send('Torrent is currently being cached to Real-Debrid servers. Please try again in a few minutes.');
+      return res.status(202).json({ 
+        success: false, 
+        message: 'Torrent is being cached on Real-Debrid. Please retry in a moment.',
+        status: info.status,
+        progress: info.progress 
+      });
     }
 
     if (!info.links || info.links.length === 0) {
-      return res.status(404).send('No valid video links found in this torrent.');
+      return res.status(404).json({ success: false, message: 'No valid video links found.' });
     }
 
-    // 4. Unrestrict the link to get the direct high-speed HTTP URL
+    // 6. Unrestrict the link to get the direct CDN URL
     const unrestrictRes = await axios.post('https://api.real-debrid.com/rest/1.0/unrestrict/link', 
       new URLSearchParams({ link: info.links[0] }), 
       { headers }
     );
 
-    const directUrl = unrestrictRes.data.download;
+    const data = unrestrictRes.data;
 
-    // 5. Proxy the stream to spoof Content-Type to video/webm so Chrome can play MKVs natively
-    const range = req.headers.range;
-    const streamRes = await axios({
-      method: 'get',
-      url: directUrl,
-      responseType: 'stream',
-      headers: range ? { Range: range } : {}
+    return res.json({
+      success: true,
+      url: data.download,
+      filename: data.filename,
+      filesize: data.filesize,
+      mimeType: data.mimeType,
     });
-
-    // Forward the headers necessary for video streaming
-    for (const [key, value] of Object.entries(streamRes.headers)) {
-      if (['content-length', 'content-range', 'accept-ranges'].includes(key.toLowerCase())) {
-        res.setHeader(key, value as string);
-      }
-    }
-    
-    // SPOOF the content type so Chrome's Matroska demuxer accepts the MKV file
-    res.setHeader('Content-Type', 'video/webm');
-    res.status(streamRes.status || 200);
-
-    // Pipe the video data to the frontend
-    streamRes.data.pipe(res);
 
   } catch (error: any) {
     console.error("Real-Debrid API Error:", error.response?.data || error.message);
-    return res.status(500).send('Error communicating with Real-Debrid API');
+    return res.status(500).json({ success: false, message: 'Error communicating with Real-Debrid API' });
   }
 });
 

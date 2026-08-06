@@ -108,15 +108,25 @@ router.get('/stream', async (req: Request, res: Response) => {
     );
     const torrentId = addRes.data.id;
 
-    // 2. Select all files to initiate the download/caching process
+    // 2. Get Torrent Info to see available files
+    let infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
+    let info = infoRes.data;
+
+    // 3. Find the largest file (assume it's the main video)
+    if (!info.files || info.files.length === 0) {
+      return res.status(404).send('No files found in this torrent.');
+    }
+    const largestFile = info.files.reduce((prev: any, current: any) => (prev.bytes > current.bytes) ? prev : current);
+
+    // 4. Select ONLY the largest file to start caching/downloading
     await axios.post(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, 
-      new URLSearchParams({ files: 'all' }), 
+      new URLSearchParams({ files: largestFile.id.toString() }), 
       { headers }
     );
 
-    // 3. Get Torrent Info to check if it's instantly cached
-    const infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
-    const info = infoRes.data;
+    // 5. Get Torrent Info AGAIN to check if it's instantly cached now that files are selected
+    infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
+    info = infoRes.data;
 
     // If it's still downloading, tell the player it's not ready
     if (info.status !== 'downloaded') {
@@ -135,8 +145,28 @@ router.get('/stream', async (req: Request, res: Response) => {
 
     const directUrl = unrestrictRes.data.download;
 
-    // 5. Seamlessly redirect the frontend video player to the direct stream
-    return res.redirect(302, directUrl);
+    // 5. Proxy the stream to spoof Content-Type to video/webm so Chrome can play MKVs natively
+    const range = req.headers.range;
+    const streamRes = await axios({
+      method: 'get',
+      url: directUrl,
+      responseType: 'stream',
+      headers: range ? { Range: range } : {}
+    });
+
+    // Forward the headers necessary for video streaming
+    for (const [key, value] of Object.entries(streamRes.headers)) {
+      if (['content-length', 'content-range', 'accept-ranges'].includes(key.toLowerCase())) {
+        res.setHeader(key, value as string);
+      }
+    }
+    
+    // SPOOF the content type so Chrome's Matroska demuxer accepts the MKV file
+    res.setHeader('Content-Type', 'video/webm');
+    res.status(streamRes.status || 200);
+
+    // Pipe the video data to the frontend
+    streamRes.data.pipe(res);
 
   } catch (error: any) {
     console.error("Real-Debrid API Error:", error.response?.data || error.message);

@@ -43,7 +43,8 @@ function parseSize(description?: string): number {
 /**
  * GET /api/torrent/search
  * Query params: title, ep, quality (optional: '4k' | '1080p' | '720p')
- * Finds the best magnet link on Nyaa for the episode at the requested quality.
+ * Finds the best magnet link on Nyaa for the episode at the requested quality,
+ * and provides fallbacks in other qualities to prevent DMCA failures.
  */
 router.get('/search', async (req: Request, res: Response) => {
   const { title, ep, quality } = req.query;
@@ -55,67 +56,80 @@ router.get('/search', async (req: Request, res: Response) => {
   const epStr = String(ep).padStart(2, '0');
   const requestedQuality = (quality as string || '1080p').toLowerCase();
 
-  // Build resolution cascade based on requested quality
-  const resolutions: string[] = [];
-  if (requestedQuality === '4k' || requestedQuality === '2160p') {
-    resolutions.push('2160p', '1080p', '720p');
-  } else if (requestedQuality === '720p') {
-    resolutions.push('720p', '480p');
-  } else {
-    // Default: 1080p
-    resolutions.push('1080p', '720p');
-  }
-
   // Fansub groups to try in priority order
   const groups = ['SubsPlease', 'Erai-raws', ''];
-  
-  let items: any[] = [];
-  let matchedQuality = '';
+  let allItems: any[] = [];
 
-  // Try each resolution tier, and for each tier try preferred groups first
-  for (const res of resolutions) {
-    for (const group of groups) {
-      const query = group 
-        ? `${group} ${cleanTitle} ${epStr} ${res}` 
-        : `${cleanTitle} ${epStr} ${res}`;
-      items = await searchNyaa(query);
-      if (items.length > 0) {
-        matchedQuality = res;
-        break;
-      }
-    }
-    if (items.length > 0) break;
-  }
-
-  // Final fallback: search without any resolution filter
-  if (items.length === 0) {
-    for (const group of groups) {
-      const query = group 
-        ? `${group} ${cleanTitle} ${epStr}` 
-        : `${cleanTitle} ${epStr}`;
-      items = await searchNyaa(query);
-      if (items.length > 0) {
-        matchedQuality = 'auto';
-        break;
-      }
+  for (const group of groups) {
+    const query = group 
+      ? `${group} ${cleanTitle} ${epStr}` 
+      : `${cleanTitle} ${epStr}`;
+    const items = await searchNyaa(query);
+    if (items.length > 0) {
+      allItems = items;
+      break; // Found items with this group, no need to fallback to less specific queries
     }
   }
 
-  if (items.length === 0) {
+  if (allItems.length === 0) {
     return res.status(404).json({ success: false, message: 'No torrents found.' });
   }
 
-  // Sort by seeders first (more seeders = faster), then by size as tiebreaker
-  items.sort((a, b) => {
+  // Helper to score how closely an item matches the requested resolution
+  function getResScore(title: string, reqQual: string): number {
+    const t = title.toLowerCase();
+    const has4k = t.includes('2160p') || t.includes('4k');
+    const has1080 = t.includes('1080p');
+    const has720 = t.includes('720p');
+    const has480 = t.includes('480p');
+    
+    if (reqQual === '4k' || reqQual === '2160p') {
+      if (has4k) return 4;
+      if (has1080) return 3;
+      if (has720) return 2;
+      return 1;
+    } else if (reqQual === '720p') {
+      if (has720) return 4;
+      if (has1080) return 3;
+      if (has480) return 2;
+      if (has4k) return 1;
+      return 0;
+    } else {
+      // Default to 1080p preference
+      if (has1080) return 4;
+      if (has720) return 3;
+      if (has4k) return 2; // Usually we prefer 720p over 4k if 1080p is missing, to save bandwidth
+      return 1;
+    }
+  }
+
+  // Sort by resolution score first, then seeders, then size
+  allItems.sort((a, b) => {
+    const scoreA = getResScore(a.title, requestedQuality);
+    const scoreB = getResScore(b.title, requestedQuality);
+    if (scoreA !== scoreB) return scoreB - scoreA;
+    
     const seedA = parseInt(a.seeders) || 0;
     const seedB = parseInt(b.seeders) || 0;
     if (seedB !== seedA) return seedB - seedA;
+    
     return parseSize(b.contentSnippet) - parseSize(a.contentSnippet);
   });
-  const bestItem = items[0];
+
+  // Take top 15 results to provide plenty of fallbacks to Real-Debrid
+  const topItems = allItems.slice(0, 15);
+  const bestItem = topItems[0];
+
+  // Determine the actual matched quality of the best item
+  let matchedQuality = 'auto';
+  const bestTitle = bestItem.title.toLowerCase();
+  if (bestTitle.includes('2160p') || bestTitle.includes('4k')) matchedQuality = '2160p';
+  else if (bestTitle.includes('1080p')) matchedQuality = '1080p';
+  else if (bestTitle.includes('720p')) matchedQuality = '720p';
+  else if (bestTitle.includes('480p')) matchedQuality = '480p';
 
   // Construct proper magnet URIs for all found items
-  const allMagnets: string[] = items
+  const allMagnets: string[] = topItems
     .filter((item: any) => item.infoHash)
     .map((item: any) => `magnet:?xt=urn:btih:${item.infoHash}&dn=${encodeURIComponent(item.title || '')}`);
 

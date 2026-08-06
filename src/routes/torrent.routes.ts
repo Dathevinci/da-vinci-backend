@@ -166,6 +166,44 @@ router.get('/resolve', async (req: Request, res: Response) => {
   }
 
   const headers = { Authorization: `Bearer ${apiKey}` };
+
+  // Check instantAvailability to prioritize torrents that are already 100% cached on Real-Debrid
+  const hashToMagnet = new Map<string, string>();
+  const hashes: string[] = [];
+  for (const m of magnetList) {
+    const match = m.match(/btih:([a-fA-F0-9]{40})/i) || m.match(/btih:([a-zA-Z0-9]{32})/i);
+    if (match) {
+      const h = match[1].toLowerCase();
+      hashes.push(h);
+      hashToMagnet.set(h, m);
+    }
+  }
+
+  if (hashes.length > 0) {
+    try {
+      const hashPath = hashes.join('/');
+      const checkRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${hashPath}`, { headers });
+      const checkData = checkRes.data || {};
+      
+      const instantMagnets: string[] = [];
+      const nonInstantMagnets: string[] = [];
+      for (const h of hashes) {
+        const itemData = checkData[h];
+        if (itemData && itemData.rd && Array.isArray(itemData.rd) && itemData.rd.length > 0) {
+          instantMagnets.push(hashToMagnet.get(h)!);
+        } else {
+          nonInstantMagnets.push(hashToMagnet.get(h)!);
+        }
+      }
+
+      if (instantMagnets.length > 0) {
+        magnetList = [...instantMagnets, ...nonInstantMagnets];
+      }
+    } catch (e) {
+      console.warn("Real-Debrid instantAvailability check skipped:", e);
+    }
+  }
+
   let lastError: any = null;
 
   for (let i = 0; i < magnetList.length; i++) {
@@ -194,11 +232,20 @@ router.get('/resolve', async (req: Request, res: Response) => {
         { headers }
       );
 
-      // 5. Re-fetch info to check cache status
-      infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
-      info = infoRes.data;
+      // 5. Poll up to 5 times (7.5s max) if status is not 'downloaded' yet
+      let attempts = 0;
+      while (info.status !== 'downloaded' && attempts < 5) {
+        await new Promise(r => setTimeout(r, 1500));
+        infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
+        info = infoRes.data;
+        attempts++;
+      }
 
       if (info.status !== 'downloaded') {
+        // If not downloaded yet and we have other magnet candidates, try the next candidate!
+        if (i < magnetList.length - 1) {
+          continue;
+        }
         return res.status(202).json({ 
           success: false, 
           message: 'Torrent is being cached on Real-Debrid. Please retry in a moment.',
@@ -234,11 +281,10 @@ router.get('/resolve', async (req: Request, res: Response) => {
       const isInfringing = rdStatus === 451 || rdError?.error === 'infringing_file' || rdError?.error_code === 35;
 
       if (isInfringing && i < magnetList.length - 1) {
-        console.warn(`Magnet ${i + 1}/${magnetList.length} is DMCA blacklisted (infringing_file). Auto-trying next magnet...`);
+        console.warn(`Magnet ${i + 1}/${magnetList.length} is DMCA blacklisted. Auto-trying next magnet...`);
         continue;
       }
       
-      // If not an infringing file or no more candidates, break and return error
       break;
     }
   }

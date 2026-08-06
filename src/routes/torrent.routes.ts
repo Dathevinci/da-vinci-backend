@@ -1,13 +1,10 @@
 import { Router, Request, Response } from 'express';
 import Parser from 'rss-parser';
-import torrentStream from 'torrent-stream';
+import axios from 'axios';
 import url from 'url';
 
 const router = Router();
 const parser = new Parser();
-
-// Active torrent engines map to prevent re-downloading/spinning up multiple engines for the same magnet
-const engines = new Map<string, any>();
 
 // Helper to search Nyaa.si via RSS
 async function searchNyaa(query: string): Promise<any[]> {
@@ -85,77 +82,62 @@ router.get('/search', async (req: Request, res: Response) => {
 });
 
 /**
- * GET /api/torrent/stream
- * Query params: magnet
- * Streams the video file from the torrent.
- */
-router.get('/stream', (req: Request, res: Response) => {
+router.get('/stream', async (req: Request, res: Response) => {
   const magnet = req.query.magnet as string;
   
   if (!magnet) {
     return res.status(400).send('Missing magnet link');
   }
 
-  const engine = engines.get(magnet) || torrentStream(magnet, {
-    connections: 100,
-    uploads: 10,
-    tmp: './tmp', // store temporary chunks
-    trackers: [
-      'udp://tracker.opentrackr.org:1337/announce',
-      'udp://tracker.openbittorrent.com:80/announce',
-      'udp://tracker.coppersurfer.tk:6969/announce',
-      'udp://tracker.leechers-paradise.org:6969/announce',
-      'udp://p4p.arenabg.com:1337/announce',
-      'udp://tracker.internetwarriors.net:1337/announce'
-    ]
-  });
-
-  if (!engines.has(magnet)) {
-    engines.set(magnet, engine);
-    
-    // Optional: cleanup after 1 hour if idle
-    setTimeout(() => {
-      if (engines.has(magnet)) {
-        engine.destroy(() => {
-          engines.delete(magnet);
-        });
-      }
-    }, 60 * 60 * 1000);
+  const apiKey = process.env.REAL_DEBRID_API_KEY;
+  if (!apiKey) {
+    return res.status(500).send('REAL_DEBRID_API_KEY is not configured on the backend.');
   }
 
-  engine.on('ready', () => {
-    // Find the largest file (assume it's the video)
-    const file = engine.files.reduce((a: any, b: any) => (a.length > b.length ? a : b));
-    
-    file.select();
+  const headers = { Authorization: `Bearer ${apiKey}` };
 
-    const range = req.headers.range;
-    if (!range) {
-      const head = {
-        'Content-Length': file.length,
-        'Content-Type': 'video/webm', // WebM triggers Chromium's internal Matroska demuxer, enabling MKV playback
-      };
-      res.writeHead(200, head);
-      file.createReadStream().pipe(res);
-      return;
+  try {
+    // 1. Add Magnet to Real-Debrid
+    const addRes = await axios.post('https://api.real-debrid.com/rest/1.0/torrents/addMagnet', 
+      new URLSearchParams({ magnet }), 
+      { headers }
+    );
+    const torrentId = addRes.data.id;
+
+    // 2. Select all files to initiate the download/caching process
+    await axios.post(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, 
+      new URLSearchParams({ files: 'all' }), 
+      { headers }
+    );
+
+    // 3. Get Torrent Info to check if it's instantly cached
+    const infoRes = await axios.get(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, { headers });
+    const info = infoRes.data;
+
+    // If it's still downloading, tell the player it's not ready
+    if (info.status !== 'downloaded') {
+      return res.status(503).send('Torrent is currently being cached to Real-Debrid servers. Please try again in a few minutes.');
     }
 
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : file.length - 1;
-    const chunksize = (end - start) + 1;
+    if (!info.links || info.links.length === 0) {
+      return res.status(404).send('No valid video links found in this torrent.');
+    }
 
-    const head = {
-      'Content-Range': `bytes ${start}-${end}/${file.length}`,
-      'Accept-Ranges': 'bytes',
-      'Content-Length': chunksize,
-      'Content-Type': 'video/webm',
-    };
+    // 4. Unrestrict the link to get the direct high-speed HTTP URL
+    const unrestrictRes = await axios.post('https://api.real-debrid.com/rest/1.0/unrestrict/link', 
+      new URLSearchParams({ link: info.links[0] }), 
+      { headers }
+    );
 
-    res.writeHead(206, head);
-    const stream = file.createReadStream({ start, end });
-    stream.pipe(res);
-  });
+    const directUrl = unrestrictRes.data.download;
+
+    // 5. Seamlessly redirect the frontend video player to the direct stream
+    return res.redirect(302, directUrl);
+
+  } catch (error: any) {
+    console.error("Real-Debrid API Error:", error.response?.data || error.message);
+    return res.status(500).send('Error communicating with Real-Debrid API');
+  }
 });
 
 export default router;

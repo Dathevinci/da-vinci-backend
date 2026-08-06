@@ -20,15 +20,19 @@ router.get('/extract', (req: Request, res: Response) => {
   res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  // Spawn ffmpeg to extract the first subtitle stream
+  // Spawn ffmpeg to extract the English subtitle stream or first subtitle stream
   const ffmpegArgs = [
+    '-headers', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)\r\n',
+    '-probesize', '10000000',
+    '-analyzeduration', '10000000',
     '-i', videoUrl,
-    '-map', '0:s:0',     // Map the first subtitle stream
-    '-c:s', 'webvtt',    // Convert to webvtt
-    '-f', 'webvtt',      // Output format webvtt
-    '-hide_banner',      // Suppress banner to keep stdout clean
-    '-loglevel', 'error', // Only output errors to stderr
-    'pipe:1'             // Output to stdout
+    '-map', '0:s:m:language:eng?', // Prefer English subtitle track
+    '-map', '0:s:0?',             // Fallback to first subtitle track
+    '-c:s', 'webvtt',              // Convert to webvtt
+    '-f', 'webvtt',                // Output format webvtt
+    '-hide_banner',                // Suppress banner to keep stdout clean
+    '-loglevel', 'error',           // Only output errors to stderr
+    'pipe:1'                       // Output to stdout
   ];
 
   try {
@@ -45,7 +49,7 @@ router.get('/extract', (req: Request, res: Response) => {
       if (code !== 0) {
         console.error(`ffmpeg process exited with code ${code}`);
         if (!res.headersSent) {
-          res.status(500).send('WEBVTT\n\nNOTE ffmpeg extraction failed');
+          res.status(200).send('WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\n[Subtitles unavailable for this stream]\n\n');
         } else {
           res.end();
         }
@@ -60,7 +64,7 @@ router.get('/extract', (req: Request, res: Response) => {
   } catch (err) {
     console.error('Failed to spawn ffmpeg:', err);
     if (!res.headersSent) {
-      res.status(500).send('WEBVTT\n\nNOTE server error spawning ffmpeg');
+      res.status(200).send('WEBVTT\n\n1\n00:00:00.000 --> 00:00:05.000\n[Subtitle extraction error]\n\n');
     }
   }
 });

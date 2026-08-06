@@ -4,7 +4,15 @@ import axios from 'axios';
 import url from 'url';
 
 const router = Router();
-const parser = new Parser();
+const parser = new Parser({
+  customFields: {
+    item: [
+      ['nyaa:infoHash', 'infoHash'],
+      ['nyaa:seeders', 'seeders'],
+      ['nyaa:size', 'nyaaSize']
+    ]
+  }
+});
 
 // Helper to search Nyaa.si via RSS
 async function searchNyaa(query: string): Promise<any[]> {
@@ -67,16 +75,31 @@ router.get('/search', async (req: Request, res: Response) => {
     return res.status(404).json({ success: false, message: 'No torrents found.' });
   }
 
-  // Sort by size or seeders if possible (RSS gives size in description)
-  items.sort((a, b) => parseSize(b.contentSnippet) - parseSize(a.contentSnippet));
+  // Sort by seeders first (more seeders = faster), then by size as tiebreaker
+  items.sort((a, b) => {
+    const seedA = parseInt(a.seeders) || 0;
+    const seedB = parseInt(b.seeders) || 0;
+    if (seedB !== seedA) return seedB - seedA;
+    return parseSize(b.contentSnippet) - parseSize(a.contentSnippet);
+  });
   const bestItem = items[0];
+
+  // Construct a proper magnet URI from the info hash
+  let magnetLink: string;
+  if (bestItem.infoHash) {
+    magnetLink = `magnet:?xt=urn:btih:${bestItem.infoHash}&dn=${encodeURIComponent(bestItem.title || '')}`;
+  } else {
+    // Fallback: try to extract from the page link
+    return res.status(404).json({ success: false, message: 'No magnet link available for this torrent.' });
+  }
 
   return res.json({
     success: true,
     data: {
       title: bestItem.title,
-      link: bestItem.link, // Magnet link
-      size: bestItem.contentSnippet,
+      link: magnetLink,
+      size: bestItem.nyaaSize || bestItem.contentSnippet,
+      seeders: bestItem.seeders || '0',
     }
   });
 });

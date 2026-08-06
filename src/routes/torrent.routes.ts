@@ -82,6 +82,10 @@ router.get('/search', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/torrent/stream
+ * Query params: magnet
+ * Streams the video file from the torrent.
+ */
 router.get('/stream', async (req: Request, res: Response) => {
   const magnet = req.query.magnet as string;
   

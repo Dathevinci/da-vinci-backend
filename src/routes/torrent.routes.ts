@@ -42,33 +42,63 @@ function parseSize(description?: string): number {
 
 /**
  * GET /api/torrent/search
- * Query params: title, ep
- * Finds the best magnet link on Nyaa for the episode.
+ * Query params: title, ep, quality (optional: '4k' | '1080p' | '720p')
+ * Finds the best magnet link on Nyaa for the episode at the requested quality.
  */
 router.get('/search', async (req: Request, res: Response) => {
-  const { title, ep } = req.query;
+  const { title, ep, quality } = req.query;
   if (!title || !ep) {
     return res.status(400).json({ success: false, message: 'Missing title or ep' });
   }
 
   const cleanTitle = (title as string).replace(/[^a-zA-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
   const epStr = String(ep).padStart(2, '0');
+  const requestedQuality = (quality as string || '1080p').toLowerCase();
 
-  // We want to search for SubsPlease or Erai-raws preferably, as they have consistent naming.
-  // First, try 4K/2160p with SubsPlease
-  let items = await searchNyaa(`SubsPlease ${cleanTitle} ${epStr} 1080p`); // 4K anime is rare for weeklies, so we'll look for 1080p mostly, but we can query 2160p if requested.
-  
-  if (items.length === 0) {
-    items = await searchNyaa(`Erai-raws ${cleanTitle} ${epStr} 1080p`);
+  // Build resolution cascade based on requested quality
+  const resolutions: string[] = [];
+  if (requestedQuality === '4k' || requestedQuality === '2160p') {
+    resolutions.push('2160p', '1080p', '720p');
+  } else if (requestedQuality === '720p') {
+    resolutions.push('720p', '480p');
+  } else {
+    // Default: 1080p
+    resolutions.push('1080p', '720p');
   }
+
+  // Fansub groups to try in priority order
+  const groups = ['SubsPlease', 'Erai-raws', ''];
   
-  if (items.length === 0) {
-    items = await searchNyaa(`${cleanTitle} ${epStr} 1080p`);
+  let items: any[] = [];
+  let matchedQuality = '';
+
+  // Try each resolution tier, and for each tier try preferred groups first
+  for (const res of resolutions) {
+    for (const group of groups) {
+      const query = group 
+        ? `${group} ${cleanTitle} ${epStr} ${res}` 
+        : `${cleanTitle} ${epStr} ${res}`;
+      items = await searchNyaa(query);
+      if (items.length > 0) {
+        matchedQuality = res;
+        break;
+      }
+    }
+    if (items.length > 0) break;
   }
-  
+
+  // Final fallback: search without any resolution filter
   if (items.length === 0) {
-    // Fallback without resolution
-    items = await searchNyaa(`${cleanTitle} ${epStr}`);
+    for (const group of groups) {
+      const query = group 
+        ? `${group} ${cleanTitle} ${epStr}` 
+        : `${cleanTitle} ${epStr}`;
+      items = await searchNyaa(query);
+      if (items.length > 0) {
+        matchedQuality = 'auto';
+        break;
+      }
+    }
   }
 
   if (items.length === 0) {
@@ -89,7 +119,6 @@ router.get('/search', async (req: Request, res: Response) => {
   if (bestItem.infoHash) {
     magnetLink = `magnet:?xt=urn:btih:${bestItem.infoHash}&dn=${encodeURIComponent(bestItem.title || '')}`;
   } else {
-    // Fallback: try to extract from the page link
     return res.status(404).json({ success: false, message: 'No magnet link available for this torrent.' });
   }
 
@@ -100,6 +129,7 @@ router.get('/search', async (req: Request, res: Response) => {
       link: magnetLink,
       size: bestItem.nyaaSize || bestItem.contentSnippet,
       seeders: bestItem.seeders || '0',
+      quality: matchedQuality,
     }
   });
 });

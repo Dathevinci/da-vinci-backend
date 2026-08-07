@@ -332,6 +332,52 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
 /** The only topics a post may carry. Anything else is stored as untagged. */
 export const FORUM_TAGS = ["General", "Discussion", "Art", "Theory", "News", "Question", "Spoiler", "Meme"];
 
+/**
+ * The deep link a notification about a comment should carry.
+ *
+ * Every notification here used to point at
+ * `/community?view=<animeId>&tab=discussions` — which was wrong on three
+ * counts. A manhwa or novel comment has no animeId, so its notifications went
+ * to bare `/community`, a page that doesn't show that comment at all. A forum
+ * post reply did the same. And no link named the comment, so even the anime
+ * case dropped you at the top of a feed to scroll on your own.
+ *
+ * The comment row itself knows which surface it lives on, so the link is built
+ * from the row: anime → the community modal flow that already exists; manhwa /
+ * novel → the series or chapter page that renders the feed; anything else is
+ * forum, where the post IS a root comment, so the thread page is
+ * /community/post/<root>. The ?comment= is picked up by CommunityFeed, which
+ * scrolls to and highlights that comment.
+ *
+ * `anchorId` lets a reply notification link to the PARENT thread but anchor on
+ * the new reply itself.
+ */
+const commentDeepLink = (
+  c: {
+    id: string;
+    animeId?: number | null;
+    mangaId?: string | null;
+    novelId?: string | null;
+    chapterId?: string | null;
+    parentId?: string | null;
+  },
+  anchorId?: string
+): string => {
+  const anchor = `comment=${anchorId || c.id}`;
+  if (c.animeId) return `/community?view=${c.animeId}&tab=discussions&${anchor}`;
+  if (c.mangaId) {
+    const base = `/manhwa/${encodeURIComponent(c.mangaId)}`;
+    return `${base}${c.chapterId ? `/chapter/${encodeURIComponent(c.chapterId)}` : ""}?${anchor}`;
+  }
+  if (c.novelId) {
+    const base = `/novel/${encodeURIComponent(c.novelId)}`;
+    return `${base}${c.chapterId ? `/chapter/${encodeURIComponent(c.chapterId)}` : ""}?${anchor}`;
+  }
+  // Forum. A reply's parentId IS the thread root (threads are shallow); a root
+  // comment is its own thread.
+  return `/community/post/${c.parentId || c.id}?${anchor}`;
+};
+
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId, animeId, animeTitle, episodeNo, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl, title, tag, poll } = req.body;
@@ -448,7 +494,9 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
               actorId: userId,
               type: "reply",
               message: `${actor.username} replied to your comment.`,
-              link: animeId ? `/community?view=${animeId}&tab=discussions` : `/community`
+              // The parent decides the page (it may be a forum root); the new
+              // reply is the anchor, so the click lands ON the reply.
+              link: commentDeepLink(parent, comment.id)
             }
           });
         }
@@ -460,7 +508,7 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
     });
 
     // Process @mentions in the comment content
-    const commentLink = animeId ? `/community?view=${animeId}&tab=discussions` : `/community`;
+    const commentLink = commentDeepLink(comment);
     await processMentions(content, userId, commentLink);
 
     // Shaped exactly like the feed's rows — the client prepends this object
@@ -564,7 +612,7 @@ export const voteComment = async (req: Request, res: Response, next: NextFunctio
               actorId: userId,
               type: "like",
               message: `${actor.username} liked your comment.`,
-              link: comment.animeId ? `/community?view=${comment.animeId}&tab=discussions` : `/community`
+              link: commentDeepLink(comment)
             }
           });
         }
@@ -647,7 +695,7 @@ export const tipComment = async (req: Request, res: Response, next: NextFunction
         actorId: userId,
         type: "tip",
         message: `${tipper.username} tipped your comment ${TIP_AMOUNT} Arise Points!`,
-        link: comment.animeId ? `/community?view=${comment.animeId}&tab=discussions` : `/community`,
+        link: commentDeepLink(comment),
       },
     });
 
@@ -686,7 +734,7 @@ export const blessComment = async (req: Request, res: Response, next: NextFuncti
         actorId: userId,
         type: "blessing",
         message: `${admin.username} granted your comment a Divine Blessing — +${BLESSING_AMOUNT} Arise Points!`,
-        link: comment.animeId ? `/community?view=${comment.animeId}&tab=discussions` : `/community`,
+        link: commentDeepLink(comment),
       },
     });
 

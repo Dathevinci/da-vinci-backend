@@ -88,7 +88,21 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     const chapterId = req.query.chapterId as string | undefined;
     const novelId = req.query.novelId as string | undefined;
 
+    /**
+     * TWO DIFFERENT USERS, TWO DIFFERENT PARAMS.
+     *
+     * `userId` is the VIEWER — it only personalises the response (marks which
+     * votes and poll choices are yours) and must never filter. Every feed
+     * sends it for whoever is signed in, so making it a filter would collapse
+     * the whole site's comments to "only mine".
+     *
+     * `authorId` is WHOSE comments to return. The profile page's recent-
+     * comments rail asked this of `userId` for months and the parameter was
+     * silently ignored — every profile showed the newest comments from the
+     * entire site, everyone's, under "what this person has been saying".
+     */
     const userId = req.query.userId as string | undefined;
+    const authorId = req.query.authorId as string | undefined;
     const sort = req.query.sort as string | undefined;
     const search = req.query.search as string | undefined;
     const mediaOnly = req.query.mediaOnly === 'true';
@@ -112,6 +126,7 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     
     if (search) where.content = { contains: search, mode: 'insensitive' };
     if (mediaOnly) where.mediaUrl = { not: null };
+    if (authorId) where.userId = authorId;
 
     // ── FORUM ──────────────────────────────────────────────────────────────
     // `forum=true` means standalone posts: the ones not attached to any anime,
@@ -148,8 +163,11 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
       }
     }
 
-    // To keep threads intact, paginate only root comments unless searching/filtering
-    if (!search && !mediaOnly) {
+    // To keep threads intact, paginate only root comments unless searching/
+    // filtering. An authorId query is exempt too: replies ARE that person's
+    // comments, and a user whose activity is mostly replies would otherwise
+    // show an empty profile rail.
+    if (!search && !mediaOnly && !authorId) {
        where.parentId = null;
     }
 

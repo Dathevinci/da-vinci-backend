@@ -954,6 +954,11 @@ export const getLadder = async (_req: Request, res: Response, next: NextFunction
         username: u.username,
         avatar: u.avatar,
         cardTitle: u.cardTitle,
+        // Shipped so the client can tell staff from players by the PERSISTENT
+        // role rather than a hardcoded username list — staff sit outside the
+        // level ladder, and a username check would break the moment one of
+        // them renames.
+        role: u.role,
         xp: u.xp,
         shards: u.shards,
         cards: byCards.get(u.id) || 0,

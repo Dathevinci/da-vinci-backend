@@ -112,7 +112,21 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     const skip = (page - 1) * limit;
 
     const where: any = {};
-    if (animeId) where.animeId = parseInt(animeId);
+    if (animeId) {
+      where.animeId = parseInt(animeId);
+      /**
+       * Per-episode threads. episodeNo has been STAMPED on new comments for a
+       * while but never filtered, so every episode's watch page showed the
+       * whole series' chatter. The filter is opt-in by param — the series
+       * Discussions tab keeps sending no episodeNo and stays series-wide, so
+       * nothing vanishes from the hub.
+       */
+      const episodeNoRaw = req.query.episodeNo as string | undefined;
+      if (episodeNoRaw) {
+        const ep = parseInt(episodeNoRaw);
+        if (Number.isFinite(ep) && ep > 0) where.episodeNo = ep;
+      }
+    }
     if (mangaId) where.mangaId = mangaId;
     if (chapterId) where.chapterId = chapterId;
     if (novelId) where.novelId = novelId;
@@ -374,6 +388,7 @@ const commentDeepLink = (
   c: {
     id: string;
     animeId?: number | null;
+    episodeNo?: number | null;
     mangaId?: string | null;
     novelId?: string | null;
     chapterId?: string | null;
@@ -382,6 +397,10 @@ const commentDeepLink = (
   anchorId?: string
 ): string => {
   const anchor = `comment=${anchorId || c.id}`;
+  // An episode-stamped comment lives in that episode's thread on the watch
+  // page, so that is where its notifications should land — the series modal
+  // would show it, but stranded among every other episode's chatter.
+  if (c.animeId && c.episodeNo) return `/watch/${c.animeId}?ep=${c.episodeNo}&${anchor}`;
   if (c.animeId) return `/community?view=${c.animeId}&tab=discussions&${anchor}`;
   if (c.mangaId) {
     const base = `/manhwa/${encodeURIComponent(c.mangaId)}`;

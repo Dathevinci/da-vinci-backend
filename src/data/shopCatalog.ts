@@ -47,7 +47,9 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   // SSS launch drop — 10% off while it headlines the shop hero (6,000 → 5,400).
   effect_outergod: { type: "effect", price: 6000, discountPercent: 10 },
   effect_gateway: { type: "effect", price: 4500 },
-  effect_webslinger: { type: "effect", price: 4000 },
+  // Promoted to SSS 2026-08-09 (price must match the frontend card exactly —
+  // this side is what the purchase endpoint actually charges).
+  effect_webslinger: { type: "effect", price: 7000 },
   effect_mango: { type: "effect", price: 3800 },
   effect_jungle: { type: "effect", price: 3800 },
   effect_samurai: { type: "effect", price: 3600 },

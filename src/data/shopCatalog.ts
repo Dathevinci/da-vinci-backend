@@ -50,6 +50,8 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   // Promoted to SSS 2026-08-09 (price must match the frontend card exactly —
   // this side is what the purchase endpoint actually charges).
   effect_webslinger: { type: "effect", price: 7000 },
+  // Dimension C-137 — SSS, shipped 2026-08-09. Same price-sync rule.
+  effect_portal: { type: "effect", price: 8000 },
   effect_mango: { type: "effect", price: 3800 },
   effect_jungle: { type: "effect", price: 3800 },
   effect_samurai: { type: "effect", price: 3600 },

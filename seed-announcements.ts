@@ -5,6 +5,92 @@ const prisma = new PrismaClient();
 // The Dev Blog entries that should exist on the Updates page (newest first).
 const announcementsData = [
   {
+    title: "Da Vinci — Dev Blog 1.8: Read It Properly",
+    tag: "Dev Blog",
+    content:
+      "Da Vinci — Dev Blog 1.8\n\n" +
+      "Official light novels, in your browser. A reader rebuilt from scratch — twice, because the first rebuild was wrong. Every episode gets its own conversation. Genre filters that actually filter. And a long, unglamorous list of things that were quietly broken on phones.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Official light novels, read in the browser\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "There is a new shelf on the Novels page: Da Vinci Official EPUBs. Complete published volumes — Overlord, Tanya the Evil, 86, Classroom of the Elite and a long list more — opening straight in the site.\n\n" +
+      "It has its own See All page with search, so you can find a series by name instead of scrolling a wall. Search matches loosely on purpose: type bookworm ascendance and it finds Ascendance of a Bookworm, because these titles carry volume and publisher tags that break an exact match.\n\n" +
+      "Volume covers are pulled out of the books themselves, so a shelf shows the real published art rather than a generic placeholder.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "The reader, rebuilt around the book\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "The first version rendered each book inside a sandboxed frame, the way most web readers do. It fought us for days. Themes would not stick. Covers refused to scroll. Chapter links did nothing at all when clicked.\n\n" +
+      "So it was rebuilt. The server now unpacks each book and hands the reader plain text, which means the book is simply part of the page — and every one of those problems stopped existing rather than getting worked around.\n\n" +
+      "It is one continuous scroll now. No page buttons, no chapter-by-chapter clicking. Open a volume and the rest of the book streams in behind you while you read the first page, so reaching the bottom never means waiting.\n\n" +
+      "Your position is remembered per volume. Close it, come back next week, carry on.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Reading settings worth having\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Six themes, each with a light and a dark version behind one switch: Classic, Vintage, Lipstick, Ocean, Cyber, Nature.\n\n" +
+      "Six typefaces, and three of them are there for a reason rather than for variety. Atkinson Hyperlegible was drawn by the Braille Institute for low vision. OpenDyslexic weights the bottom of every letter so they are harder to flip. Comic Neue is the readable relative of the font a lot of dyslexic readers genuinely prefer.\n\n" +
+      "Plus text size, alignment, and Bionic Reading — which bolds the front of each word so your eye can skip ahead.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Every episode gets its own conversation\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Comments on the watch page are now scoped to the episode you are actually watching. Episode 5 has episode 5 talk in it.\n\n" +
+      "There is an All eps toggle next to the sort buttons for the series-wide view, and it matters: every comment written before this existed has no episode attached to it, and without a way back to the wide view that whole history would have vanished from the watch page. Scoped by default, one tap to everything.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "FIXED — Notifications now land on the actual comment\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Tapping a reply notification used to drop you at the top of the community forum to hunt for it yourself. Manhwa and novel notifications were worse — they went to a page that did not contain the comment at all.\n\n" +
+      "Now a notification takes you to the exact chapter, episode or thread the comment lives in, scrolled to it. Older notifications keep their old links, since the destination is written when the notification is created — new ones from here behave.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "NEW — Genre filters for manhwa and novels\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Explore now filters by genre on both. Manhwa gets the full set including the house genres — Murim, Regression, Overpowered, System, Necromancer. Novels get 37, from Wuxia to Xianxia to Slice of Life.\n\n" +
+      "Every one was tested against the source before it shipped. A filter that returns the same page whatever you pick is worse than no filter, so anything the sources do not honestly support was left out.\n\n" +
+      "The status and sort filters got more honest too. Results are merged from several libraries, and only some of them can obey a filter — so picking Completed used to quietly mix ongoing series back in. Now the sources that cannot honour your filter step aside: fewer results, all of them true.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "FIXED — The manhwa reader knows what chapter you are on\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Chapter numbers were being guessed from titles, so a chapter with an actual name showed no number, and one called Kraken (3) filed itself as chapter 3. The next and previous buttons were off by one in both directions — the next button printed the number of the chapter you were already reading.\n\n" +
+      "Add to Library and Mark as Read said they saved and saved nothing. Both work now, and Mark as Read tracks the series if you had not already.\n\n" +
+      "Pinning the toolbar survives a reload instead of lasting until the next chapter. And tapping the chapter list when the list failed to load no longer removes every control on screen with no way back.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "FIXED — The back button stopped fighting you\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "The back arrow in the readers was adding to your history instead of stepping back through it. So pressing your phone's back button returned you to the chapter you had just closed, then the series, then the chapter again, with no way out but holding it down.\n\n" +
+      "Related: opening something from More Like This used to replace what you were looking at, so closing it dumped you at the feed and checking a second recommendation meant finding the first show all over again. There is a back arrow inside the popup now that returns you to where you came from, on the same tab you left.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "FIXED — Phones, at length\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "The explore filter panel hung off the left edge of the screen and sliced the first letters off every option — Most Popular read as lost Popular. It is a proper bottom sheet now, thumb-height, impossible to clip.\n\n" +
+      "The reader would not scroll with a thumb on some pages, would not scroll at all on covers, and could strand you on a page with nothing loading beneath it.\n\n" +
+      "Profile picture effects were sized for the big profile avatar and reused everywhere, so beside a comment the glow spread wider than the picture itself. On some Android phones a spinning frame smeared into a red streak where the avatar should be.\n\n" +
+      "The reader's bottom controls overlapped each other on a narrow screen, and the explore search box was a sliver.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "FIXED — Profiles told the truth\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Recent comments on a profile were showing the newest comments from the entire site rather than that person's. It looked right, which is why nobody caught it: the page asked for one member's comments using a parameter the server reads as who is viewing, so it was silently ignored.\n\n" +
+      "Tracked manhwa covers showed a MangaDex placeholder instead of the cover — their servers block images loaded from other sites, and this was the one page still asking directly.\n\n" +
+      "Profiles were also printing the same title twice, once plain and once with its emblem.\n\n" +
+      "Staff now show their real standing on the leaderboard, and admin Arise Points read as infinite rather than as a number.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n" +
+      "REMOVED — the torrent player and the 4K row\n" +
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "Both are gone. The player never worked reliably, its subtitles did not show, and the 4K row on the home feed did nothing when clicked. Something half-working in the middle of the site is worse than nothing there.\n\n" +
+
+      "━━━━━━━━━━━━━━━━━━\n\n" +
+      "That is 1.8. Mostly it is about reading — go and open a volume.\n\n" +
+      "— Dejavuh",
+  },
+  {
     title: "Da Vinci — Dev Blog 1.7: The Big One",
     tag: "Dev Blog",
     content:

@@ -20,6 +20,7 @@ model User {
   bannerPosition Int  @default(50)   // vertical focus of the cover banner (object-position %, 0=top, 100=bottom)
   bannerStyle String @default("full") // "full" = full-screen background, "cover" = header strip
   bio       String?
+  profileSong String?               // one audio URL that plays on the profile (host/format-gated server-side)
   arisePoints Int      @default(0)   // community currency
   xp          Int      @default(0)   // drives level (max level 10), separate from currency
   usernameChanges Int  @default(0)   // first username change is free, then costs Arise Points

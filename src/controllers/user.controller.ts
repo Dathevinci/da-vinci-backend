@@ -12,6 +12,52 @@ import { sanitizeOwnUser, sanitizePublicUser, sanitizePublicUsers } from "../uti
 import { signToken, getActorId } from "../lib/jwt";
 import { liveShowcase } from "../lib/showcase";
 
+// ── Profile audio ──────────────────────────────────────────────────────────
+// One audio URL that plays on a profile. AUDIO ONLY — video is rejected by
+// omission (its extensions aren't in the allow-list). The file loads in the
+// VISITOR's browser via `new Audio(src)`, so the risk here is a hostile,
+// oversized, or redirecting link — not server-side SSRF — which is why host +
+// https + extension allow-listing is the correct gate rather than a fetch check.
+// catbox is the one host that reliably serves a direct, non-expiring audio
+// file. Uploads live on files.catbox.moe; the bare domain is kept as a courtesy
+// for oddly-formatted links. imgur/postimg host images+video, not audio, so
+// advertising them here would only produce links that never play — left out.
+const PROFILE_AUDIO_HOSTS = new Set([
+  "files.catbox.moe",
+  "catbox.moe",
+]);
+const PROFILE_AUDIO_EXTS = [".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus"];
+
+function checkProfileSong(
+  raw: unknown
+): { ok: true; value: string | null } | { ok: false; message: string } {
+  if (raw === null) return { ok: true, value: null };
+  if (typeof raw !== "string") return { ok: false, message: "Invalid audio link." };
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: true, value: null }; // empty clears the song
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return { ok: false, message: "That doesn't look like a valid URL." };
+  }
+  if (url.protocol !== "https:") {
+    return { ok: false, message: "Audio links must start with https://." };
+  }
+  if (!PROFILE_AUDIO_HOSTS.has(url.hostname.toLowerCase())) {
+    return { ok: false, message: "Host not allowed — upload to catbox.moe and paste the files.catbox.moe link." };
+  }
+  const path = url.pathname.toLowerCase();
+  if (!PROFILE_AUDIO_EXTS.some((ext) => path.endsWith(ext))) {
+    return {
+      ok: false,
+      message: "Audio only — the link must end in .mp3, .wav, .ogg, .m4a, .flac, or .opus.",
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
 
 export const createUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -198,7 +244,7 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
     // isAdmin/role/xp are deliberately NOT destructured: they must never be
     // settable through the public profile PATCH (that was a self-escalation to
     // admin). They change only via trusted server-side paths.
-    const { username, email, avatar, bannerUrl, bannerPosition, bannerStyle, bio, arisePoints, isPrivate, theme,
+    const { username, email, avatar, bannerUrl, bannerPosition, bannerStyle, bio, profileSong, arisePoints, isPrivate, theme,
             purchasedBanners, purchasedTags, purchasedRoles, purchasedEffects, purchasedThemes, purchasedColors, purchasedFonts, purchasedFrames,
             activeRole, activeTag, activeEffect, activeTheme, activeColor, activeFont, activeFrame } = req.body;
     const userId = req.params.id as string;
@@ -279,6 +325,15 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
       }
     }
 
+    // Profile audio — validate here (server-authoritative) so a crafted PATCH
+    // can't store a video, a non-audio host, or a javascript: URL.
+    let profileSongValue: string | null | undefined = undefined;
+    if (profileSong !== undefined) {
+      const check = checkProfileSong(profileSong);
+      if (!check.ok) return res.status(400).json({ success: false, message: check.message });
+      profileSongValue = check.value;
+    }
+
     const updateData: any = {
       // NOTE: username goes through the gated changeUsername endpoint.
       // arisePoints + purchased* are DELIBERATELY not client-writable — money and
@@ -291,6 +346,7 @@ export const updateUser = async (req: Request, res: Response, next: NextFunction
       ...(bannerPosition !== undefined && { bannerPosition: Math.max(0, Math.min(100, Number(bannerPosition))) }),
       ...(bannerStyle !== undefined && { bannerStyle: bannerStyle === "cover" ? "cover" : "full" }),
       ...(bio !== undefined && { bio }),
+      ...(profileSongValue !== undefined && { profileSong: profileSongValue }),
       ...(isPrivate !== undefined && { isPrivate: Boolean(isPrivate) }),
       ...(theme !== undefined && { theme }),
       ...(activeRole !== undefined && { activeRole }),
@@ -387,6 +443,7 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
         user.likes = [];
         user.bio = "This profile is private. You must mutually follow each other to see their bio, banner, and watchlist.";
         user.bannerUrl = null;
+        user.profileSong = null; // a private profile's soundtrack is private too
       }
     }
 

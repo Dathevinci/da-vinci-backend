@@ -233,7 +233,7 @@ export const getRaid = async (req: Request, res: Response, next: NextFunction) =
       });
       mine = {
         attacksToday: todays.length,
-        usedCardIds: todays.flatMap((a) => ((a.squad as any[]) || []).map((l) => String(l.userCardId))),
+        usedCardIds: todays.flatMap((a) => ((a.squad as any[]) || []).map((l) => String(l.cardId))),
         myDamage: all._sum.damage || 0,
         myAttacks: all._count._all,
       };
@@ -326,15 +326,18 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
     // Fatigue: one appearance per card per UTC day. (This and the cap above
     // are fast-path UX only — the transaction re-derives both under a lock.)
     const usedToday = new Set(
-      todays.flatMap((a) => ((a.squad as any[]) || []).map((l) => String(l.userCardId)))
+      todays.flatMap((a) => ((a.squad as any[]) || []).map((l) => String(l.cardId)))
     );
     const tired = squadIds.filter((id) => usedToday.has(id));
     if (tired.length) {
       return res.status(409).json({ success: false, message: "Some of those cards already fought today — they're resting." });
     }
 
+    // squadIds are CATALOG card ids — the id currency of the whole frontend
+    // (the collection endpoint never exposes UserCard row ids). Safe because
+    // @@unique([userId, cardId]) makes catalog ids 1:1 with rows per user.
     const cards = await prisma.userCard.findMany({
-      where: { id: { in: squadIds }, userId: actor, count: { gt: 0 } },
+      where: { cardId: { in: squadIds }, userId: actor, count: { gt: 0 } },
     });
     if (cards.length !== RAID.SQUAD_SIZE) {
       return res.status(400).json({ success: false, message: "You don't own all of those cards." });
@@ -445,7 +448,7 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
         throw Object.assign(new Error("raid-capped"), { raidCode: 429 });
       }
       const txUsed = new Set(
-        txTodays.flatMap((a) => ((a.squad as any[]) || []).map((l) => String(l.userCardId)))
+        txTodays.flatMap((a) => ((a.squad as any[]) || []).map((l) => String(l.cardId)))
       );
       if (squadIds.some((id) => txUsed.has(id))) {
         throw Object.assign(new Error("raid-fatigued"), { raidCode: 409 });

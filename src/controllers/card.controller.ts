@@ -366,7 +366,7 @@ export const getCollection = async (req: Request, res: Response, next: NextFunct
       // copy actually is. Without them every surface fell back to the printed
       // line and the pull roll was invisible outside a duel — which read, from
       // the outside, exactly like the randomisation never shipped.
-      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true, rolledHp: true, rolledAtk: true, merges: true } }),
+      prisma.userCard.findMany({ where: { userId }, select: { cardId: true, count: true, foil: true, hibernating: true, level: true, skillLevel: true, atkForge: true, hpForge: true, mythAffix: true, mythMod: true, rolledHp: true, rolledAtk: true, merges: true, raidRestUntil: true } }),
       prisma.user.findUnique({ where: { id: userId }, select: { shards: true, claimedSets: true, cardTitle: true } }),
       // Legendary print identities — serial + condition per held copy. Best
       // condition first, then oldest serial, so the first entry is always

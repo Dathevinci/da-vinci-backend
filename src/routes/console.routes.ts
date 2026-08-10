@@ -27,6 +27,7 @@ import {
   insights,
   listAudit,
 } from "../controllers/consoleOps.controller";
+import { raidDevSetHp, raidDevSettleNow } from "../controllers/raid.controller";
 
 /**
  * Lead-Dev-only console API.
@@ -63,6 +64,8 @@ router.get("/ops/invites", listInvites);
 router.post("/ops/invites", createInvites);
 router.delete("/ops/invites/:id", revokeInvite);
 router.post("/ops/announcements", publishAnnouncement);
+router.post("/ops/raid-hp", raidDevSetHp);
+router.post("/ops/raid-settle", raidDevSettleNow);
 
 // Moderation
 router.get("/moderation/comments", listComments);

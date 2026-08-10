@@ -3,6 +3,7 @@ import { randomUUID } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
+import { requireStaff } from "../lib/staff";
 import { weekKey } from "./gem.controller";
 import { CARDS, levelMult, FORGE_ATK_STEP, FORGE_HP_STEP } from "../data/cardCatalog";
 import { CARD_STATS_BY_ID, CARD_STATS } from "../data/duelRules";
@@ -125,6 +126,42 @@ async function sizeRealmHp(def: ReturnType<typeof bossBySlug>): Promise<number> 
   return Math.max(hp, 1000);
 }
 
+/**
+ * One member's payout for one settled encounter — the SINGLE source of the
+ * reward math, used by settlement (to pay) and by getRaid's lastWeek summary
+ * (to show what was paid). Keep them identical or the UI lies about money.
+ */
+function payoutFor(
+  attackCount: number,
+  damageRankIdx: number,
+  ctx: { killed: boolean; fraction: number; rewardMult: number }
+): { ap: number; shards: number } {
+  let ap = Math.round(RAID.KILL_AP * ctx.rewardMult * ctx.fraction);
+  let shards = Math.round(RAID.KILL_SHARDS * ctx.rewardMult * ctx.fraction);
+  if (attackCount >= RAID.CONSISTENCY_ATTACKS) {
+    ap += Math.round(RAID.CONSISTENCY_AP * ctx.rewardMult * ctx.fraction);
+  }
+  if (ctx.killed && damageRankIdx > -1 && damageRankIdx < RAID.TOP_DAMAGE_SHARDS.length) {
+    shards += RAID.TOP_DAMAGE_SHARDS[damageRankIdx];
+  }
+  return { ap, shards };
+}
+
+function outcomeOf(enc: { hpMax: number; hpLeft: number; killedAt: Date | null }, slug: string) {
+  const def = bossBySlug(slug);
+  const killed = !!enc.killedAt;
+  const dealtRatio = enc.hpMax > 0 ? (enc.hpMax - enc.hpLeft) / enc.hpMax : 0;
+  const escapeFraction =
+    dealtRatio >= RAID.ESCAPE_CLOSE_RATIO ? RAID.ESCAPE_CLOSE_FRACTION : RAID.ESCAPE_FAR_FRACTION;
+  return {
+    def,
+    killed,
+    dealtRatio,
+    fraction: killed ? 1 : escapeFraction,
+    rewardMult: gimmickRewardMult(def.gimmick),
+  };
+}
+
 /** Pay out last week's realm encounter exactly once. */
 async function settlePreviousWeek() {
   const prev = await prisma.raidBoss.findUnique({
@@ -133,14 +170,18 @@ async function settlePreviousWeek() {
   });
   const enc = prev?.encounters[0];
   if (!prev || !enc) return;
+  await settleEncounter(prev.slug, prev.week, enc);
+}
 
-  const def = bossBySlug(prev.slug);
-  const rewardMult = gimmickRewardMult(def.gimmick);
-  const killed = !!enc.killedAt;
-  const dealtRatio = enc.hpMax > 0 ? (enc.hpMax - enc.hpLeft) / enc.hpMax : 0;
-  const escapeFraction =
-    dealtRatio >= RAID.ESCAPE_CLOSE_RATIO ? RAID.ESCAPE_CLOSE_FRACTION : RAID.ESCAPE_FAR_FRACTION;
-  const fraction = killed ? 1 : escapeFraction;
+/** Settle ONE encounter: compute payouts, pay in a CAS-guarded transaction.
+ *  Shared by the Monday rollover and the lead-dev settle-now drill. */
+async function settleEncounter(
+  slug: string,
+  week: string,
+  enc: { id: string; hpMax: number; hpLeft: number; killedAt: Date | null }
+) {
+  const def = bossBySlug(slug);
+  const { killed, dealtRatio, fraction, rewardMult } = outcomeOf(enc, slug);
 
   const per = await prisma.raidAttack.groupBy({
     by: ["userId"],
@@ -179,15 +220,8 @@ async function settlePreviousWeek() {
     if (claimed.count === 0) return;
 
     for (const p of gated) {
-      let ap = Math.round(RAID.KILL_AP * rewardMult * fraction);
-      let shards = Math.round(RAID.KILL_SHARDS * rewardMult * fraction);
-      if (p._count._all >= RAID.CONSISTENCY_ATTACKS) {
-        ap += Math.round(RAID.CONSISTENCY_AP * rewardMult * fraction);
-      }
       const rank = byDamage.findIndex((r) => r.userId === p.userId);
-      if (killed && rank > -1 && rank < RAID.TOP_DAMAGE_SHARDS.length) {
-        shards += RAID.TOP_DAMAGE_SHARDS[rank];
-      }
+      const { ap, shards } = payoutFor(p._count._all, rank, { killed, fraction, rewardMult });
       if (ap <= 0 && shards <= 0) continue;
       await tx.user.update({
         where: { id: p.userId },
@@ -202,8 +236,8 @@ async function settlePreviousWeek() {
             userId: p.userId,
             amount: ap,
             reason: killed
-              ? `Raid: ${def.name} slain (${prev.week})`
-              : `Raid: ${def.name} escaped at ${(dealtRatio * 100).toFixed(0)}% (${prev.week})`,
+              ? `Raid: ${def.name} slain (${week})`
+              : `Raid: ${def.name} escaped at ${(dealtRatio * 100).toFixed(0)}% (${week})`,
           },
         });
       }
@@ -241,6 +275,55 @@ export const getRaid = async (req: Request, res: Response, next: NextFunction) =
       };
     }
 
+    // Last week's story — outcome and, for the signed-in caller, what the
+    // settlement paid them. payoutFor is the same function settlement used,
+    // so this can't drift from the actual money.
+    let lastWeek: any = null;
+    const prevBoss = await prisma.raidBoss.findUnique({
+      where: { week: prevWeekKey() },
+      include: { encounters: { where: { guildId: REALM } } },
+    });
+    const prevEnc = prevBoss?.encounters[0];
+    if (prevBoss && prevEnc) {
+      const o = outcomeOf(prevEnc, prevBoss.slug);
+      lastWeek = {
+        week: prevBoss.week,
+        name: o.def.name,
+        slug: o.def.slug,
+        killed: o.killed,
+        dealtRatio: Math.round(o.dealtRatio * 1000) / 1000,
+        settled: prevEnc.rewarded,
+        mine: null,
+      };
+      if (actor) {
+        const gatedRows = await prisma.raidAttack.groupBy({
+          by: ["userId"],
+          where: { encounterId: prevEnc.id },
+          _count: { _all: true },
+          _sum: { damage: true },
+        });
+        const meRow = gatedRows.find((r) => r.userId === actor);
+        if (meRow) {
+          const gatedSorted = gatedRows
+            .filter((r) => r._count._all >= RAID.REWARD_GATE_ATTACKS)
+            .sort((a, b) => (b._sum.damage || 0) - (a._sum.damage || 0));
+          const rank = gatedSorted.findIndex((r) => r.userId === actor);
+          const eligible = meRow._count._all >= RAID.REWARD_GATE_ATTACKS;
+          const paid = eligible
+            ? payoutFor(meRow._count._all, rank, o)
+            : { ap: 0, shards: 0 };
+          lastWeek.mine = {
+            attacks: meRow._count._all,
+            damage: meRow._sum.damage || 0,
+            rank: rank > -1 ? rank + 1 : null,
+            eligible,
+            ap: paid.ap,
+            shards: paid.shards,
+          };
+        }
+      }
+    }
+
     const top = await prisma.raidAttack.groupBy({
       by: ["userId"],
       where: { encounterId: enc.id },
@@ -276,7 +359,57 @@ export const getRaid = async (req: Request, res: Response, next: NextFunction) =
         squadSize: RAID.SQUAD_SIZE,
         mine,
         standings,
+        lastWeek,
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── Lead-dev drill ops (mounted under /api/console) ─────────────────────────
+// The phase-3 proof: set the boss's HP low, land a real killing blow, then
+// force the settlement without waiting for Monday. Both are leadDevOnly and
+// operate on the CURRENT week's realm encounter.
+
+/** POST /api/console/ops/raid-hp  body: { hpLeft } — set the live boss's HP. */
+export const raidDevSetHp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = await requireStaff(req, res, { leadDevOnly: true });
+    if (!actor) return;
+    const hpLeft = Math.floor(Number(req.body?.hpLeft));
+    if (!Number.isFinite(hpLeft) || hpLeft < 1) {
+      return res.status(400).json({ success: false, message: "hpLeft must be a number ≥ 1 — land the kill with a real attack." });
+    }
+    const { boss, enc } = await ensureWeek();
+    if (enc.killedAt) {
+      return res.status(409).json({ success: false, message: "The boss is already down this week." });
+    }
+    const updated = await prisma.raidEncounter.update({
+      where: { id: enc.id },
+      data: { hpLeft: Math.min(hpLeft, enc.hpMax) },
+    });
+    return res.json({ success: true, data: { week: boss.week, hpLeft: updated.hpLeft, hpMax: updated.hpMax } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /api/console/ops/raid-settle — settle THIS week's encounter now.
+ *  Idempotent via the same rewarded CAS; Monday's pass will then skip it. */
+export const raidDevSettleNow = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = await requireStaff(req, res, { leadDevOnly: true });
+    if (!actor) return;
+    const { week, boss, enc } = await ensureWeek();
+    if (enc.rewarded) {
+      return res.status(409).json({ success: false, message: "This week is already settled." });
+    }
+    await settleEncounter(boss.slug, week, enc);
+    const after = await prisma.raidEncounter.findUnique({ where: { id: enc.id } });
+    return res.json({
+      success: true,
+      data: { week, settled: !!after?.rewarded, killed: !!after?.killedAt },
     });
   } catch (error) {
     next(error);

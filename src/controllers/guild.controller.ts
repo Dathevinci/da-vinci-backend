@@ -29,19 +29,21 @@ const NAME_MIN = 3;
 const NAME_MAX = 24;
 const TAG_RE = /^[A-Z]{2,5}$/;
 
-// ── Guild avatar ────────────────────────────────────────────────────────────
+// ── Guild imagery (avatar + banner) ─────────────────────────────────────────
 // Same posture as the profileSong check in user.controller.ts: the URL loads
 // in VISITORS' browsers, so the gate is https + a host allow-list — Cloudinary
-// only, the CDN the rest of the product already serves art from.
-const GUILD_AVATAR_HOSTS = new Set(["res.cloudinary.com"]);
+// only, the CDN the rest of the product already serves art from. ONE checker
+// for both fields, so the avatar and banner rules can never drift apart.
+const GUILD_IMAGE_HOSTS = new Set(["res.cloudinary.com"]);
 
-function checkGuildAvatar(
-  raw: unknown
+function checkGuildImage(
+  raw: unknown,
+  label: "avatar" | "banner"
 ): { ok: true; value: string | null } | { ok: false; message: string } {
   if (raw === null) return { ok: true, value: null };
-  if (typeof raw !== "string") return { ok: false, message: "Invalid avatar link." };
+  if (typeof raw !== "string") return { ok: false, message: `Invalid ${label} link.` };
   const trimmed = raw.trim();
-  if (!trimmed) return { ok: true, value: null }; // empty clears the avatar
+  if (!trimmed) return { ok: true, value: null }; // empty clears the field
 
   let url: URL;
   try {
@@ -50,10 +52,10 @@ function checkGuildAvatar(
     return { ok: false, message: "That doesn't look like a valid URL." };
   }
   if (url.protocol !== "https:") {
-    return { ok: false, message: "Avatar links must start with https://." };
+    return { ok: false, message: `Guild ${label} links must start with https://.` };
   }
-  if (!GUILD_AVATAR_HOSTS.has(url.hostname.toLowerCase())) {
-    return { ok: false, message: "Guild avatars must be hosted on res.cloudinary.com." };
+  if (!GUILD_IMAGE_HOSTS.has(url.hostname.toLowerCase())) {
+    return { ok: false, message: `Guild ${label}s must be hosted on res.cloudinary.com.` };
   }
   return { ok: true, value: trimmed };
 }
@@ -130,7 +132,7 @@ export const createGuild = async (req: Request, res: Response, next: NextFunctio
       success: true,
       data: {
         id: result.id, name: result.name, tag: result.tag,
-        description: result.description, avatar: result.avatar,
+        description: result.description, avatar: result.avatar, banner: result.banner,
         leaderId: result.leaderId, coLeaderId: result.coLeaderId,
         coins: result.coins, xp: result.xp,
         level: levelOf(result.xp), memberCount: 1, createdAt: result.createdAt,
@@ -153,7 +155,8 @@ export const listGuilds = async (_req: Request, res: Response, next: NextFunctio
       success: true,
       data: guilds.map((g) => ({
         id: g.id, name: g.name, tag: g.tag, description: g.description,
-        avatar: g.avatar, leaderId: g.leaderId, coLeaderId: g.coLeaderId,
+        avatar: g.avatar, banner: g.banner,
+        leaderId: g.leaderId, coLeaderId: g.coLeaderId,
         coins: g.coins, xp: g.xp,
         level: levelOf(g.xp), memberCount: g._count.members, createdAt: g.createdAt,
       })),
@@ -188,7 +191,7 @@ async function guildDetailPayload(id: string, actor: string | null) {
 
   return {
     id: guild.id, name: guild.name, tag: guild.tag,
-    description: guild.description, avatar: guild.avatar,
+    description: guild.description, avatar: guild.avatar, banner: guild.banner,
     leaderId: guild.leaderId, coLeaderId: guild.coLeaderId,
     coins: guild.coins, xp: guild.xp,
     level: levelOf(guild.xp), createdAt: guild.createdAt,
@@ -470,9 +473,9 @@ export const setCoLeader = async (req: Request, res: Response, next: NextFunctio
 };
 
 // ── PATCH /api/guilds/:id ───────────────────────────────────────────────────
-// Description and avatar only. Name and tag are immutable in v1 — they're
-// unique identity, and renames are exactly the mutable-key trap the identity
-// memory warns about.
+// Description, avatar and banner only. Name and tag are immutable in v1 —
+// they're unique identity, and renames are exactly the mutable-key trap the
+// identity memory warns about.
 
 export const updateGuild = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -489,7 +492,7 @@ export const updateGuild = async (req: Request, res: Response, next: NextFunctio
       return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can do that." });
     }
 
-    const data: { description?: string; avatar?: string | null } = {};
+    const data: { description?: string; avatar?: string | null; banner?: string | null } = {};
     if (req.body?.description !== undefined) {
       if (typeof req.body.description !== "string") {
         return res.status(400).json({ success: false, message: "Invalid description." });
@@ -501,16 +504,21 @@ export const updateGuild = async (req: Request, res: Response, next: NextFunctio
       data.description = d;
     }
     if (req.body?.avatar !== undefined) {
-      const check = checkGuildAvatar(req.body.avatar);
+      const check = checkGuildImage(req.body.avatar, "avatar");
       if (!check.ok) return res.status(400).json({ success: false, message: check.message });
       data.avatar = check.value;
+    }
+    if (req.body?.banner !== undefined) {
+      const check = checkGuildImage(req.body.banner, "banner");
+      if (!check.ok) return res.status(400).json({ success: false, message: check.message });
+      data.banner = check.value;
     }
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ success: false, message: "Nothing to update." });
     }
 
     const updated = await prisma.guild.update({ where: { id }, data });
-    res.json({ success: true, data: { description: updated.description, avatar: updated.avatar } });
+    res.json({ success: true, data: { description: updated.description, avatar: updated.avatar, banner: updated.banner } });
   } catch (error) {
     next(error);
   }

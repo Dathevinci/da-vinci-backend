@@ -29,6 +29,7 @@ import novelBookmarkRoutes from "./routes/novelBookmarks";
 import kofiRoutes from "./routes/kofi.routes";
 import raidRoutes from "./routes/raid.routes";
 import guildRoutes from "./routes/guild.routes";
+import guildChatRoutes from "./routes/guildChat.routes";
 import consoleRoutes from "./routes/console.routes";
 import auctionRoutes from "./routes/auction.routes";
 import cardRoutes from "./routes/card.routes";
@@ -61,6 +62,16 @@ app.use(express.json({ limit: "100kb" }));
 // every console request still costs one user lookup inside resolveActor.
 app.use("/api/console", consoleLimiter, consoleRoutes);
 
+// Guild chat mounts above the global limiter for the console's reason in
+// polling form: the chat pane refetches its guild's messages every 8s, which
+// would burn the shared per-IP budget and start 429-ing the whole API for
+// everyone on that household IP. Safe, because resolveActor plus the
+// members-only gate inside every chat handler — not the limiter — is the
+// wall. This router matches ONLY the /:id/messages paths (chatLimiter rides
+// on those routes, inside the router, so unmatched /api/guilds requests fall
+// through to the main guild mount below without touching the chat budget).
+app.use("/api/guilds", guildChatRoutes);
+
 // Baseline rate limit on the whole API (auth routes get a stricter limiter of
 // their own inside auth.routes.ts).
 app.use("/api", apiLimiter);
@@ -70,7 +81,7 @@ app.use("/api", apiLimiter);
 // timeline recorder) is otherwise impossible to distinguish from the previous
 // deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1", "guilds-v1", "guild-raids", "co-leader"] });
+  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1", "guilds-v1", "guild-raids", "co-leader", "guild-chat", "guild-banner"] });
 });
 
 // Mount routers

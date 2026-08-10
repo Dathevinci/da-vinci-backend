@@ -31,6 +31,23 @@ export const consoleLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// Guild chat polls its message stream every 8 seconds per open guild page —
+// ~113 requests per 15 minutes before anyone types a word — so like the
+// console it gets its own budget rather than eating the shared per-IP
+// allowance. This is a runaway-loop backstop, NOT an access control:
+// resolveActor plus the members-only gate inside every chat handler is the
+// actual wall.
+export const chatLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 900,
+  message: {
+    success: false,
+    message: "Chat rate limit reached. Wait a few minutes.",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Strict limiter for credential endpoints (login / signup / change-password) to
 // blunt brute-force and credential-stuffing.
 export const authLimiter = rateLimit({

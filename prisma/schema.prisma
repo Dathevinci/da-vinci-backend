@@ -802,6 +802,7 @@ model Guild {
   tag         String        @unique
   description String        @default("")
   avatar      String?
+  banner      String?       // page background image — same host wall as avatar, enforced in the controller
   leaderId    String        // plain string, no FK — the duel pattern
   // One optional deputy, leader-appointed. Cleared in the SAME transaction
   // whenever its holder leaves, is kicked, or takes the leadership — a stale
@@ -844,4 +845,23 @@ model GuildCardLoan {
   @@unique([ownerId, cardId, borrowerId])
   @@index([borrowerId])
   @@index([guildId])
+}
+
+// ═══ GUILD CHAT ════════════════════════════════════════════════════════════
+// One row per message, append-only except for deletion. userId is a plain
+// string (no FK — the duel pattern), so a deleted account leaves its messages
+// behind and the reader renders `author: null`. Members-only BOTH ways is
+// enforced in the controller on every read and write — there is no visibility
+// state to store. The composite index carries both the poll (guildId +
+// createdAt cursor) and the "latest N" first load.
+
+model GuildMessage {
+  id        String   @id @default(uuid())
+  guildId   String
+  userId    String   // plain string, no FK — the duel pattern
+  content   String?
+  mediaUrl  String?
+  createdAt DateTime @default(now())
+
+  @@index([guildId, createdAt])
 }

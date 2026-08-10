@@ -451,6 +451,11 @@ model UserCard {
   hpForge    Int     @default(0)     // +2 flat HP per rank, capped
   mythAffix  String?                 // a Mythic copy's rolled stat affix (MYTHIC_AFFIXES key)
   mythMod    String?                 // a Mythic copy's rolled eruption mod (MYTHIC_MODS key)
+  // ── Guild Raid Boss ── a card hurt in a raid RESTS until this timestamp
+  // (no heal system exists, so injuries self-expire — a timer, not a flag).
+  // Deliberately separate from `hibernating`: duel sleep and raid rest are
+  // two modes, two bodies, same as the old dungeon comment above intended.
+  raidRestUntil DateTime?
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -727,4 +732,51 @@ model ArenaChestOpen {
 
   @@unique([userId, rollId])
   @@index([userId])
+}
+
+// ═══ GUILD RAID BOSS (phase 1: realm mode) ═══════════════════════════════
+// One boss per ISO week, lazily spawned by the first GET of the week — the
+// gems weekKey pattern, no cron. Encounters are per-GROUP fights against
+// that boss: today the only group is the whole server (guildId "realm");
+// when guilds exist, per-guild rows slot in with zero schema change. The
+// sentinel is a string, not null, because Postgres treats NULLs as distinct
+// in unique constraints — a nullable guildId would allow duplicate realm
+// encounters and the lazy-spawn race guard would silently stop guarding.
+
+model RaidBoss {
+  id         String          @id @default(uuid())
+  week       String          @unique // gems-style ISO weekKey, e.g. "2026-W33"
+  slug       String          // -> src/data/raidBosses.ts (name/series/gimmick)
+  createdAt  DateTime        @default(now())
+  encounters RaidEncounter[]
+}
+
+model RaidEncounter {
+  id       String    @id @default(uuid())
+  bossId   String
+  guildId  String    @default("realm") // "realm" until guilds exist
+  hpMax    Int
+  hpLeft   Int
+  killedAt DateTime?
+  rewarded Boolean   @default(false) // settlement idempotency at rollover
+  boss     RaidBoss  @relation(fields: [bossId], references: [id])
+  attacks  RaidAttack[]
+
+  @@unique([bossId, guildId])
+}
+
+model RaidAttack {
+  id          String        @id @default(uuid())
+  encounterId String
+  userId      String        // plain string, no relation — the duel pattern
+  day         String        // "2026-08-12" UTC; daily caps + fatigue key off this
+  squad       Json          // per-card battle-report lines, replayable evidence
+  damage      Int
+  isRally     Boolean       @default(false) // the AP-bought third attack
+  nonce       String        @unique // client idempotency — replays return the original
+  createdAt   DateTime      @default(now())
+  encounter   RaidEncounter @relation(fields: [encounterId], references: [id])
+
+  @@index([encounterId, userId, day])
+  @@index([userId, day])
 }

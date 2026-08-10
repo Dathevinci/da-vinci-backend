@@ -174,9 +174,15 @@ export const RAID = {
   HP_ACTIVE_MAX: 80,
   GUILD_HP_ACTIVE_MIN: 3, // per-guild floor — a 3-person guild still gets a boss it can plausibly kill
   COLD_START_AVG_DAMAGE: 900,
-  // §6 payouts (realm mode: personal rewards only — guild coins wait for guilds)
+  // §6 payouts — personal rewards, paid to members at settlement
   KILL_AP: 400,
   KILL_SHARDS: 25,
+  // Guild progression — paid to the GUILD row in-transaction by raidAttack
+  // (xp per attack, xp + treasury shards on the killing blow). Realm fights
+  // feed nothing: the realm sentinel has no Guild row to receive them.
+  GUILD_ATTACK_XP: 25,
+  GUILD_KILL_XP: 500,
+  GUILD_KILL_SHARDS: 25,
   CONSISTENCY_ATTACKS: 15,
   CONSISTENCY_AP: 150,
   TOP_DAMAGE_SHARDS: [40, 25, 15],

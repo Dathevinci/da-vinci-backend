@@ -134,7 +134,7 @@ export const createGuild = async (req: Request, res: Response, next: NextFunctio
         id: result.id, name: result.name, tag: result.tag,
         description: result.description, avatar: result.avatar, banner: result.banner,
         leaderId: result.leaderId, coLeaderId: result.coLeaderId,
-        coins: result.coins, xp: result.xp,
+        shards: result.shards, xp: result.xp,
         level: levelOf(result.xp), memberCount: 1, createdAt: result.createdAt,
       },
     });
@@ -157,7 +157,7 @@ export const listGuilds = async (_req: Request, res: Response, next: NextFunctio
         id: g.id, name: g.name, tag: g.tag, description: g.description,
         avatar: g.avatar, banner: g.banner,
         leaderId: g.leaderId, coLeaderId: g.coLeaderId,
-        coins: g.coins, xp: g.xp,
+        shards: g.shards, xp: g.xp,
         level: levelOf(g.xp), memberCount: g._count.members, createdAt: g.createdAt,
       })),
     });
@@ -193,7 +193,7 @@ async function guildDetailPayload(id: string, actor: string | null) {
     id: guild.id, name: guild.name, tag: guild.tag,
     description: guild.description, avatar: guild.avatar, banner: guild.banner,
     leaderId: guild.leaderId, coLeaderId: guild.coLeaderId,
-    coins: guild.coins, xp: guild.xp,
+    shards: guild.shards, xp: guild.xp,
     level: levelOf(guild.xp), createdAt: guild.createdAt,
     memberCap: GUILD_MEMBER_CAP,
     memberCount: guild.members.length,
@@ -218,6 +218,58 @@ export const getGuild = async (req: Request, res: Response, next: NextFunction) 
     const data = await guildDetailPayload(id, getActorId(req));
     if (!data) return res.status(404).json({ success: false, message: "Guild not found." });
     res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── GET /api/guilds/of/:userId ──────────────────────────────────────────────
+// The profile-page lookup: which guild is this user in? PUBLIC read, no auth
+// — guild membership is already public on the guild page, so hiding it here
+// would protect nothing. No membership answers data: null, not 404: "not in
+// a guild" is a normal state, not an error.
+
+export const guildOfUser = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.params.userId as string;
+
+    const membership = await prisma.guildMember.findUnique({ where: { userId } });
+    if (!membership) {
+      return res.json({ success: true, data: null });
+    }
+
+    const guild = await prisma.guild.findUnique({
+      where: { id: membership.guildId },
+      include: { _count: { select: { members: true } } },
+    });
+    if (!guild) {
+      // Membership row outliving its guild shouldn't happen (deletes cascade),
+      // but if it does, answer like a guildless user rather than erroring.
+      return res.json({ success: true, data: null });
+    }
+
+    // Role from the PERSISTENT leaderId/coLeaderId columns, never the mutable
+    // role string on GuildMember — the identity-not-username rule.
+    const role =
+      guild.leaderId === userId ? "leader" :
+      guild.coLeaderId === userId ? "co-leader" : "member";
+
+    res.json({
+      success: true,
+      data: {
+        id: guild.id,
+        name: guild.name,
+        tag: guild.tag,
+        avatar: guild.avatar,
+        banner: guild.banner,
+        level: levelOf(guild.xp),
+        xp: guild.xp,
+        shards: guild.shards,
+        memberCount: guild._count.members,
+        role,
+        joinedAt: membership.joinedAt,
+      },
+    });
   } catch (error) {
     next(error);
   }

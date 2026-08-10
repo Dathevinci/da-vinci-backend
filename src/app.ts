@@ -81,7 +81,7 @@ app.use("/api", apiLimiter);
 // timeline recorder) is otherwise impossible to distinguish from the previous
 // deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1", "guilds-v1", "guild-raids", "co-leader", "guild-chat", "guild-banner"] });
+  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1", "guilds-v1", "guild-raids", "co-leader", "guild-chat", "guild-banner", "guild-xp"] });
 });
 
 // Mount routers

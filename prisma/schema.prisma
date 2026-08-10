@@ -808,7 +808,11 @@ model Guild {
   // whenever its holder leaves, is kicked, or takes the leadership — a stale
   // co-leader id would be a standing power grant to a non-member.
   coLeaderId  String?
-  coins       Int           @default(0)
+  // Treasury in SHARDS — the site's scarce currency. Renamed from the
+  // never-fed `coins` (every row was 0, so the rename is lossless). Fed by
+  // raid killing blows in raid.controller.ts; these are GUILD-row shards,
+  // separate from any member's personal balance.
+  shards      Int           @default(0)
   xp          Int           @default(0)
   createdAt   DateTime      @default(now())
   members     GuildMember[]

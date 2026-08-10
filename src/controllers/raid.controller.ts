@@ -552,7 +552,8 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
       return res.json({ success: true, replay: true, data: { damage: replay.damage, lines: replay.squad } });
     }
 
-    const { boss, enc } = await ensureWeek(await encKeyFor(actor));
+    const encKey = await encKeyFor(actor);
+    const { boss, enc } = await ensureWeek(encKey);
     const def = bossBySlug(boss.slug);
     if (enc.killedAt) {
       return res.status(409).json({ success: false, message: `${def.name} has already fallen this week.` });
@@ -765,6 +766,18 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
         },
       });
 
+      // Guild progression: every attack on a GUILD encounter feeds the
+      // guild's xp. updateMany, not update — a guild disbanded mid-week
+      // would make update throw P2025 and poison the whole attack
+      // transaction; here a vanished guild just matches zero rows. Realm
+      // fights feed nothing: the realm sentinel has no Guild row.
+      if (encKey !== REALM) {
+        await tx.guild.updateMany({
+          where: { id: encKey },
+          data: { xp: { increment: RAID.GUILD_ATTACK_XP } },
+        });
+      }
+
       await tx.raidEncounter.update({
         where: { id: enc.id },
         data: { hpLeft: { decrement: damage } },
@@ -777,6 +790,21 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
         where: { id: enc.id, hpLeft: { lte: 0 }, killedAt: null },
         data: { killedAt: new Date() },
       });
+      // The killing blow pays the GUILD row: the kill xp bonus plus treasury
+      // shards. Same updateMany guard as the attack xp above (a disbanded
+      // guild matches zero rows instead of aborting the tx), and same realm
+      // rule — a realm kill feeds nothing, there's no Guild row behind the
+      // sentinel. These are GUILD-row shards, never any user's; member
+      // payouts happen at settlement.
+      if (claim.count === 1 && encKey !== REALM) {
+        await tx.guild.updateMany({
+          where: { id: encKey },
+          data: {
+            xp: { increment: RAID.GUILD_KILL_XP },
+            shards: { increment: RAID.GUILD_KILL_SHARDS },
+          },
+        });
+      }
       await tx.raidEncounter.updateMany({
         where: { id: enc.id, hpLeft: { lt: 0 } },
         data: { hpLeft: 0 },

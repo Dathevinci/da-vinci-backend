@@ -34,15 +34,33 @@ export const kofiWebhook = async (req: Request, res: Response) => {
       return res.status(401).json({ success: false, error: "Bad verification token" });
     }
 
-    const kofiTxnId: string = payload.kofi_transaction_id || payload.message_id;
+    let kofiTxnId: string = payload.kofi_transaction_id || payload.message_id;
     if (!kofiTxnId) return res.status(400).json({ success: false, error: "Missing transaction id" });
 
-    // Idempotency: Ko-fi can retry. If we've seen this txn, ack and stop.
+    /**
+     * KO-FI "SEND TEST" CARVE-OUT. The dashboard's test button sends the SAME
+     * fixed transaction id every time (and always the Jo Example identity), so
+     * after the first-ever test the dedupe below swallowed every later one as
+     * a duplicate — the owner pressed Send Test and nothing visibly happened,
+     * which reads as "the webhook is broken" when it's working perfectly.
+     * A test is not a payment, so idempotency buys nothing there: give each
+     * test a unique id and label it, so it lands in the feed every time and
+     * proves the pipeline end-to-end.
+     */
+    const isKofiTest =
+      kofiTxnId === "00000000-1111-2222-3333-444444444444" ||
+      payload.email === "jo.example@example.com";
+    if (isKofiTest) kofiTxnId = `kofi-test-${Date.now()}`;
+
+    // Idempotency: Ko-fi can retry real payments. If we've seen this txn, ack
+    // and stop.
     const existing = await prisma.donation.findUnique({ where: { kofiTxnId } });
     if (existing) return res.json({ success: true, duplicate: true });
 
     const type: string = payload.type || "Donation";
-    const fromName: string = payload.from_name || "Anonymous";
+    const fromName: string = isKofiTest
+      ? `${payload.from_name || "Jo Example"} (test)`
+      : payload.from_name || "Anonymous";
     const message: string | null = payload.message ?? null;
     const currency: string = payload.currency || "GBP";
     const amount = parseFloat(payload.amount || "0") || 0;

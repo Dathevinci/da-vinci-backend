@@ -105,7 +105,9 @@ async function sizeRealmHp(def: ReturnType<typeof bossBySlug>): Promise<number> 
     include: { encounters: { where: { guildId: REALM } } },
   });
   let mActive = 0;
-  let dAvg = RAID.COLD_START_AVG_DAMAGE;
+  // Annotated: RAID is `as const`, so without this the literal type 900 is
+  // inferred and the median reassignment below is a compile error.
+  let dAvg: number = RAID.COLD_START_AVG_DAMAGE;
   const prevEnc = prevBoss?.encounters[0];
   if (prevEnc) {
     const damages = await prisma.raidAttack.findMany({

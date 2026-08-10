@@ -1,7 +1,7 @@
 import { Router } from "express";
 import {
   createGuild, listGuilds, getGuild, joinGuild, leaveGuild,
-  transferLeadership, kickMember, updateGuild,
+  transferLeadership, kickMember, setCoLeader, updateGuild,
   createLoan, endLoan, myLoans,
 } from "../controllers/guild.controller";
 
@@ -19,6 +19,7 @@ router.get("/:id", getGuild);
 router.post("/:id/join", joinGuild);
 router.post("/:id/transfer", transferLeadership);
 router.post("/:id/kick", kickMember);
+router.post("/:id/co-leader", setCoLeader);
 router.patch("/:id", updateGuild);
 router.post("/:id/loans", createLoan);
 

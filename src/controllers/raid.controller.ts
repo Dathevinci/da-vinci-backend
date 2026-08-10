@@ -14,13 +14,15 @@ import {
 } from "../data/raidBosses";
 
 /**
- * GUILD RAID BOSS — phase 1, realm mode.
+ * GUILD RAID BOSS.
  *
- * One boss per ISO week; ONE encounter shared by the whole server (guildId
- * sentinel "realm") until guilds exist, at which point per-guild encounters
- * slot into the same tables. Spawn and last week's settlement both happen
- * lazily on the first look of a new week — the gems pattern, no cron; a
- * Render restart can postpone a payout but never lose one.
+ * One boss per ISO week; every guild fights ITS OWN encounter against it,
+ * and guildless players share the realm-wide one (guildId sentinel "realm").
+ * The encounter key is derived SERVER-side from the caller's membership,
+ * never accepted from the client — a client-picked guildId would let anyone
+ * hit (or spy on) another guild's boss. Spawn and last week's settlement
+ * both happen lazily on the first look of a new week — the gems pattern, no
+ * cron; a Render restart can postpone a payout but never lose one.
  *
  * SECURITY: attack is the endpoint that mints value, so it takes the
  * changeUsername treatment — a verified JWT is REQUIRED, no grandfathering.
@@ -29,6 +31,14 @@ import {
  */
 
 const REALM = "realm";
+
+/** The caller's encounter key: their guild's id, else the realm sentinel.
+ *  Unauthenticated viewers get the realm fight. */
+async function encKeyFor(actor: string | null): Promise<string> {
+  if (!actor) return REALM;
+  const membership = await prisma.guildMember.findUnique({ where: { userId: actor } });
+  return membership?.guildId ?? REALM;
+}
 
 const dayKey = (d: Date = new Date()) => d.toISOString().slice(0, 10);
 const prevWeekKey = () => weekKey(new Date(Date.now() - 7 * 86400000));
@@ -55,9 +65,12 @@ function effectivePower(uc: {
   return atk + hp / 10;
 }
 
-/** Get-or-create this week's boss + realm encounter, settling last week first.
- *  Unique constraints make the create races safe: on P2002 we just refetch. */
-async function ensureWeek() {
+/** Get-or-create this week's boss + the encounter for ONE key (a guild id or
+ *  the realm sentinel), settling last week first. Unique constraints make the
+ *  create races safe: on P2002 we just refetch. The boss lookup and the
+ *  encounter lookup stay independent on purpose — a killed or settled realm
+ *  fight must never block a guild's encounter from spawning. */
+async function ensureWeek(encKey: string) {
   const week = weekKey();
 
   // Settlement runs on EVERY look, not only the spawning one: it early-exits
@@ -81,17 +94,18 @@ async function ensureWeek() {
   }
   if (!boss) throw new Error("raid boss spawn failed");
 
-  let enc = boss.encounters.find((e) => e.guildId === REALM) || null;
+  let enc = boss.encounters.find((e) => e.guildId === encKey) || null;
   if (!enc) {
-    const hp = await sizeRealmHp(bossBySlug(boss.slug));
+    const def = bossBySlug(boss.slug);
+    const hp = encKey === REALM ? await sizeRealmHp(def) : await sizeGuildHp(encKey, def);
     try {
       enc = await prisma.raidEncounter.create({
-        data: { bossId: boss.id, guildId: REALM, hpMax: hp, hpLeft: hp },
+        data: { bossId: boss.id, guildId: encKey, hpMax: hp, hpLeft: hp },
       });
     } catch (e: any) {
       if (e?.code !== "P2002") throw e;
       enc = await prisma.raidEncounter.findUnique({
-        where: { bossId_guildId: { bossId: boss.id, guildId: REALM } },
+        where: { bossId_guildId: { bossId: boss.id, guildId: encKey } },
       });
     }
   }
@@ -99,31 +113,52 @@ async function ensureWeek() {
   return { week, boss, enc };
 }
 
-/** §3.4, realm clamps: HP = M_active × 14 × D_avg × 0.85 (× finale mult). */
-async function sizeRealmHp(def: ReturnType<typeof bossBySlug>): Promise<number> {
-  const prevBoss = await prisma.raidBoss.findUnique({
-    where: { week: prevWeekKey() },
-    include: { encounters: { where: { guildId: REALM } } },
-  });
-  let mActive = 0;
-  // Annotated: RAID is `as const`, so without this the literal type 900 is
-  // inferred and the median reassignment below is a compile error.
-  let dAvg: number = RAID.COLD_START_AVG_DAMAGE;
-  const prevEnc = prevBoss?.encounters[0];
-  if (prevEnc) {
-    const damages = await prisma.raidAttack.findMany({
-      where: { encounterId: prevEnc.id },
-      select: { damage: true, userId: true },
-    });
-    if (damages.length) {
-      mActive = new Set(damages.map((a) => a.userId)).size;
-      const sorted = damages.map((a) => a.damage).sort((a, b) => a - b);
-      dAvg = sorted[Math.floor(sorted.length / 2)] || dAvg;
-    }
-  }
-  const m = Math.min(Math.max(mActive, RAID.HP_ACTIVE_MIN), RAID.HP_ACTIVE_MAX);
+/** §3.4 core, ONE function for realm and guild sizing so they cannot drift:
+ *  HP = clamp(M_active) × 14 × D_avg × 0.85 (× finale mult), floored at 1000. */
+function hpFormula(
+  mActive: number,
+  minClamp: number,
+  dAvg: number,
+  def: ReturnType<typeof bossBySlug>
+): number {
+  const m = Math.min(Math.max(mActive, minClamp), RAID.HP_ACTIVE_MAX);
   const hp = Math.ceil(m * RAID.HP_ATTACKS_PER_MEMBER * dAvg * RAID.HP_TUNING * gimmickHpMult(def.gimmick));
   return Math.max(hp, 1000);
+}
+
+/** Distinct attackers and median damage on ONE key's previous-week encounter.
+ *  Both null-ish when that key didn't fight last week — the caller decides
+ *  what a cold start falls back to. */
+async function prevWeekActivity(encKey: string): Promise<{ mActive: number; dMedian: number | null }> {
+  const prevBoss = await prisma.raidBoss.findUnique({
+    where: { week: prevWeekKey() },
+    include: { encounters: { where: { guildId: encKey } } },
+  });
+  const prevEnc = prevBoss?.encounters[0];
+  if (!prevEnc) return { mActive: 0, dMedian: null };
+  const damages = await prisma.raidAttack.findMany({
+    where: { encounterId: prevEnc.id },
+    select: { damage: true, userId: true },
+  });
+  if (!damages.length) return { mActive: 0, dMedian: null };
+  const sorted = damages.map((a) => a.damage).sort((a, b) => a - b);
+  return {
+    mActive: new Set(damages.map((a) => a.userId)).size,
+    dMedian: sorted[Math.floor(sorted.length / 2)] || null,
+  };
+}
+
+async function sizeRealmHp(def: ReturnType<typeof bossBySlug>): Promise<number> {
+  const { mActive, dMedian } = await prevWeekActivity(REALM);
+  return hpFormula(mActive, RAID.HP_ACTIVE_MIN, dMedian ?? RAID.COLD_START_AVG_DAMAGE, def);
+}
+
+async function sizeGuildHp(guildId: string, def: ReturnType<typeof bossBySlug>): Promise<number> {
+  const { mActive, dMedian } = await prevWeekActivity(guildId);
+  // Cold start: a guild with no raid history sizes off who's in it TODAY, so
+  // its first boss is beatable by the roster it actually has.
+  const m = mActive || (await prisma.guildMember.count({ where: { guildId } }));
+  return hpFormula(m, RAID.GUILD_HP_ACTIVE_MIN, dMedian ?? RAID.COLD_START_AVG_DAMAGE, def);
 }
 
 /**
@@ -162,20 +197,58 @@ function outcomeOf(enc: { hpMax: number; hpLeft: number; killedAt: Date | null }
   };
 }
 
-/** Pay out last week's realm encounter exactly once. */
+/** Pay out EVERY unrewarded encounter of last week's boss exactly once —
+ *  realm and per-guild alike. settleEncounter's rewarded-CAS keeps each one
+ *  idempotent, so two concurrent rollovers can't double-pay a guild. */
 async function settlePreviousWeek() {
   const prev = await prisma.raidBoss.findUnique({
     where: { week: prevWeekKey() },
-    include: { encounters: { where: { guildId: REALM, rewarded: false } } },
+    include: { encounters: { where: { rewarded: false } } },
   });
-  const enc = prev?.encounters[0];
-  if (!prev || !enc) return;
-  await settleEncounter(prev.slug, prev.week, enc);
+  if (!prev) return;
+  for (const enc of prev.encounters) {
+    await settleEncounter(prev.id, prev.slug, prev.week, enc);
+  }
+}
+
+/**
+ * userId → the ONE encounter of a boss's week allowed to pay that user.
+ *
+ * Joins are open and the daily cap is user-global but not encounter-bound,
+ * so a player can meet the 3-attack reward gate on several encounters by
+ * guild-hopping — and since every encounter settles independently, each one
+ * would pay them in full. Splitting 21 weekly attacks across seven guilds
+ * that kill anyway would out-earn a loyal member several times over.
+ * Home = the encounter with the most of their attacks; ties break to the
+ * earliest first attack, then encounter id, so the answer is deterministic
+ * however the encounters settle (Monday loop or the dev drill).
+ */
+async function homeEncounterByUser(bossId: string): Promise<Map<string, string>> {
+  const rows = await prisma.raidAttack.groupBy({
+    by: ["userId", "encounterId"],
+    where: { encounter: { bossId } },
+    _count: { _all: true },
+    _min: { createdAt: true },
+  });
+  const best = new Map<string, { encId: string; n: number; t: number }>();
+  for (const r of rows) {
+    const t = r._min.createdAt ? r._min.createdAt.getTime() : 0;
+    const cur = best.get(r.userId);
+    if (
+      !cur ||
+      r._count._all > cur.n ||
+      (r._count._all === cur.n && (t < cur.t || (t === cur.t && r.encounterId < cur.encId)))
+    ) {
+      best.set(r.userId, { encId: r.encounterId, n: r._count._all, t });
+    }
+  }
+  return new Map([...best].map(([u, b]) => [u, b.encId] as [string, string]));
 }
 
 /** Settle ONE encounter: compute payouts, pay in a CAS-guarded transaction.
  *  Shared by the Monday rollover and the lead-dev settle-now drill. */
 async function settleEncounter(
+  bossId: string,
   slug: string,
   week: string,
   enc: { id: string; hpMax: number; hpLeft: number; killedAt: Date | null }
@@ -204,7 +277,13 @@ async function settleEncounter(
         ).map((u) => u.id)
       )
     : new Set<string>();
-  const gated = gatedAll.filter((p) => existing.has(p.userId));
+  // Anti-tourism: this encounter only pays users whose HOME it is (see
+  // homeEncounterByUser). The rank ladder is filtered the same way so a
+  // tourist's damage can't hold a top-damage shard slot either.
+  const home = await homeEncounterByUser(bossId);
+  const gated = gatedAll.filter(
+    (p) => existing.has(p.userId) && home.get(p.userId) === enc.id
+  );
   const byDamage = [...gated].sort((a, b) => (b._sum.damage || 0) - (a._sum.damage || 0));
 
   await prisma.$transaction(async (tx) => {
@@ -249,17 +328,31 @@ async function settleEncounter(
 
 export const getRaid = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { week, boss, enc } = await ensureWeek();
-    const def = bossBySlug(boss.slug);
     const actor = getActorId(req);
+    const encKey = await encKeyFor(actor);
+    const { week, boss, enc } = await ensureWeek(encKey);
+    const def = bossBySlug(boss.slug);
     const day = dayKey();
+
+    // Whose fight the caller is looking at — null means the realm-wide one.
+    const guild =
+      encKey === REALM
+        ? null
+        : await prisma.guild.findUnique({
+            where: { id: encKey },
+            select: { id: true, name: true, tag: true },
+          });
 
     let mine: { attacksToday: number; usedCardIds: string[]; myDamage: number; myAttacks: number } = {
       attacksToday: 0, usedCardIds: [], myDamage: 0, myAttacks: 0,
     };
     if (actor) {
+      // attacksToday/usedCardIds are USER-global, not encounter-scoped —
+      // they mirror the enforcement in raidAttack, which counts across all
+      // encounters so a mid-day guild hop can't reset the cap. Scoping the
+      // display to the encounter would show an available attack that 429s.
       const todays = await prisma.raidAttack.findMany({
-        where: { encounterId: enc.id, userId: actor, day },
+        where: { userId: actor, day },
         select: { squad: true },
       });
       const all = await prisma.raidAttack.aggregate({
@@ -281,9 +374,13 @@ export const getRaid = async (req: Request, res: Response, next: NextFunction) =
     let lastWeek: any = null;
     const prevBoss = await prisma.raidBoss.findUnique({
       where: { week: prevWeekKey() },
-      include: { encounters: { where: { guildId: REALM } } },
+      include: { encounters: { where: { guildId: { in: [encKey, REALM] } } } },
     });
-    const prevEnc = prevBoss?.encounters[0];
+    // The caller's own fight when their key had one last week; the realm
+    // fight otherwise, so a freshly-founded guild's card still tells a story.
+    const prevEnc =
+      prevBoss?.encounters.find((e) => e.guildId === encKey) ??
+      prevBoss?.encounters.find((e) => e.guildId === REALM);
     if (prevBoss && prevEnc) {
       const o = outcomeOf(prevEnc, prevBoss.slug);
       lastWeek = {
@@ -304,11 +401,20 @@ export const getRaid = async (req: Request, res: Response, next: NextFunction) =
         });
         const meRow = gatedRows.find((r) => r.userId === actor);
         if (meRow) {
+          // Same home-encounter rule as settlement — without it this card
+          // would promise a guild-hopper money the settlement never paid.
+          const home = await homeEncounterByUser(prevBoss.id);
           const gatedSorted = gatedRows
-            .filter((r) => r._count._all >= RAID.REWARD_GATE_ATTACKS)
+            .filter(
+              (r) =>
+                r._count._all >= RAID.REWARD_GATE_ATTACKS &&
+                home.get(r.userId) === prevEnc.id
+            )
             .sort((a, b) => (b._sum.damage || 0) - (a._sum.damage || 0));
           const rank = gatedSorted.findIndex((r) => r.userId === actor);
-          const eligible = meRow._count._all >= RAID.REWARD_GATE_ATTACKS;
+          const eligible =
+            meRow._count._all >= RAID.REWARD_GATE_ATTACKS &&
+            home.get(actor) === prevEnc.id;
           const paid = eligible
             ? payoutFor(meRow._count._all, rank, o)
             : { ap: 0, shards: 0 };
@@ -346,6 +452,7 @@ export const getRaid = async (req: Request, res: Response, next: NextFunction) =
       success: true,
       data: {
         week,
+        guild,
         boss: {
           slug: def.slug, name: def.name, series: def.series, art: def.art,
           flavor: def.flavor, gimmickText: def.gimmickText,
@@ -370,7 +477,9 @@ export const getRaid = async (req: Request, res: Response, next: NextFunction) =
 // ── Lead-dev drill ops (mounted under /api/console) ─────────────────────────
 // The phase-3 proof: set the boss's HP low, land a real killing blow, then
 // force the settlement without waiting for Monday. Both are leadDevOnly and
-// operate on the CURRENT week's realm encounter.
+// operate on the CURRENT week's encounter for the LEAD DEV'S OWN key — their
+// guild's fight when they're in one, else the realm — so the drill demos the
+// same encounter their attacks land on.
 
 /** POST /api/console/ops/raid-hp  body: { hpLeft } — set the live boss's HP. */
 export const raidDevSetHp = async (req: Request, res: Response, next: NextFunction) => {
@@ -381,7 +490,7 @@ export const raidDevSetHp = async (req: Request, res: Response, next: NextFuncti
     if (!Number.isFinite(hpLeft) || hpLeft < 1) {
       return res.status(400).json({ success: false, message: "hpLeft must be a number ≥ 1 — land the kill with a real attack." });
     }
-    const { boss, enc } = await ensureWeek();
+    const { boss, enc } = await ensureWeek(await encKeyFor(actor.id));
     if (enc.killedAt) {
       return res.status(409).json({ success: false, message: "The boss is already down this week." });
     }
@@ -401,11 +510,11 @@ export const raidDevSettleNow = async (req: Request, res: Response, next: NextFu
   try {
     const actor = await requireStaff(req, res, { leadDevOnly: true });
     if (!actor) return;
-    const { week, boss, enc } = await ensureWeek();
+    const { week, boss, enc } = await ensureWeek(await encKeyFor(actor.id));
     if (enc.rewarded) {
       return res.status(409).json({ success: false, message: "This week is already settled." });
     }
-    await settleEncounter(boss.slug, week, enc);
+    await settleEncounter(boss.id, boss.slug, week, enc);
     const after = await prisma.raidEncounter.findUnique({ where: { id: enc.id } });
     return res.json({
       success: true,
@@ -443,15 +552,18 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
       return res.json({ success: true, replay: true, data: { damage: replay.damage, lines: replay.squad } });
     }
 
-    const { boss, enc } = await ensureWeek();
+    const { boss, enc } = await ensureWeek(await encKeyFor(actor));
     const def = bossBySlug(boss.slug);
     if (enc.killedAt) {
       return res.status(409).json({ success: false, message: `${def.name} has already fallen this week.` });
     }
 
+    // The daily cap and card fatigue are PER USER, across ALL encounters —
+    // scoping them to enc.id would let leaving guild A for guild B mid-day
+    // reset both and double a player's attacks.
     const day = dayKey();
     const todays = await prisma.raidAttack.findMany({
-      where: { encounterId: enc.id, userId: actor, day },
+      where: { userId: actor, day },
       select: { squad: true },
     });
     if (todays.length >= RAID.MAX_ATTACKS_PER_DAY) {
@@ -534,8 +646,10 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
     };
 
     // Collector's pride: distinct sets fielded this week (before this attack).
+    // Joined through the boss, not the encounter, so the streak follows the
+    // player across a mid-week guild switch instead of resetting.
     const weekAttacks = await prisma.raidAttack.findMany({
-      where: { encounterId: enc.id, userId: actor },
+      where: { userId: actor, encounter: { bossId: boss.id } },
       select: { squad: true },
     });
     const setsThisWeek = new Set(
@@ -607,8 +721,10 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
       // once. FOR UPDATE on the user's row serializes this user's attacks;
       // everything economic is then re-derived from tx-consistent reads.
       await tx.$executeRaw`SELECT id FROM "User" WHERE id = ${actor} FOR UPDATE`;
+      // Cross-encounter on purpose, matching the fast path above — the cap
+      // and fatigue belong to the USER's day, not to any one encounter.
       const txTodays = await tx.raidAttack.findMany({
-        where: { encounterId: enc.id, userId: actor, day },
+        where: { userId: actor, day },
         select: { squad: true },
       });
       if (txTodays.length >= RAID.MAX_ATTACKS_PER_DAY) {
@@ -722,9 +838,10 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
 
 // ── GET /api/raid/leaderboard ───────────────────────────────────────────────
 
-export const raidLeaderboard = async (_req: Request, res: Response, next: NextFunction) => {
+export const raidLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { boss, enc } = await ensureWeek();
+    // Soft auth — signed-out viewers see the realm fight's board.
+    const { boss, enc } = await ensureWeek(await encKeyFor(getActorId(req)));
     const def = bossBySlug(boss.slug);
     const per = await prisma.raidAttack.groupBy({
       by: ["userId"],
@@ -765,25 +882,39 @@ export const raidLeaderboard = async (_req: Request, res: Response, next: NextFu
 
 // ── GET /api/raid/history ───────────────────────────────────────────────────
 
-export const raidHistory = async (_req: Request, res: Response, next: NextFunction) => {
+export const raidHistory = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Soft auth — the caller's key picks whose record this is.
+    const encKey = await encKeyFor(getActorId(req));
     const bosses = await prisma.raidBoss.findMany({
       orderBy: { createdAt: "desc" },
       take: 12,
-      include: { encounters: { where: { guildId: REALM } } },
+      include: { encounters: { where: { guildId: { in: [encKey, REALM] } } } },
     });
+    // The caller's-key fight when that week had one, else the realm fight —
+    // a guild founded mid-season still sees every week's story.
+    const pick = (b: (typeof bosses)[number]) =>
+      b.encounters.find((e) => e.guildId === encKey) ?? b.encounters.find((e) => e.guildId === REALM);
+    const guild =
+      encKey === REALM
+        ? null
+        : await prisma.guild.findUnique({
+            where: { id: encKey },
+            select: { id: true, name: true, tag: true },
+          });
     // The phase-4 season record: kills among the 8 most recent weeks. A
     // SIBLING of data, not a reshape of it — the history list is already a
-    // deployed contract and the array must stay an array.
+    // deployed contract and the array must stay an array. `guild` is a
+    // sibling too, for the same reason.
     const SEASON_WEEKS = 8;
     const cleared = bosses
       .slice(0, SEASON_WEEKS)
-      .filter((b) => !!b.encounters[0]?.killedAt).length;
+      .filter((b) => !!pick(b)?.killedAt).length;
     res.json({
       success: true,
       data: bosses.map((b) => {
         const def = bossBySlug(b.slug);
-        const e = b.encounters[0];
+        const e = pick(b);
         return {
           week: b.week,
           name: def.name,
@@ -794,6 +925,7 @@ export const raidHistory = async (_req: Request, res: Response, next: NextFuncti
         };
       }),
       season: { cleared, total: SEASON_WEEKS },
+      guild,
     });
   } catch (error) {
     next(error);

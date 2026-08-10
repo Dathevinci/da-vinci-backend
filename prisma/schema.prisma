@@ -742,14 +742,14 @@ model ArenaChestOpen {
   @@index([userId])
 }
 
-// ═══ GUILD RAID BOSS (phase 1: realm mode) ═══════════════════════════════
+// ═══ GUILD RAID BOSS ═══════════════════════════════════════════════════════
 // One boss per ISO week, lazily spawned by the first GET of the week — the
 // gems weekKey pattern, no cron. Encounters are per-GROUP fights against
-// that boss: today the only group is the whole server (guildId "realm");
-// when guilds exist, per-guild rows slot in with zero schema change. The
-// sentinel is a string, not null, because Postgres treats NULLs as distinct
-// in unique constraints — a nullable guildId would allow duplicate realm
-// encounters and the lazy-spawn race guard would silently stop guarding.
+// that boss: one per guild, plus the realm-wide fight the guildless share
+// (guildId "realm"). The sentinel is a string, not null, because Postgres
+// treats NULLs as distinct in unique constraints — a nullable guildId would
+// allow duplicate realm encounters and the lazy-spawn race guard would
+// silently stop guarding.
 
 model RaidBoss {
   id         String          @id @default(uuid())
@@ -762,7 +762,7 @@ model RaidBoss {
 model RaidEncounter {
   id       String    @id @default(uuid())
   bossId   String
-  guildId  String    @default("realm") // "realm" until guilds exist
+  guildId  String    @default("realm") // a guild id, or "realm" for the guildless fight
   hpMax    Int
   hpLeft   Int
   killedAt DateTime?
@@ -803,6 +803,10 @@ model Guild {
   description String        @default("")
   avatar      String?
   leaderId    String        // plain string, no FK — the duel pattern
+  // One optional deputy, leader-appointed. Cleared in the SAME transaction
+  // whenever its holder leaves, is kicked, or takes the leadership — a stale
+  // co-leader id would be a standing power grant to a non-member.
+  coLeaderId  String?
   coins       Int           @default(0)
   xp          Int           @default(0)
   createdAt   DateTime      @default(now())

@@ -131,7 +131,8 @@ export const createGuild = async (req: Request, res: Response, next: NextFunctio
       data: {
         id: result.id, name: result.name, tag: result.tag,
         description: result.description, avatar: result.avatar,
-        leaderId: result.leaderId, coins: result.coins, xp: result.xp,
+        leaderId: result.leaderId, coLeaderId: result.coLeaderId,
+        coins: result.coins, xp: result.xp,
         level: levelOf(result.xp), memberCount: 1, createdAt: result.createdAt,
       },
     });
@@ -152,7 +153,8 @@ export const listGuilds = async (_req: Request, res: Response, next: NextFunctio
       success: true,
       data: guilds.map((g) => ({
         id: g.id, name: g.name, tag: g.tag, description: g.description,
-        avatar: g.avatar, leaderId: g.leaderId, coins: g.coins, xp: g.xp,
+        avatar: g.avatar, leaderId: g.leaderId, coLeaderId: g.coLeaderId,
+        coins: g.coins, xp: g.xp,
         level: levelOf(g.xp), memberCount: g._count.members, createdAt: g.createdAt,
       })),
     });
@@ -163,51 +165,56 @@ export const listGuilds = async (_req: Request, res: Response, next: NextFunctio
 
 // ── GET /api/guilds/:id ─────────────────────────────────────────────────────
 
+/** The guild-detail payload, shared with setCoLeader — which answers with the
+ *  same shape — so the two responses can't drift apart. Null = no such guild. */
+async function guildDetailPayload(id: string, actor: string | null) {
+  const guild = await prisma.guild.findUnique({
+    where: { id },
+    include: { members: { orderBy: { joinedAt: "asc" } } },
+  });
+  if (!guild) return null;
+
+  const users = guild.members.length
+    ? await prisma.user.findMany({
+        where: { id: { in: guild.members.map((m) => m.userId) } },
+        select: { id: true, username: true, avatar: true },
+      })
+    : [];
+
+  const myMembership = actor ? guild.members.find((m) => m.userId === actor) || null : null;
+  const activeLoanCount = await prisma.guildCardLoan.count({
+    where: { guildId: id, expiresAt: { gt: new Date() } },
+  });
+
+  return {
+    id: guild.id, name: guild.name, tag: guild.tag,
+    description: guild.description, avatar: guild.avatar,
+    leaderId: guild.leaderId, coLeaderId: guild.coLeaderId,
+    coins: guild.coins, xp: guild.xp,
+    level: levelOf(guild.xp), createdAt: guild.createdAt,
+    memberCap: GUILD_MEMBER_CAP,
+    memberCount: guild.members.length,
+    members: guild.members.map((m) => {
+      const u = users.find((x) => x.id === m.userId);
+      return {
+        userId: m.userId,
+        username: u?.username || "?",
+        avatar: u?.avatar || null,
+        role: m.role,
+        joinedAt: m.joinedAt,
+      };
+    }),
+    myMembership: myMembership ? { role: myMembership.role, joinedAt: myMembership.joinedAt } : null,
+    activeLoanCount,
+  };
+}
+
 export const getGuild = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const guild = await prisma.guild.findUnique({
-      where: { id },
-      include: { members: { orderBy: { joinedAt: "asc" } } },
-    });
-    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
-
-    const users = guild.members.length
-      ? await prisma.user.findMany({
-          where: { id: { in: guild.members.map((m) => m.userId) } },
-          select: { id: true, username: true, avatar: true },
-        })
-      : [];
-
-    const actor = getActorId(req);
-    const myMembership = actor ? guild.members.find((m) => m.userId === actor) || null : null;
-    const activeLoanCount = await prisma.guildCardLoan.count({
-      where: { guildId: id, expiresAt: { gt: new Date() } },
-    });
-
-    res.json({
-      success: true,
-      data: {
-        id: guild.id, name: guild.name, tag: guild.tag,
-        description: guild.description, avatar: guild.avatar,
-        leaderId: guild.leaderId, coins: guild.coins, xp: guild.xp,
-        level: levelOf(guild.xp), createdAt: guild.createdAt,
-        memberCap: GUILD_MEMBER_CAP,
-        memberCount: guild.members.length,
-        members: guild.members.map((m) => {
-          const u = users.find((x) => x.id === m.userId);
-          return {
-            userId: m.userId,
-            username: u?.username || "?",
-            avatar: u?.avatar || null,
-            role: m.role,
-            joinedAt: m.joinedAt,
-          };
-        }),
-        myMembership: myMembership ? { role: myMembership.role, joinedAt: myMembership.joinedAt } : null,
-        activeLoanCount,
-      },
-    });
+    const data = await guildDetailPayload(id, getActorId(req));
+    if (!data) return res.status(404).json({ success: false, message: "Guild not found." });
+    res.json({ success: true, data });
   } catch (error) {
     next(error);
   }
@@ -299,6 +306,9 @@ export const leaveGuild = async (req: Request, res: Response, next: NextFunction
       prisma.guildCardLoan.deleteMany({
         where: { guildId, OR: [{ ownerId: actor }, { borrowerId: actor }] },
       }),
+      // A departing co-leader vacates the seat in the same transaction —
+      // conditional, so anyone else's leave touches nothing.
+      prisma.guild.updateMany({ where: { id: guildId, coLeaderId: actor }, data: { coLeaderId: null } }),
       prisma.guildMember.delete({ where: { userId: actor } }),
     ]);
     res.json({ success: true, data: { left: true, disbanded: false } });
@@ -339,6 +349,9 @@ export const transferLeadership = async (req: Request, res: Response, next: Next
     // matches zero instead of aborting the transaction with a P2025.
     await prisma.$transaction([
       prisma.guild.update({ where: { id }, data: { leaderId: targetId } }),
+      // A co-leader promoted to leader can't hold both seats — conditional,
+      // so transferring to anyone else leaves the deputy in place.
+      prisma.guild.updateMany({ where: { id, coLeaderId: targetId }, data: { coLeaderId: null } }),
       prisma.guildMember.updateMany({ where: { userId: actor, guildId: id }, data: { role: "member" } }),
       prisma.guildMember.updateMany({ where: { userId: targetId, guildId: id }, data: { role: "leader" } }),
     ]);
@@ -364,11 +377,16 @@ export const kickMember = async (req: Request, res: Response, next: NextFunction
 
     const guild = await prisma.guild.findUnique({ where: { id } });
     if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
-    if (guild.leaderId !== actor) {
-      return res.status(403).json({ success: false, message: "Only the guild leader can do that." });
+    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can do that." });
     }
     if (targetId === actor) {
       return res.status(400).json({ success: false, message: "You can't kick yourself — use leave." });
+    }
+    // The self-kick check above already covers the leader kicking the leader,
+    // so this only ever bites a co-leader: they outrank members, not the top.
+    if (targetId === guild.leaderId) {
+      return res.status(403).json({ success: false, message: "The leader can't be kicked." });
     }
 
     const target = await prisma.guildMember.findUnique({ where: { userId: targetId } });
@@ -381,9 +399,71 @@ export const kickMember = async (req: Request, res: Response, next: NextFunction
       prisma.guildCardLoan.deleteMany({
         where: { guildId: id, OR: [{ ownerId: targetId }, { borrowerId: targetId }] },
       }),
+      // A kicked co-leader loses the seat in the same transaction —
+      // conditional, so kicking anyone else touches nothing.
+      prisma.guild.updateMany({ where: { id, coLeaderId: targetId }, data: { coLeaderId: null } }),
       prisma.guildMember.delete({ where: { userId: targetId } }),
     ]);
     res.json({ success: true, data: { kicked: targetId } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/guilds/:id/co-leader ──────────────────────────────────────────
+// The leader appoints ONE deputy, or clears the seat with userId: null.
+// Leader-only, like transfer — the deputy can't appoint their own successor.
+// The membership check runs INSIDE the transaction, beside the write:
+// transferLeadership's read-then-write gap would let a target who left
+// between the check and the update end up co-leading a guild they're not in.
+
+export const setCoLeader = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const raw = req.body?.userId;
+    const targetId = raw === null || raw === undefined || raw === "" ? null : String(raw);
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    if (guild.leaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader can do that." });
+    }
+    if (targetId === actor) {
+      return res.status(400).json({ success: false, message: "You already lead this guild — appoint someone else." });
+    }
+
+    if (targetId === null) {
+      await prisma.guild.update({ where: { id }, data: { coLeaderId: null } });
+    } else {
+      const result = await prisma.$transaction(async (tx) => {
+        // Lock the target's membership row for the length of the tx. Without
+        // it, an appoint racing the target's leave/kick can commit AFTER the
+        // GuildMember delete (whose conditional coLeaderId clear ran first
+        // and matched nothing) — a standing power grant to a non-member. The
+        // lock makes the delete wait, so its clear fires after this commits.
+        await tx.$executeRaw`SELECT "userId" FROM "GuildMember" WHERE "userId" = ${targetId} FOR UPDATE`;
+        const member = await tx.guildMember.findUnique({ where: { userId: targetId } });
+        if (!member || member.guildId !== id) {
+          throw Object.assign(new Error("co-leader-not-member"), { guildCode: 404 });
+        }
+        await tx.guild.update({ where: { id }, data: { coLeaderId: targetId } });
+        return "ok" as const;
+      }).catch((e) => {
+        if (e?.guildCode === 404) return "not-member" as const;
+        throw e;
+      });
+      if (result === "not-member") {
+        return res.status(404).json({ success: false, message: "That user isn't a member of this guild." });
+      }
+    }
+
+    const data = await guildDetailPayload(id, actor);
+    if (!data) return res.status(404).json({ success: false, message: "Guild not found." });
+    res.json({ success: true, data });
   } catch (error) {
     next(error);
   }
@@ -404,8 +484,9 @@ export const updateGuild = async (req: Request, res: Response, next: NextFunctio
 
     const guild = await prisma.guild.findUnique({ where: { id } });
     if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
-    if (guild.leaderId !== actor) {
-      return res.status(403).json({ success: false, message: "Only the guild leader can do that." });
+    // Profile edits are shared power; the co-leader carries them too.
+    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can do that." });
     }
 
     const data: { description?: string; avatar?: string | null } = {};

@@ -630,16 +630,16 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
     }
 
     if (comment.userId !== userId && !actor.isStaff) {
-      // Guild leaders moderate their own board — and ONLY their own. Scoped
-      // to comments that carry that guild's id, so leadership grants nothing
-      // over public threads or other guilds' boards.
+      // Guild leaders and co-leaders moderate their own board — and ONLY
+      // their own. Scoped to comments that carry that guild's id, so the
+      // power grants nothing over public threads or other guilds' boards.
       let leaderModerates = false;
       if (comment.guildId) {
         const guild = await prisma.guild.findUnique({
           where: { id: comment.guildId },
-          select: { leaderId: true },
+          select: { leaderId: true, coLeaderId: true },
         });
-        leaderModerates = guild?.leaderId === userId;
+        leaderModerates = !!guild && (guild.leaderId === userId || guild.coLeaderId === userId);
       }
       if (!leaderModerates) {
         return res.status(403).json({ success: false, message: "You can only delete your own comments" });

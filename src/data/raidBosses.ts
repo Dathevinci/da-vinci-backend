@@ -172,6 +172,7 @@ export const RAID = {
   HP_TUNING: 0.85,
   HP_ACTIVE_MIN: 8, // realm-mode clamps (whole server is one "guild")
   HP_ACTIVE_MAX: 80,
+  GUILD_HP_ACTIVE_MIN: 3, // per-guild floor — a 3-person guild still gets a boss it can plausibly kill
   COLD_START_AVG_DAMAGE: 900,
   // §6 payouts (realm mode: personal rewards only — guild coins wait for guilds)
   KILL_AP: 400,

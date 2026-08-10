@@ -471,30 +471,62 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
     // squadIds are CATALOG card ids — the id currency of the whole frontend
     // (the collection endpoint never exposes UserCard row ids). Safe because
     // @@unique([userId, cardId]) makes catalog ids 1:1 with rows per user.
-    const cards = await prisma.userCard.findMany({
+    const owned = await prisma.userCard.findMany({
       where: { cardId: { in: squadIds }, userId: actor, count: { gt: 0 } },
     });
-    if (cards.length !== RAID.SQUAD_SIZE) {
-      return res.status(400).json({ success: false, message: "You don't own all of those cards." });
-    }
+
+    // ── GUILD CARD LOANS ── squad ids the actor doesn't own may be borrowed
+    // from a guildmate. A borrowed card fights as the OWNER's copy: the
+    // owner's UserCard row supplies stats/level/forge, the owner's prints
+    // supply condition, and an injury sets raidRestUntil on the OWNER's row —
+    // lending is real, your card comes back tired. Fatigue stays keyed on the
+    // BORROWER's own attacks by catalog cardId, unchanged.
     const now = new Date();
+    const ownedIds = new Set(owned.map((c) => c.cardId));
+    const missing = squadIds.filter((id) => !ownedIds.has(id));
+    let borrowed: typeof owned = [];
+    if (missing.length) {
+      const loans = await prisma.guildCardLoan.findMany({
+        where: { borrowerId: actor, cardId: { in: missing }, expiresAt: { gt: now } },
+      });
+      if (loans.length) {
+        const rows = await prisma.userCard.findMany({
+          where: {
+            OR: loans.map((l) => ({ userId: l.ownerId, cardId: l.cardId })),
+            count: { gt: 0 },
+          },
+        });
+        // One usable row per missing catalog id — if the same card is somehow
+        // on loan from two owners, the first row stands in for it.
+        const byCardId = new Map<string, (typeof owned)[number]>();
+        for (const r of rows) if (!byCardId.has(r.cardId)) byCardId.set(r.cardId, r);
+        borrowed = missing
+          .map((id) => byCardId.get(id))
+          .filter((r): r is (typeof owned)[number] => !!r);
+      }
+    }
+
+    const cards = [...owned, ...borrowed];
+    if (cards.length !== RAID.SQUAD_SIZE) {
+      return res.status(400).json({ success: false, message: "You don't own (or hold an active guild loan for) all of those cards." });
+    }
     const resting = cards.filter((c) => c.raidRestUntil && c.raidRestUntil > now);
     if (resting.length) {
       return res.status(409).json({ success: false, message: "An injured card is still resting from a raid." });
     }
 
-    // Best owned print condition per legendary card (fresh > factory > rusted).
-    const legendaryIds = cards
-      .filter((c) => CARDS[c.cardId]?.rarity === "legendary")
-      .map((c) => c.cardId);
-    const prints = legendaryIds.length
+    // Best print condition per legendary card (fresh > factory > rusted).
+    // Prints belong to the row's OWNER — for a borrowed card that's the
+    // lender, not the actor, so the lookup is keyed per (owner, card).
+    const legendaryRows = cards.filter((c) => CARDS[c.cardId]?.rarity === "legendary");
+    const prints = legendaryRows.length
       ? await prisma.cardPrint.findMany({
-          where: { userId: actor, cardId: { in: legendaryIds } },
-          select: { cardId: true, condition: true },
+          where: { OR: legendaryRows.map((c) => ({ userId: c.userId, cardId: c.cardId })) },
+          select: { userId: true, cardId: true, condition: true },
         })
       : [];
-    const bestCondition = (cardId: string): string | null => {
-      const mine = prints.filter((p) => p.cardId === cardId);
+    const bestCondition = (ownerId: string, cardId: string): string | null => {
+      const mine = prints.filter((p) => p.userId === ownerId && p.cardId === cardId);
       if (!mine.length) return null;
       if (mine.some((p) => p.condition === "fresh")) return "fresh";
       if (mine.some((p) => p.condition === "factory")) return "factory";
@@ -530,7 +562,7 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
       const rarity = cat?.rarity || "common";
       const base = effectivePower(uc);
       const rarityMult = RAID.RARITY_MULT[rarity] ?? 1;
-      const cond = bestCondition(uc.cardId);
+      const cond = bestCondition(uc.userId, uc.cardId);
       const condMult = cond ? RAID.CONDITION_MULT[cond] ?? 1 : 1;
       const isAffine = !!cat && cat.set === def.series;
       const affMult = isAffine ? affinityMult : 1;
@@ -740,6 +772,13 @@ export const raidHistory = async (_req: Request, res: Response, next: NextFuncti
       take: 12,
       include: { encounters: { where: { guildId: REALM } } },
     });
+    // The phase-4 season record: kills among the 8 most recent weeks. A
+    // SIBLING of data, not a reshape of it — the history list is already a
+    // deployed contract and the array must stay an array.
+    const SEASON_WEEKS = 8;
+    const cleared = bosses
+      .slice(0, SEASON_WEEKS)
+      .filter((b) => !!b.encounters[0]?.killedAt).length;
     res.json({
       success: true,
       data: bosses.map((b) => {
@@ -754,6 +793,7 @@ export const raidHistory = async (_req: Request, res: Response, next: NextFuncti
           dealtRatio: e && e.hpMax > 0 ? Math.round(((e.hpMax - e.hpLeft) / e.hpMax) * 100) / 100 : 0,
         };
       }),
+      season: { cleared, total: SEASON_WEEKS },
     });
   } catch (error) {
     next(error);

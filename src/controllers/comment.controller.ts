@@ -87,6 +87,9 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     const mangaId = req.query.mangaId as string | undefined;
     const chapterId = req.query.chapterId as string | undefined;
     const novelId = req.query.novelId as string | undefined;
+    // Guild board — same shape as the mangaId/novelId filters: the board is
+    // the existing forum machinery scoped to one guild's comments.
+    const guildId = req.query.guildId as string | undefined;
 
     /**
      * TWO DIFFERENT USERS, TWO DIFFERENT PARAMS.
@@ -130,6 +133,11 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     if (mangaId) where.mangaId = mangaId;
     if (chapterId) where.chapterId = chapterId;
     if (novelId) where.novelId = novelId;
+    // Guild boards are members-only rooms, not another feed. Without the
+    // else, every guild post also matched the default forum/media lists and
+    // the whole board leaked to everyone by omission.
+    if (guildId) where.guildId = guildId;
+    else where.guildId = null;
     // Series-level views must EXCLUDE chapter chatter. This used to apply to
     // manhwa only — novels had no chapter comments to exclude. The novel
     // reader now has its own per-chapter threads, so without widening this,
@@ -154,6 +162,9 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
       where.mangaId = null;
       where.chapterId = null;
       where.novelId = null;
+      // Guild boards are their own rooms — without this every guild's
+      // internal chatter would spill into the public community feed.
+      where.guildId = null;
     }
     if (tag && tag !== 'All') where.tag = tag;
 
@@ -392,11 +403,14 @@ const commentDeepLink = (
     mangaId?: string | null;
     novelId?: string | null;
     chapterId?: string | null;
+    guildId?: string | null;
     parentId?: string | null;
   },
   anchorId?: string
 ): string => {
   const anchor = `comment=${anchorId || c.id}`;
+  // A guild-board comment lives on that guild's page, not in the forum.
+  if (c.guildId) return `/guilds/${encodeURIComponent(c.guildId)}?${anchor}`;
   // An episode-stamped comment lives in that episode's thread on the watch
   // page, so that is where its notifications should land — the series modal
   // would show it, but stranded among every other episode's chatter.
@@ -417,7 +431,47 @@ const commentDeepLink = (
 
 export const createComment = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId, animeId, animeTitle, episodeNo, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, content, parentId, mediaUrl, title, tag, poll } = req.body;
+    const { userId, animeId, animeTitle, episodeNo, mangaId, mangaTitle, chapterId, chapterTitle, novelId, novelTitle, guildId, content, parentId, mediaUrl, title, tag, poll } = req.body;
+
+    /**
+     * Guild board posts. The board rides this exact machinery — the only
+     * addition is the stamp and a membership gate: a guild's board is for its
+     * members, and GuildMember.userId is unique, so one lookup answers both
+     * "are they in a guild" and "is it THIS one".
+     */
+    let guildIdValue = guildId ? String(guildId) : null;
+    // Replies inherit the parent's board server-side. Otherwise a reply that
+    // simply omits guildId is stored as a PUBLIC comment (and skips the
+    // membership gate below) yet still renders inside the guild thread.
+    if (parentId) {
+      const parentBoard = await prisma.comment.findUnique({
+        where: { id: String(parentId) },
+        select: { guildId: true },
+      });
+      if (parentBoard?.guildId) guildIdValue = parentBoard.guildId;
+    }
+    if (guildIdValue) {
+      // A guild post lives on exactly one board. Carrying a media id too
+      // would surface a members-only post inside public series tabs.
+      if (animeId || mangaId || novelId || chapterId) {
+        return res.status(400).json({ success: false, message: "A guild post can't also be attached to a series." });
+      }
+      // Members-only means the author must be PROVEN, not claimed. The
+      // body's userId is client-supplied everywhere in this controller —
+      // fine for public chatter, but here it would let anyone post into any
+      // guild by naming one of its members. The token decides who's writing.
+      const actor = await resolveActor(req);
+      if (!actor) {
+        return res.status(401).json({ success: false, message: "Sign in again to post on the guild board." });
+      }
+      if (String(userId || "") !== actor.id) {
+        return res.status(403).json({ success: false, message: "You can only post as yourself." });
+      }
+      const membership = await prisma.guildMember.findUnique({ where: { userId: actor.id } });
+      if (!membership || membership.guildId !== guildIdValue) {
+        return res.status(403).json({ success: false, message: "Only guild members can post on the guild board." });
+      }
+    }
 
     /**
      * An attached poll. Validated here rather than trusted: at least two
@@ -478,6 +532,7 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
         chapterTitle: chapterTitle || null,
         novelId: novelId || null,
         novelTitle: novelTitle || null,
+        guildId: guildIdValue,
         parentId: parentId ? parentId : null,
         mediaUrl: mediaUrl || null,
         // Trimmed and capped here, not just in the composer — the client is not
@@ -575,7 +630,20 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
     }
 
     if (comment.userId !== userId && !actor.isStaff) {
-      return res.status(403).json({ success: false, message: "You can only delete your own comments" });
+      // Guild leaders moderate their own board — and ONLY their own. Scoped
+      // to comments that carry that guild's id, so leadership grants nothing
+      // over public threads or other guilds' boards.
+      let leaderModerates = false;
+      if (comment.guildId) {
+        const guild = await prisma.guild.findUnique({
+          where: { id: comment.guildId },
+          select: { leaderId: true },
+        });
+        leaderModerates = guild?.leaderId === userId;
+      }
+      if (!leaderModerates) {
+        return res.status(403).json({ success: false, message: "You can only delete your own comments" });
+      }
     }
 
     await prisma.comment.delete({ where: { id } });
@@ -1096,7 +1164,7 @@ export const setRating = async (req: Request, res: Response, next: NextFunction)
 // gets worse with every post ever written.
 export const getForumTopics = async (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const base = { animeId: null, mangaId: null, chapterId: null, novelId: null, parentId: null };
+    const base = { animeId: null, mangaId: null, chapterId: null, novelId: null, guildId: null, parentId: null };
     const [rows, total] = await Promise.all([
       prisma.comment.groupBy({ by: ["tag"], where: base, _count: { _all: true } }),
       prisma.comment.count({ where: base }),

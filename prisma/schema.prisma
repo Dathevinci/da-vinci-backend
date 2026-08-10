@@ -137,6 +137,12 @@ model Comment {
   novelId      String?  // novel source id, e.g. 'nf:overlord-ln'
   novelTitle   String?  // Title for global feed rendering
 
+  // Guild board — a comment stamped with a guildId lives on that guild's
+  // board and nowhere else (the forum and global feeds exclude it). The board
+  // RIDES the existing comment machinery: votes, replies, polls, reports all
+  // work unchanged. Nullable so every existing comment stays exactly as it is.
+  guildId   String?
+
   parentId  String?  // Optional: references another comment
   mediaUrl  String?  // Optional: attached image/GIF URL
   // Forum fields. A comment with NO anime/manga/novel id and no parent is a
@@ -156,6 +162,8 @@ model Comment {
   votes     CommentVote[]
   reports   CommentReport[]
   poll      Poll?
+
+  @@index([guildId])
 }
 
 /// A poll attached to one forum post. Optional and one-per-post: a post
@@ -779,4 +787,57 @@ model RaidAttack {
 
   @@index([encounterId, userId, day])
   @@index([userId, day])
+}
+
+// ═══ GUILDS (phase 4) ════════════════════════════════════════════════════
+// Player-founded groups. All additive — `prisma db push` applies this with
+// zero data loss. Name/tag shape rules (3-24 chars / 2-5 uppercase) are
+// enforced in the controller; the DB only guarantees uniqueness. Level is
+// COMPUTED from xp (floor(xp/1000)+1) — deliberately no column, so it can
+// never drift from the xp that defines it.
+
+model Guild {
+  id          String        @id @default(uuid())
+  name        String        @unique
+  tag         String        @unique
+  description String        @default("")
+  avatar      String?
+  leaderId    String        // plain string, no FK — the duel pattern
+  coins       Int           @default(0)
+  xp          Int           @default(0)
+  createdAt   DateTime      @default(now())
+  members     GuildMember[]
+}
+
+model GuildMember {
+  id       String   @id @default(uuid())
+  guildId  String
+  // ONE guild per user — the whole design leans on this. The unique
+  // constraint IS the rule, so a join race can't put someone in two guilds
+  // any more than a crafted request can.
+  userId   String   @unique
+  role     String   @default("member") // "leader" | "member"
+  joinedAt DateTime @default(now())
+  guild    Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+}
+
+// A card lent to a fellow guild member. The card NEVER changes hands — the
+// borrower's raids read the OWNER's UserCard row (stats, prints), and
+// injuries land on the owner's row too: lending is real, your card comes
+// back tired. Active = expiresAt > now; the unique triple makes re-lending
+// the same card to the same person an upsert that refreshes the expiry.
+model GuildCardLoan {
+  id         String   @id @default(uuid())
+  guildId    String
+  ownerId    String
+  borrowerId String
+  cardId     String   // id in the server-side card catalog
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime
+
+  @@unique([ownerId, cardId, borrowerId])
+  @@index([borrowerId])
+  @@index([guildId])
 }

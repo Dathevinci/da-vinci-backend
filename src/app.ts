@@ -28,6 +28,7 @@ import manhwaBookmarkRoutes from "./routes/manhwaBookmarks";
 import novelBookmarkRoutes from "./routes/novelBookmarks";
 import kofiRoutes from "./routes/kofi.routes";
 import raidRoutes from "./routes/raid.routes";
+import guildRoutes from "./routes/guild.routes";
 import consoleRoutes from "./routes/console.routes";
 import auctionRoutes from "./routes/auction.routes";
 import cardRoutes from "./routes/card.routes";
@@ -69,7 +70,7 @@ app.use("/api", apiLimiter);
 // timeline recorder) is otherwise impossible to distinguish from the previous
 // deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1"] });
+  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1", "guilds-v1"] });
 });
 
 // Mount routers
@@ -97,6 +98,7 @@ app.use("/api/manhwa-bookmarks", manhwaBookmarkRoutes);
 app.use("/api/novel-bookmarks", novelBookmarkRoutes);
 app.use("/api/kofi", kofiRoutes);
 app.use("/api/raid", raidRoutes);
+app.use("/api/guilds", guildRoutes);
 app.use("/api/auctions", auctionRoutes);
 app.use("/api/cards", cardRoutes);
 app.use("/api/duels", duelRoutes);

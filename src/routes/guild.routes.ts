@@ -12,6 +12,11 @@ const router = Router();
 // the static-prefix paths (/mine/loans, /leave, /loans/:loanId, /of/:userId)
 // must register before the /:id family or Express hands them to the param
 // routes ("/of" would match as a guild id).
+//
+// POST /tags belongs to that static-prefix block by shape but deliberately
+// does NOT live here: it rides guildTags.routes.ts, mounted above the global
+// limiter with its own tagLimiter (see app.ts). Registering it here too would
+// give the chip a second, limiter-less path to the same handler.
 router.post("/", createGuild);
 router.get("/", listGuilds);
 router.get("/mine/loans", myLoans);

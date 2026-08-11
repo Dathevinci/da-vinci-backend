@@ -371,6 +371,68 @@ export const guildOfUser = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// ── POST /api/guilds/tags ───────────────────────────────────────────────────
+// The batch resolver behind the site-wide username chip: a page paints dozens
+// of names at once, so this answers ALL of them in TWO queries — memberships,
+// then the guilds they point at — never one lookup per id. PUBLIC read for
+// guildOfUser's reason: membership is already public on the guild page.
+//
+// The cap is the real wall. An unbounded id list is a free DB scan for any
+// caller, so the array is deduped (100 repeats of one id is one lookup, not a
+// rejection) and then hard-capped.
+
+const TAGS_MAX_IDS = 100;
+
+export const guildTags = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const raw = req.body?.userIds;
+    if (!Array.isArray(raw)) {
+      return res.status(400).json({ success: false, message: "userIds must be an array." });
+    }
+    // Keep only real strings. String() is NOT safe here: this endpoint is
+    // public, and `[{ toString: null, valueOf: null }]` makes ToPrimitive
+    // throw — a free 500 for any caller. Non-strings are dropped, not
+    // coerced; empty strings match nothing, so they are dropped rather than
+    // spent against the cap.
+    const ids = Array.from(
+      new Set(raw.filter((v): v is string => typeof v === "string"))
+    ).filter(Boolean);
+    if (ids.length > TAGS_MAX_IDS) {
+      return res.status(400).json({ success: false, message: "Too many ids." });
+    }
+    if (ids.length === 0) {
+      return res.json({ success: true, data: {} });
+    }
+
+    const members = await prisma.guildMember.findMany({
+      where: { userId: { in: ids } },
+      select: { userId: true, guildId: true },
+    });
+    const guildIds = Array.from(new Set(members.map((m) => m.guildId)));
+    const guilds = guildIds.length
+      ? await prisma.guild.findMany({
+          where: { id: { in: guildIds } },
+          select: { id: true, name: true, tag: true },
+        })
+      : [];
+    const byId = new Map(guilds.map((g) => [g.id, g]));
+
+    // Only users who are IN a guild get a key. Guildless ids — and a
+    // membership row outliving its guild, the hole guildOfUser also absorbs —
+    // are simply ABSENT, so the client has one rule ("no key = no guild")
+    // instead of a null-vs-missing distinction to get wrong.
+    const data: Record<string, { id: string; name: string; tag: string }> = {};
+    for (const m of members) {
+      const guild = byId.get(m.guildId);
+      if (guild) data[m.userId] = { id: guild.id, name: guild.name, tag: guild.tag };
+    }
+
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ── POST /api/guilds/:id/join ───────────────────────────────────────────────
 // The cap is re-checked under a guild-row lock — N parallel joins would all
 // pass a plain count, and 30 is a wall, not a suggestion. The userId unique

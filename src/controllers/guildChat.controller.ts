@@ -106,6 +106,50 @@ export const listMessages = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
+// ── GET /api/guilds/:id/messages/head ───────────────────────────────────────
+// The dock's unread probe, polled from every page. listMessages?limit=1 would
+// answer the same question but ships a whole message row plus a batched author
+// lookup; this is ONE row, two columns, no join. The gate is IDENTICAL to
+// listMessages — cheap is not the same as public, and the room is private —
+// so it costs the same membership check, which is the point of keeping the
+// payload this small. Ordering matches listMessages' newest-first path,
+// tiebreak included, or a same-millisecond pair could name a different
+// "newest" than the stream renders. An empty room answers null/null rather
+// than 404: "nothing yet" is a state, not an error.
+
+export const messagesHead = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = await resolveActor(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to read guild chat." });
+    }
+    const guildId = req.params.id as string;
+    const member = await membershipIn(guildId, actor.id);
+    if (!member) {
+      return res.status(403).json({ success: false, message: "Guild chat is members-only." });
+    }
+
+    const newest = await prisma.guildMessage.findFirst({
+      where: { guildId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { id: true, createdAt: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: newest?.id ?? null,
+        // Explicit ISO, not the Date JSON would emit for us: the client
+        // compares this string across polls, so the shape must not depend on
+        // serializer behaviour.
+        createdAt: newest ? newest.createdAt.toISOString() : null,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ── POST /api/guilds/:id/messages ───────────────────────────────────────────
 
 export const postMessage = async (req: Request, res: Response, next: NextFunction) => {

@@ -30,6 +30,7 @@ import kofiRoutes from "./routes/kofi.routes";
 import raidRoutes from "./routes/raid.routes";
 import guildRoutes from "./routes/guild.routes";
 import guildChatRoutes from "./routes/guildChat.routes";
+import guildTagsRoutes from "./routes/guildTags.routes";
 import consoleRoutes from "./routes/console.routes";
 import auctionRoutes from "./routes/auction.routes";
 import cardRoutes from "./routes/card.routes";
@@ -72,6 +73,17 @@ app.use("/api/console", consoleLimiter, consoleRoutes);
 // through to the main guild mount below without touching the chat budget).
 app.use("/api/guilds", guildChatRoutes);
 
+// The guild-tag resolver mounts above the global limiter for the chat mount's
+// reason in a wider form: the username chip asks "which guild is this person
+// in" from nearly every page, so on the shared budget it would 429 the whole
+// API for everyone behind that household IP. Safe, because this is a PUBLIC
+// read of membership the guild page already shows, and the 100-id cap in the
+// handler — not the limiter — is what bounds the work per request. This
+// router matches ONLY POST /tags (tagLimiter rides on that route, inside the
+// router, so unmatched /api/guilds requests fall through to the main guild
+// mount below without touching the tag budget).
+app.use("/api/guilds", guildTagsRoutes);
+
 // Baseline rate limit on the whole API (auth routes get a stricter limiter of
 // their own inside auth.routes.ts).
 app.use("/api", apiLimiter);
@@ -81,7 +93,7 @@ app.use("/api", apiLimiter);
 // timeline recorder) is otherwise impossible to distinguish from the previous
 // deploy, and "the service answers" says nothing about which build answered.
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1", "guilds-v1", "guild-raids", "co-leader", "guild-chat", "guild-banner", "guild-xp", "guild-roles"] });
+  res.json({ status: "ok", features: ["duel-timeline", "lead-dev-free-shards", "wear-dust", "stat-truth", "wear-market", "support-truth", "lead-free-market", "pull-stats", "pull-stats-2", "pull-x8", "title-rack", "dust-all", "covenant-supports", "covenant-parity", "grant-all", "pull-x32", "gzip", "max-card", "ratings", "comment-reports", "polls", "post-permalink", "showcase-truth", "media-comments", "hidden-gems", "no-dungeon", "pulls-closed", "reset-refund", "raid-v1", "guilds-v1", "guild-raids", "co-leader", "guild-chat", "guild-banner", "guild-xp", "guild-roles", "guild-tags"] });
 });
 
 // Mount routers

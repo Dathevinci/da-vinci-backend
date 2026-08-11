@@ -48,6 +48,23 @@ export const chatLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// The username chip resolves its guild tag from nearly EVERY page — a browse
+// session fires this on every list, comment thread and profile card it paints
+// — so like chat it gets its own budget rather than eating the shared per-IP
+// allowance. This is a runaway-loop backstop, NOT an access control: the
+// endpoint is a public read of already-public membership, and its 100-id cap
+// is what actually bounds the work one request can buy.
+export const tagLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  message: {
+    success: false,
+    message: "Tag lookup rate limit reached. Wait a few minutes.",
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Strict limiter for credential endpoints (login / signup / change-password) to
 // blunt brute-force and credential-stuffing.
 export const authLimiter = rateLimit({

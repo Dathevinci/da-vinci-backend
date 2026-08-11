@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs, addXpForWatching, earnPoints, changeUsername } from "../controllers/user.controller";
+import { getUserActivity, getUserActivityDay } from "../controllers/activity.controller";
 import { getUserNotifications, markNotificationAsRead, markAllAsRead } from "../controllers/notification.controller";
 import { giftItem, purchaseItem, purchaseBundle } from "../controllers/gift.controller";
 import { getDailyQuests, claimDailyQuest } from "../controllers/quest.controller";
@@ -20,6 +21,21 @@ router.post("/purchase-bundle", purchaseBundle);
 router.post("/", validateRequest(createUserSchema), createUser);
 router.get("/:id", getUser);
 router.get("/:id/point-logs", getUserPointLogs);
+
+// Activity history (the profile contribution grid). Public reads, like
+// /:id/point-logs directly above.
+//
+// ROUTE ORDER: the three-segment ":date" route is declared FIRST, ahead of the
+// two-segment summary, so the specific pattern always gets first refusal —
+// the same specific-before-general rule /gift and /:id/quests follow. Nothing
+// above can swallow either one: every GET declared earlier is one segment
+// ("/:id") or a two-segment path whose second segment is a LITERAL
+// ("/point-logs", "/quests", "/notifications"), and a literal cannot match
+// "activity". Nothing below can swallow them either — the remaining "/:id"
+// routes are PATCH/DELETE/POST, not GET. Keep any future "/:id/:something"
+// GET route (a param in the second slot) BELOW these two, or it will eat them.
+router.get("/:id/activity/:date", getUserActivityDay);
+router.get("/:id/activity", getUserActivity);
 router.post("/:id/add-xp", addXpForWatching);
 router.post("/:id/earn", earnPoints);
 

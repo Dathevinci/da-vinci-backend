@@ -376,6 +376,17 @@ model PointLog {
   createdAt DateTime @default(now())
 
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // This is the site's highest-volume table — every episode, chapter, duel
+  // stake, market fee, tip and donation writes a row — and Postgres does NOT
+  // index a foreign key column for you. Without this, the public activity
+  // heatmap sequentially scanned the WHOLE ledger on every profile view (the
+  // 20k take caps memory, not I/O: LIMIT applies after the scan and sort).
+  // userId leading serves the equality, createdAt trailing serves both the
+  // range predicate and the ORDER BY, so the limit can stop early. The same
+  // shape also covers remainingDailyAp, the daily quest scan and the point-log
+  // reader, which were all paying for the missing index already.
+  @@index([userId, createdAt])
 }
 
 // A card put up for sale.

@@ -793,8 +793,9 @@ model RaidAttack {
 // Player-founded groups. All additive — `prisma db push` applies this with
 // zero data loss. Name/tag shape rules (3-24 chars / 2-5 uppercase) are
 // enforced in the controller; the DB only guarantees uniqueness. Level is
-// COMPUTED from xp (floor(xp/1000)+1) — deliberately no column, so it can
-// never drift from the xp that defines it.
+// COMPUTED from xp by the curve in guild.controller.ts (levels 1-100, level
+// 100 at 320,760 xp) — deliberately no column, so it can never drift from
+// the xp that defines it, and the SERVER is the only place that math lives.
 
 model Guild {
   id          String        @id @default(uuid())
@@ -808,12 +809,21 @@ model Guild {
   // whenever its holder leaves, is kicked, or takes the leadership — a stale
   // co-leader id would be a standing power grant to a non-member.
   coLeaderId  String?
-  // Treasury in SHARDS — the site's scarce currency. Renamed from the
-  // never-fed `coins` (every row was 0, so the rename is lossless). Fed by
-  // raid killing blows in raid.controller.ts; these are GUILD-row shards,
-  // separate from any member's personal balance.
+  // TREASURY in SHARDS — a CLOSED LOOP. Fed by raid killing blows, by the
+  // guild's cut of member xp, and by members donating their own shards IN.
+  // It is only ever SPENT on the guild purchases in guild.controller.ts
+  // (GUILD_ECONOMY). There is NO path — none, ever — that moves treasury
+  // shards back into a personal balance: nothing comes out. These are
+  // GUILD-row shards, separate from any member's personal balance.
   shards      Int           @default(0)
   xp          Int           @default(0)
+  // ── Joining ──
+  isPublic    Boolean       @default(true) // false = a pending GuildInvite is REQUIRED to join
+  minLevel    Int           @default(1)    // 1..10 — user levels cap at 10 on this site
+  // ── Bought with treasury shards (see GUILD_ECONOMY) ──
+  purchasedSlots Int        @default(0)    // +5 member slots each, on top of the level curve, hard-capped at 100
+  rolesUnlocked  Boolean    @default(false) // permanent once bought; backfilled true for guilds that already have roles
+  xpBoostUntil   DateTime?  // while in the future, the guild's CUT of member xp is x1.25 (the member's own xp is untouched)
   createdAt   DateTime      @default(now())
   members     GuildMember[]
 }
@@ -831,10 +841,32 @@ model GuildMember {
   // deletes the role in, and every enforcement site re-resolves the role by
   // id+guildId, so a stale pointer grants nothing.
   customRoleId String?
+  // Lifetime xp this member has fed the guild — the same amount that was added
+  // to Guild.xp on their behalf, never their personal xp. Contribution is a
+  // running total: leaving and rejoining starts a fresh row at 0, which is the
+  // honest reading of "what this membership has contributed".
+  xpContributed Int    @default(0)
   joinedAt DateTime @default(now())
   guild    Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
 
   @@index([guildId])
+}
+
+// A pending invitation into ONE guild. Required to join a private guild and
+// consumed (deleted) in the SAME transaction as the membership create, so an
+// invite can never be spent twice. No FK to Guild — the GuildRole pattern —
+// so the disband path sweeps invites explicitly.
+model GuildInvite {
+  id        String   @id @default(uuid())
+  guildId   String
+  userId    String   // the invitee
+  invitedBy String   // the officer who sent it
+  createdAt DateTime @default(now())
+
+  // One live invite per person per guild — a second send is a no-op collision,
+  // not a duplicate row for the invitee to see twice.
+  @@unique([guildId, userId])
+  @@index([userId])
 }
 
 // Discord-style custom roles: one per member, a colored name + permission

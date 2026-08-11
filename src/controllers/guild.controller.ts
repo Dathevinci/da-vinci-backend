@@ -18,7 +18,7 @@ import { CARDS } from "../data/cardCatalog";
  */
 
 const GUILD_CREATE_COST = 2000; // AP
-const GUILD_MEMBER_CAP = 30;
+const GUILD_CREATE_MIN_ACCOUNT_DAYS = 3; // account age required to FOUND one
 const LOAN_MAX_ACTIVE = 3;      // per side: lent by an owner / held by a borrower
 const LOAN_DAYS = 7;
 
@@ -109,8 +109,184 @@ async function actorPermsFor(
   return actorPerms(guild, membership, role ? [role] : []);
 }
 
-/** Level is derived, never stored — floor(xp/1000)+1, so it can't drift. */
-const levelOf = (xp: number) => Math.floor(xp / 1000) + 1;
+// ═══ GUILD PROGRESSION ══════════════════════════════════════════════════════
+// THE SERVER IS THE ONLY PLACE THIS MATH LIVES. The client renders the block
+// the API sends and never recomputes a level — one curve, one owner, so a
+// bar on the page can never disagree with the cap the server enforces.
+//
+//   levelCost(L)  = 300 + (L-1)*60                 xp to go from L to L+1
+//   totalXpFor(L) = 300*(L-1) + 60*(L-1)*(L-2)/2   cumulative xp AT level L
+//   level 100 = 320,760 total xp — the ceiling.
+//
+// Level is DERIVED from xp, never stored, so it cannot drift from the number
+// that defines it (the old curve was floor(xp/1000)+1 with no ceiling).
+
+export const GUILD_MAX_LEVEL = 100;
+/** The wall no amount of levelling or buying gets past. */
+export const GUILD_HARD_MEMBER_CAP = 100;
+
+/** Clamp anything a caller hands us into a real level. */
+const asLevel = (level: number): number => {
+  const L = Math.floor(Number(level));
+  if (!Number.isFinite(L)) return 1;
+  return Math.max(1, Math.min(GUILD_MAX_LEVEL, L));
+};
+
+/** Clamp anything a caller hands us into a real xp total. */
+const asXp = (xp: number): number => {
+  const x = Math.floor(Number(xp));
+  return Number.isFinite(x) ? Math.max(0, x) : 0;
+};
+
+/** XP to go from `level` to the next one. Flat past the ceiling. */
+export const levelCost = (level: number): number => 300 + (asLevel(level) - 1) * 60;
+
+/** Cumulative XP a guild must have banked to BE at `level`. */
+export const totalXpFor = (level: number): number => {
+  const L = asLevel(level);
+  return 300 * (L - 1) + (60 * (L - 1) * (L - 2)) / 2;
+};
+
+/** The largest level in [1,100] whose entry cost this xp has paid. */
+export const guildLevel = (xp: number): number => {
+  const x = asXp(xp);
+  let level = 1;
+  while (level < GUILD_MAX_LEVEL && x >= totalXpFor(level + 1)) level++;
+  return level;
+};
+
+/** Seats: 10 at level 1, +0.8 per level, plus whatever the treasury bought —
+ *  never past the hard cap of 100. (L79 = 72, L100 = 89, + bought slots.) */
+export const memberCap = (level: number, purchasedSlots: number): number => {
+  const bought = Math.max(0, Math.floor(Number(purchasedSlots)) || 0);
+  return Math.min(GUILD_HARD_MEMBER_CAP, 10 + Math.floor((asLevel(level) - 1) * 0.8) + bought);
+};
+
+/** The whole progression answer for one guild, in ONE shape — every payload
+ *  that mentions a level spreads this, so no endpoint can invent its own.
+ *
+ *  At level 100 `isMax` is true and BOTH xpIntoLevel and xpForNextLevel are 0,
+ *  so a client subtracting one from the other reads 0 and the bar reads full
+ *  and "MAX" — there is deliberately no negative "xp to next level" at the
+ *  ceiling. */
+export function levelBlock(xp: number, purchasedSlots: number) {
+  const x = asXp(xp);
+  const level = guildLevel(x);
+  const isMax = level >= GUILD_MAX_LEVEL;
+  const xpForNextLevel = isMax ? 0 : levelCost(level);
+  const xpIntoLevel = isMax ? 0 : x - totalXpFor(level);
+  return {
+    level,
+    xp: x,
+    xpIntoLevel,
+    xpForNextLevel,
+    progressPct: isMax
+      ? 100
+      : Math.min(100, Math.max(0, Math.round((xpIntoLevel / xpForNextLevel) * 100))),
+    maxLevel: GUILD_MAX_LEVEL,
+    isMax,
+    memberCap: memberCap(level, purchasedSlots),
+  };
+}
+
+// ═══ GUILD ECONOMY ══════════════════════════════════════════════════════════
+// Every tunable number in ONE object. Members feed their guild: personal xp
+// earned anywhere on the site also pays the guild a cut, and the treasury
+// takes shards alongside that xp.
+//
+// TREASURY = CLOSED LOOP. Shards go IN (raid kills, the xp cut, member
+// donations) and are only ever SPENT on the purchases below. There is NO path
+// that moves treasury shards into a personal balance — see the debit sites.
+export const GUILD_ECONOMY = {
+  /** The guild gains floor(memberXp * this) whenever a member earns xp. */
+  MEMBER_XP_SHARE: 0.5,
+  /** While xpBoostUntil is in the future, the guild's CUT is multiplied by
+   *  this. The member's own xp is untouched — the boost is the guild's. */
+  XP_BOOST_MULTIPLIER: 1.25,
+  XP_BOOST_DAYS: 7,
+  /** Treasury takes floor(guildXpGained / this) shards alongside the xp
+   *  (the reference's "5 coins per 25 xp"). */
+  XP_PER_SHARD: 5,
+
+  // Purchases — leader only, CAS-debited from the treasury.
+  ROLES_UNLOCK: 15000, // -> rolesUnlocked = true, permanent
+  XP_BOOST: 5000,      // -> xpBoostUntil = max(now, current) + 7 days
+  MEMBER_SLOTS: 4000,  // -> purchasedSlots += SLOTS_PER_PURCHASE
+  SLOTS_PER_PURCHASE: 5,
+} as const;
+
+/** The guild's cut of one member's xp gain. Canonical — src/lib/guildXp.ts
+ *  should call this rather than restate the arithmetic. */
+export const guildXpShare = (memberXp: number, boostActive: boolean): number => {
+  const base = Math.max(0, Math.floor(Number(memberXp)) || 0) * GUILD_ECONOMY.MEMBER_XP_SHARE;
+  return Math.floor(boostActive ? base * GUILD_ECONOMY.XP_BOOST_MULTIPLIER : base);
+};
+
+/** Treasury shards minted alongside a guild xp gain. Canonical, as above. */
+export const treasuryFromXp = (guildXpGained: number): number =>
+  Math.floor(Math.max(0, Math.floor(Number(guildXpGained)) || 0) / GUILD_ECONOMY.XP_PER_SHARD);
+
+/** Is this guild's bought xp boost live right now? */
+export const xpBoostActive = (until: Date | null | undefined, now: Date = new Date()): boolean =>
+  !!until && until.getTime() > now.getTime();
+
+// ── PRESENCE (there is no presence system on this site) ─────────────────────
+// "Recently active" = User.updatedAt inside the last 10 minutes. Every earn,
+// comment and profile action writes the user row, so it is a fair PROXY —
+// it is never called "Online" anywhere, because the data does not support
+// that claim.
+const ACTIVE_WINDOW_MS = 10 * 60 * 1000;
+const isRecentlyActive = (updatedAt: Date | null | undefined, now: number): boolean =>
+  !!updatedAt && now - updatedAt.getTime() <= ACTIVE_WINDOW_MS;
+
+// ── USER level (for the minLevel join gate) ─────────────────────────────────
+// Mirrors the site's leveling curve (frontend src/lib/levels.ts): max level
+// 10, cumulative xp to REACH level L = 1000 * (2^(L-1) - 1). A join gate that
+// guessed at this would let someone in at a level the UI never showed them.
+const USER_MAX_LEVEL = 10;
+const userXpForLevel = (level: number): number => 1000 * (2 ** (Math.max(1, Math.min(USER_MAX_LEVEL, level)) - 1) - 1);
+const userLevelOf = (xp: number): number => {
+  const x = asXp(xp);
+  let level = 1;
+  while (level < USER_MAX_LEVEL && x >= userXpForLevel(level + 1)) level++;
+  return level;
+};
+
+// ── MIGRATION SAFETY: rolesUnlocked backfill ────────────────────────────────
+// Custom roles shipped UNGATED, then became a 15,000-shard purchase. Any guild
+// that already HAS roles must come out of this deploy unlocked — shipping a
+// price tag must never regate a feature a guild is already using.
+//
+// One-shot at boot (this module is imported by the router, which app.ts
+// mounts), idempotent, and one-directional: it only ever flips false -> true,
+// on guilds that already own GuildRole rows. It can never fight a leader who
+// unlocks normally afterwards, because unlocking IS this same direction and
+// the flag is permanent. Failures are logged, never thrown — a backfill must
+// not be able to take the API down.
+let rolesUnlockBackfillStarted = false;
+
+export async function backfillRolesUnlocked(): Promise<void> {
+  if (rolesUnlockBackfillStarted) return;
+  rolesUnlockBackfillStarted = true;
+  try {
+    const withRoles = await prisma.guildRole.findMany({
+      select: { guildId: true },
+      distinct: ["guildId"],
+    });
+    if (!withRoles.length) return;
+    const done = await prisma.guild.updateMany({
+      where: { id: { in: withRoles.map((r) => r.guildId) }, rolesUnlocked: false },
+      data: { rolesUnlocked: true },
+    });
+    if (done.count > 0) {
+      console.log(`Guild backfill: rolesUnlocked set on ${done.count} guild(s) that already had custom roles.`);
+    }
+  } catch (e) {
+    console.error("Guild backfill (rolesUnlocked) failed — retry on next boot:", e);
+  }
+}
+
+void backfillRolesUnlocked();
 
 const NAME_MIN = 3;
 const NAME_MAX = 24;
@@ -147,10 +323,29 @@ function checkGuildImage(
   return { ok: true, value: trimmed };
 }
 
+// ── Join settings (shared by createGuild and updateGuild, so the two can
+// never drift apart) ───────────────────────────────────────────────────────
+
+/** Strict boolean — an absent field means "don't touch it", and a non-boolean
+ *  is a client bug rather than something to coerce. */
+function checkIsPublic(raw: unknown): { ok: true; value: boolean } | { ok: false; message: string } {
+  if (typeof raw !== "boolean") return { ok: false, message: "isPublic must be true or false." };
+  return { ok: true, value: raw };
+}
+
+/** 1..10 — the site's user levels stop at 10, so a higher bar would be a
+ *  requirement nobody could ever meet. Clamped, not rejected. */
+function checkMinLevel(raw: unknown): { ok: true; value: number } | { ok: false; message: string } {
+  const n = Math.floor(Number(raw));
+  if (!Number.isFinite(n)) return { ok: false, message: "minLevel must be a number from 1 to 10." };
+  return { ok: true, value: Math.max(1, Math.min(USER_MAX_LEVEL, n)) };
+}
+
 // ── POST /api/guilds ────────────────────────────────────────────────────────
-// Found a guild: 2000 AP, name 3-24 chars, tag 2-5 uppercase letters. The
-// charge, the log, the guild and the leader membership are ONE transaction —
-// a unique-violation on any of them rolls the AP straight back.
+// Found a guild: 2000 AP, name 3-24 chars, tag 2-5 uppercase letters, and an
+// account at least 3 days old. The charge, the log, the guild and the leader
+// membership are ONE transaction — a unique-violation on any of them rolls the
+// AP straight back.
 
 export const createGuild = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -168,6 +363,36 @@ export const createGuild = async (req: Request, res: Response, next: NextFunctio
     }
     if (!TAG_RE.test(tag)) {
       return res.status(400).json({ success: false, message: "Tags are 2-5 uppercase letters, like DVNC." });
+    }
+
+    // Join settings are optional at founding — omitted means the defaults
+    // (public, level 1), the same values the column defaults carry.
+    let isPublic = true;
+    if (req.body?.isPublic !== undefined) {
+      const check = checkIsPublic(req.body.isPublic);
+      if (!check.ok) return res.status(400).json({ success: false, message: check.message });
+      isPublic = check.value;
+    }
+    let minLevel = 1;
+    if (req.body?.minLevel !== undefined) {
+      const check = checkMinLevel(req.body.minLevel);
+      if (!check.ok) return res.status(400).json({ success: false, message: check.message });
+      minLevel = check.value;
+    }
+
+    // Account age is an anti-throwaway wall: founding is the one guild action
+    // that mints a new group (and a new name/tag), so it is gated on the
+    // account's OWN createdAt — a fact the account can't edit.
+    const me = await prisma.user.findUnique({ where: { id: actor }, select: { createdAt: true } });
+    if (!me) {
+      return res.status(401).json({ success: false, message: "Sign in again to found a guild." });
+    }
+    const accountAgeMs = Date.now() - me.createdAt.getTime();
+    if (accountAgeMs < GUILD_CREATE_MIN_ACCOUNT_DAYS * 86400000) {
+      return res.status(403).json({
+        success: false,
+        message: `New accounts must wait ${GUILD_CREATE_MIN_ACCOUNT_DAYS} days before founding a guild.`,
+      });
     }
 
     // Fast-path courtesy; the userId unique constraint is the real wall.
@@ -190,7 +415,7 @@ export const createGuild = async (req: Request, res: Response, next: NextFunctio
         data: { userId: actor, amount: -GUILD_CREATE_COST, reason: `Founded guild ${name}` },
       });
       const guild = await tx.guild.create({
-        data: { name, tag, description, leaderId: actor },
+        data: { name, tag, description, leaderId: actor, isPublic, minLevel },
       });
       await tx.guildMember.create({
         data: { guildId: guild.id, userId: actor, role: "leader" },
@@ -221,8 +446,14 @@ export const createGuild = async (req: Request, res: Response, next: NextFunctio
         id: result.id, name: result.name, tag: result.tag,
         description: result.description, avatar: result.avatar, banner: result.banner,
         leaderId: result.leaderId, coLeaderId: result.coLeaderId,
-        shards: result.shards, xp: result.xp,
-        level: levelOf(result.xp), memberCount: 1, createdAt: result.createdAt,
+        shards: result.shards,
+        ...levelBlock(result.xp, result.purchasedSlots),
+        isPublic: result.isPublic, minLevel: result.minLevel,
+        purchasedSlots: result.purchasedSlots,
+        rolesUnlocked: result.rolesUnlocked,
+        xpBoostUntil: result.xpBoostUntil,
+        xpBoostActive: xpBoostActive(result.xpBoostUntil),
+        memberCount: 1, createdAt: result.createdAt,
       },
     });
   } catch (error) {
@@ -231,22 +462,91 @@ export const createGuild = async (req: Request, res: Response, next: NextFunctio
 };
 
 // ── GET /api/guilds ─────────────────────────────────────────────────────────
+// The directory: ?search= &sort=level|members|xp|new &page= &perPage=.
+//
+// The response is { success, data, meta } where DATA IS STILL AN ARRAY — the
+// rows — and every count lives in `meta`. This is a change to a deployed
+// shape, and keeping data an array is what makes it a small one: a client
+// that only maps over data keeps working.
+//
+// `sort=level` and `sort=xp` order identically ON PURPOSE: level is a pure
+// function of xp, so ordering by one IS ordering by the other. Both keys
+// exist so the UI can label the control however it likes.
 
-export const listGuilds = async (_req: Request, res: Response, next: NextFunction) => {
+const LIST_PER_PAGE_DEFAULT = 20;
+const LIST_PER_PAGE_MAX = 50;
+const SEARCH_MAX = 64;
+
+export const listGuilds = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const guilds = await prisma.guild.findMany({
-      include: { _count: { select: { members: true } } },
-      orderBy: [{ xp: "desc" }, { createdAt: "asc" }],
-    });
+    const search = String(req.query?.search ?? "").trim().slice(0, SEARCH_MAX);
+    const sortRaw = String(req.query?.sort ?? "level");
+    const sort = (["level", "members", "xp", "new"] as const).includes(sortRaw as never)
+      ? (sortRaw as "level" | "members" | "xp" | "new")
+      : "level";
+
+    const page = Math.max(1, Math.floor(Number(req.query?.page)) || 1);
+    const perPageRaw = Math.floor(Number(req.query?.perPage)) || LIST_PER_PAGE_DEFAULT;
+    const perPage = Math.max(1, Math.min(LIST_PER_PAGE_MAX, perPageRaw));
+
+    const where = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: "insensitive" as const } },
+            { tag: { contains: search, mode: "insensitive" as const } },
+          ],
+        }
+      : {};
+
+    // members sorts on the relation count; the rest are plain columns. The
+    // createdAt tiebreak keeps paging stable when two guilds tie.
+    const orderBy =
+      sort === "members"
+        ? ([{ members: { _count: "desc" } }, { createdAt: "asc" }] as const)
+        : sort === "new"
+        ? ([{ createdAt: "desc" }] as const)
+        : ([{ xp: "desc" }, { createdAt: "asc" }] as const);
+
+    const [total, guilds, totalGuilds, top] = await Promise.all([
+      prisma.guild.count({ where }),
+      prisma.guild.findMany({
+        where,
+        include: { _count: { select: { members: true } } },
+        orderBy: [...orderBy],
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      // Directory-wide, deliberately UNFILTERED: the header stat shouldn't
+      // jump around while someone types in the search box.
+      prisma.guild.count(),
+      prisma.guild.findFirst({ orderBy: { xp: "desc" }, select: { xp: true } }),
+    ]);
+
+    const rows = guilds.map((g) => ({
+      id: g.id, name: g.name, tag: g.tag, description: g.description,
+      avatar: g.avatar, banner: g.banner,
+      leaderId: g.leaderId, coLeaderId: g.coLeaderId,
+      shards: g.shards, xp: g.xp,
+      level: guildLevel(g.xp),
+      memberCount: g._count.members,
+      memberCap: memberCap(guildLevel(g.xp), g.purchasedSlots),
+      isPublic: g.isPublic, minLevel: g.minLevel,
+      createdAt: g.createdAt,
+    }));
+
     res.json({
       success: true,
-      data: guilds.map((g) => ({
-        id: g.id, name: g.name, tag: g.tag, description: g.description,
-        avatar: g.avatar, banner: g.banner,
-        leaderId: g.leaderId, coLeaderId: g.coLeaderId,
-        shards: g.shards, xp: g.xp,
-        level: levelOf(g.xp), memberCount: g._count.members, createdAt: g.createdAt,
-      })),
+      data: rows,
+      meta: {
+        total,          // guilds matching the search
+        page,
+        perPage,
+        totalGuilds,    // guilds in the whole directory, unfiltered
+        // members across the rows ON THIS PAGE — literally what's shown.
+        membersShown: rows.reduce((n, r) => n + r.memberCount, 0),
+        // the top level in the whole directory, unfiltered (see totalGuilds).
+        highestLevel: guildLevel(top?.xp ?? 0),
+      },
     });
   } catch (error) {
     next(error);
@@ -265,44 +565,86 @@ async function guildDetailPayload(id: string, actor: string | null) {
   });
   if (!guild) return null;
 
+  // ONE batched lookup for every member's name, avatar AND updatedAt — the
+  // presence proxy rides along on the query that was already happening, never
+  // a per-member round trip.
   const users = guild.members.length
     ? await prisma.user.findMany({
         where: { id: { in: guild.members.map((m) => m.userId) } },
-        select: { id: true, username: true, avatar: true },
+        select: { id: true, username: true, avatar: true, updatedAt: true },
       })
     : [];
+  const byUser = new Map(users.map((u) => [u.id, u]));
 
   const myMembership = actor ? guild.members.find((m) => m.userId === actor) || null : null;
   const roles = await prisma.guildRole.findMany({
     where: { guildId: id },
     orderBy: { createdAt: "asc" },
   });
+  const now = new Date();
   const activeLoanCount = await prisma.guildCardLoan.count({
-    where: { guildId: id, expiresAt: { gt: new Date() } },
+    where: { guildId: id, expiresAt: { gt: now } },
   });
+
+  const nowMs = now.getTime();
+  const members = guild.members.map((m) => {
+    const u = byUser.get(m.userId);
+    return {
+      userId: m.userId,
+      username: u?.username || "?",
+      avatar: u?.avatar || null,
+      role: m.role,
+      customRoleId: m.customRoleId,
+      xpContributed: m.xpContributed,
+      // "Active"/"Recently active" — NEVER "Online". See ACTIVE_WINDOW_MS.
+      activeRecently: isRecentlyActive(u?.updatedAt, nowMs),
+      joinedAt: m.joinedAt,
+    };
+  });
+
+  const memberCount = members.length;
+  const activeCount = members.filter((m) => m.activeRecently).length;
+  // Highest contributor, or null when nobody has fed the guild yet — a "top
+  // contributor" sitting on 0 would be a podium for doing nothing.
+  const best = members.reduce<(typeof members)[number] | null>(
+    (top, m) => (m.xpContributed > (top?.xpContributed ?? 0) ? m : top),
+    null
+  );
 
   return {
     id: guild.id, name: guild.name, tag: guild.tag,
     description: guild.description, avatar: guild.avatar, banner: guild.banner,
     leaderId: guild.leaderId, coLeaderId: guild.coLeaderId,
-    shards: guild.shards, xp: guild.xp,
-    level: levelOf(guild.xp), createdAt: guild.createdAt,
-    memberCap: GUILD_MEMBER_CAP,
-    memberCount: guild.members.length,
+    shards: guild.shards,
+    // level, xp, xpIntoLevel, xpForNextLevel, progressPct, maxLevel, isMax,
+    // memberCap — the one progression shape, computed server-side only.
+    ...levelBlock(guild.xp, guild.purchasedSlots),
+    isPublic: guild.isPublic,
+    minLevel: guild.minLevel,
+    purchasedSlots: guild.purchasedSlots,
+    rolesUnlocked: guild.rolesUnlocked,
+    xpBoostUntil: guild.xpBoostUntil,
+    xpBoostActive: xpBoostActive(guild.xpBoostUntil, now),
+    createdAt: guild.createdAt,
+    memberCount,
+    stats: {
+      memberCount,
+      activeCount,
+      onlineRate: memberCount ? Math.round((activeCount / memberCount) * 100) : 0,
+      avgXp: Math.round(guild.xp / Math.max(1, memberCount)),
+      topContributor: best
+        ? { userId: best.userId, username: best.username, avatar: best.avatar, xpContributed: best.xpContributed }
+        : null,
+    },
     roles: roles.map((r) => ({ id: r.id, name: r.name, color: r.color, permissions: r.permissions })),
-    members: guild.members.map((m) => {
-      const u = users.find((x) => x.id === m.userId);
-      return {
-        userId: m.userId,
-        username: u?.username || "?",
-        avatar: u?.avatar || null,
-        role: m.role,
-        customRoleId: m.customRoleId,
-        joinedAt: m.joinedAt,
-      };
-    }),
+    members,
     myMembership: myMembership
-      ? { role: myMembership.role, customRoleId: myMembership.customRoleId, joinedAt: myMembership.joinedAt }
+      ? {
+          role: myMembership.role,
+          customRoleId: myMembership.customRoleId,
+          xpContributed: myMembership.xpContributed,
+          joinedAt: myMembership.joinedAt,
+        }
       : null,
     activeLoanCount,
   };
@@ -358,11 +700,13 @@ export const guildOfUser = async (req: Request, res: Response, next: NextFunctio
         tag: guild.tag,
         avatar: guild.avatar,
         banner: guild.banner,
-        level: levelOf(guild.xp),
+        level: guildLevel(guild.xp),
+        memberCap: memberCap(guildLevel(guild.xp), guild.purchasedSlots),
         xp: guild.xp,
         shards: guild.shards,
         memberCount: guild._count.members,
         role,
+        xpContributed: membership.xpContributed,
         joinedAt: membership.joinedAt,
       },
     });
@@ -433,10 +777,86 @@ export const guildTags = async (req: Request, res: Response, next: NextFunction)
   }
 };
 
+// ── Admission ───────────────────────────────────────────────────────────────
+// THE one gate into a guild, shared by POST /:id/join and invite-accept so the
+// two can never enforce different rules. Everything happens inside ONE
+// transaction under a guild-row lock:
+//
+//   · the cap is re-checked under the lock — N parallel joins would all pass a
+//     plain count, and the cap is a wall, not a suggestion
+//   · minLevel is checked against the joiner's OWN xp, read in the same tx
+//   · a private guild REQUIRES a pending invite, and the invite is consumed
+//     (deleted) in the same transaction as the membership — so it can never be
+//     spent twice, and a later failure rolls the consumption back with it
+//   · the GuildMember.userId unique constraint independently stops a
+//     double-join, whatever the counts say
+//
+// A public join ALSO clears any pending invite for that user: once they're in,
+// the invite is noise.
+
+type Admission =
+  | { ok: true; guildId: string; guildName: string; role: string; joinedAt: Date }
+  | { ok: false; status: number; message: string };
+
+const admissionError = (status: number, message: string) =>
+  Object.assign(new Error("guild-admission"), { guildStatus: status, guildMessage: message });
+
+async function admitMember(guildId: string, actorId: string, viaInvite: boolean): Promise<Admission> {
+  return prisma
+    .$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "Guild" WHERE id = ${guildId} FOR UPDATE`;
+      const guild = await tx.guild.findUnique({ where: { id: guildId } });
+      if (!guild) throw admissionError(404, "Guild not found.");
+
+      const user = await tx.user.findUnique({ where: { id: actorId }, select: { xp: true } });
+      if (!user) throw admissionError(401, "Sign in again to join a guild.");
+
+      // The invite gate first: on a private guild it is the identity check,
+      // and the delete IS the consumption.
+      const consumed = await tx.guildInvite.deleteMany({ where: { guildId, userId: actorId } });
+      if (viaInvite && consumed.count === 0) {
+        throw admissionError(404, "That invite is no longer valid.");
+      }
+      if (!guild.isPublic && consumed.count === 0) {
+        throw admissionError(403, "This guild is invite-only.");
+      }
+
+      const level = userLevelOf(user.xp);
+      if (level < guild.minLevel) {
+        throw admissionError(
+          403,
+          `${guild.name} only accepts level ${guild.minLevel} and above — you're level ${level}.`
+        );
+      }
+
+      const cap = memberCap(guildLevel(guild.xp), guild.purchasedSlots);
+      const count = await tx.guildMember.count({ where: { guildId } });
+      if (count >= cap) {
+        throw admissionError(409, `${guild.name} is full (${cap} members).`);
+      }
+
+      const member = await tx.guildMember.create({ data: { guildId, userId: actorId } });
+      return {
+        ok: true as const,
+        guildId,
+        guildName: guild.name,
+        role: member.role,
+        joinedAt: member.joinedAt,
+      };
+    })
+    .catch((e: any): Admission => {
+      if (typeof e?.guildStatus === "number") {
+        return { ok: false, status: e.guildStatus, message: String(e.guildMessage) };
+      }
+      // GuildMember.userId is unique — one guild per user, enforced by the DB.
+      if (e?.code === "P2002") {
+        return { ok: false, status: 409, message: "You're already in a guild — leave it first." };
+      }
+      throw e;
+    });
+}
+
 // ── POST /api/guilds/:id/join ───────────────────────────────────────────────
-// The cap is re-checked under a guild-row lock — N parallel joins would all
-// pass a plain count, and 30 is a wall, not a suggestion. The userId unique
-// constraint independently stops a double-join.
 
 export const joinGuild = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -446,39 +866,44 @@ export const joinGuild = async (req: Request, res: Response, next: NextFunction)
     }
     const id = req.params.id as string;
 
-    const guild = await prisma.guild.findUnique({ where: { id } });
-    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
-
+    // Fast-path courtesy; the unique constraint inside admitMember is the wall.
     const existing = await prisma.guildMember.findUnique({ where: { userId: actor } });
     if (existing) {
       return res.status(409).json({ success: false, message: "You're already in a guild — leave it first." });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT id FROM "Guild" WHERE id = ${id} FOR UPDATE`;
-      const count = await tx.guildMember.count({ where: { guildId: id } });
-      if (count >= GUILD_MEMBER_CAP) {
-        throw Object.assign(new Error("guild-full"), { guildCode: 409 });
-      }
-      return tx.guildMember.create({ data: { guildId: id, userId: actor } });
-    }).catch((e) => {
-      if (e?.guildCode === 409) return "full" as const;
-      if (e?.code === "P2002") return "member" as const;
-      throw e;
-    });
-
-    if (result === "full") {
-      return res.status(409).json({ success: false, message: `${guild.name} is full (${GUILD_MEMBER_CAP} members).` });
-    }
-    if (result === "member") {
-      return res.status(409).json({ success: false, message: "You're already in a guild — leave it first." });
+    const admitted = await admitMember(id, actor, false);
+    if (!admitted.ok) {
+      return res.status(admitted.status).json({ success: false, message: admitted.message });
     }
 
-    res.json({ success: true, data: { guildId: id, role: result.role, joinedAt: result.joinedAt } });
+    res.json({ success: true, data: { guildId: id, role: admitted.role, joinedAt: admitted.joinedAt } });
   } catch (error) {
     next(error);
   }
 };
+
+// ── Disband ─────────────────────────────────────────────────────────────────
+// Turning off the lights, in the order the constraints require. GuildMember is
+// the ONLY table with an FK to Guild, so its rows cascade with the delete;
+// roles, invites, loans and messages carry a plain guildId (the duel pattern)
+// and would otherwise outlive the guild as unreachable rows.
+//
+// Returned as an ops ARRAY so both callers run it as one $transaction —
+// nothing half-swept.
+//
+// Guild BOARD POSTS (Comment.guildId) are deliberately NOT deleted: they are
+// member-authored content with votes, replies, reports and polls hanging off
+// them, and every feed already excludes guild-stamped comments, so they go
+// quiet rather than dangling. Hard-deleting other people's writing is not
+// something a disband should do silently.
+const disbandOps = (guildId: string) => [
+  prisma.guildCardLoan.deleteMany({ where: { guildId } }),
+  prisma.guildRole.deleteMany({ where: { guildId } }),
+  prisma.guildInvite.deleteMany({ where: { guildId } }),
+  prisma.guildMessage.deleteMany({ where: { guildId } }),
+  prisma.guild.delete({ where: { id: guildId } }), // cascades GuildMember
+];
 
 // ── POST /api/guilds/leave ──────────────────────────────────────────────────
 // A leader can leave ONLY as the last member, which dissolves the guild —
@@ -506,14 +931,9 @@ export const leaveGuild = async (req: Request, res: Response, next: NextFunction
       if (count > 1) {
         return res.status(409).json({ success: false, message: "Transfer leadership first — a guild can't lose its leader while members remain." });
       }
-      // Last member out turns off the lights: loans, roles (no FK, so no
-      // cascade — without this sweep they'd outlive the guild as unreachable
-      // rows), then the guild (which cascades the membership row).
-      await prisma.$transaction([
-        prisma.guildCardLoan.deleteMany({ where: { guildId } }),
-        prisma.guildRole.deleteMany({ where: { guildId } }),
-        prisma.guild.delete({ where: { id: guildId } }),
-      ]);
+      // Last member out turns off the lights — the same sweep the leader's
+      // explicit disband runs, so the two paths can't clean different things.
+      await prisma.$transaction(disbandOps(guildId));
       return res.json({ success: true, data: { left: true, disbanded: true } });
     }
 
@@ -705,6 +1125,19 @@ export const setCoLeader = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+/** Custom roles are a 15,000-shard TREASURY PURCHASE. Role management is
+ *  gated on the guild having bought them; ASSIGNING an existing role is not,
+ *  so a guild is never locked out of the roles it already owns.
+ *
+ *  Any guild that already had roles when this shipped was backfilled to
+ *  unlocked (see backfillRolesUnlocked), so this gate can never strand an
+ *  existing role — and the flag is permanent, never revoked. */
+function rolesLocked(guild: { rolesUnlocked: boolean }) {
+  return !guild.rolesUnlocked;
+}
+
+const ROLES_LOCKED_MESSAGE = "Custom roles aren't unlocked yet.";
+
 // ── POST /api/guilds/:id/roles ──────────────────────────────────────────────
 // Role MANAGEMENT (this and the three below) is OFFICER-only, off the
 // persistent leaderId/coLeaderId columns — never off a custom grant: a role
@@ -723,6 +1156,9 @@ export const createRole = async (req: Request, res: Response, next: NextFunction
     if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
     if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
       return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can manage roles." });
+    }
+    if (rolesLocked(guild)) {
+      return res.status(402).json({ success: false, message: ROLES_LOCKED_MESSAGE });
     }
 
     const name = checkRoleName(req.body?.name);
@@ -780,6 +1216,10 @@ export const updateRole = async (req: Request, res: Response, next: NextFunction
       return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can manage roles." });
     }
 
+    if (rolesLocked(guild)) {
+      return res.status(402).json({ success: false, message: ROLES_LOCKED_MESSAGE });
+    }
+
     // id AND guildId — a role id from another guild is a 404, not a handle.
     const existing = await prisma.guildRole.findFirst({ where: { id: roleId, guildId: id } });
     if (!existing) return res.status(404).json({ success: false, message: "Role not found." });
@@ -833,6 +1273,11 @@ export const updateRole = async (req: Request, res: Response, next: NextFunction
 // ── DELETE /api/guilds/:id/roles/:roleId ────────────────────────────────────
 // The role and every pointer to it go in ONE transaction — a member row
 // keeping a deleted role's id would be a ghost grant waiting to happen.
+//
+// Deliberately NOT gated on rolesUnlocked, unlike create/update: removing a
+// role is cleanup and a safety valve (a role that grants kickMembers must
+// always be revocable), and paywalling the way OUT of a permission is the one
+// thing this gate must never do.
 
 export const deleteRole = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -950,7 +1395,13 @@ export const updateGuild = async (req: Request, res: Response, next: NextFunctio
       return res.status(403).json({ success: false, message: "You don't have permission to edit this guild." });
     }
 
-    const data: { description?: string; avatar?: string | null; banner?: string | null } = {};
+    const data: {
+      description?: string;
+      avatar?: string | null;
+      banner?: string | null;
+      isPublic?: boolean;
+      minLevel?: number;
+    } = {};
     if (req.body?.description !== undefined) {
       if (typeof req.body.description !== "string") {
         return res.status(400).json({ success: false, message: "Invalid description." });
@@ -971,12 +1422,35 @@ export const updateGuild = async (req: Request, res: Response, next: NextFunctio
       if (!check.ok) return res.status(400).json({ success: false, message: check.message });
       data.banner = check.value;
     }
+    // Join settings ride the SAME gate as the profile fields — deciding who
+    // may walk in is guild-profile editing, not a leadership-only power.
+    // Changing them never touches anyone already inside: an existing member
+    // below a raised minLevel keeps their seat.
+    if (req.body?.isPublic !== undefined) {
+      const check = checkIsPublic(req.body.isPublic);
+      if (!check.ok) return res.status(400).json({ success: false, message: check.message });
+      data.isPublic = check.value;
+    }
+    if (req.body?.minLevel !== undefined) {
+      const check = checkMinLevel(req.body.minLevel);
+      if (!check.ok) return res.status(400).json({ success: false, message: check.message });
+      data.minLevel = check.value;
+    }
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ success: false, message: "Nothing to update." });
     }
 
     const updated = await prisma.guild.update({ where: { id }, data });
-    res.json({ success: true, data: { description: updated.description, avatar: updated.avatar, banner: updated.banner } });
+    res.json({
+      success: true,
+      data: {
+        description: updated.description,
+        avatar: updated.avatar,
+        banner: updated.banner,
+        isPublic: updated.isPublic,
+        minLevel: updated.minLevel,
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -1135,6 +1609,532 @@ export const myLoans = async (req: Request, res: Response, next: NextFunction) =
         borrowed: loans.filter((l) => l.borrowerId === actor).map(shape),
       },
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ═══ INVITES ════════════════════════════════════════════════════════════════
+// A private guild can only be joined with a pending invite, so these ARE the
+// door. Sending, listing and revoking are OFFICER-only (the persistent
+// leaderId/coLeaderId columns, never a custom grant — a role that could invite
+// could stuff a guild); accepting and declining belong to the INVITEE alone.
+//
+// The invite is consumed inside admitMember's transaction, so it can never be
+// spent twice, and every accept re-runs the full cap/level gate: an invite is
+// permission to knock, not a key that bypasses the rules.
+
+const INVITE_CAP = 50; // pending invites per guild
+
+// ── POST /api/guilds/:id/invites ────────────────────────────────────────────
+
+export const inviteMember = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const targetId = String(req.body?.userId || "");
+    if (!targetId) {
+      return res.status(400).json({ success: false, message: "userId is required." });
+    }
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    const perms = await actorPermsFor(guild, actor);
+    if (!perms.officer) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can send invites." });
+    }
+
+    const target = await prisma.user.findUnique({
+      where: { id: targetId },
+      select: { id: true, username: true, avatar: true },
+    });
+    if (!target) {
+      return res.status(404).json({ success: false, message: "That user doesn't exist." });
+    }
+
+    // One guild per user is the whole design, so an invite to someone who
+    // already has a guild could never be accepted — reject it here rather than
+    // parking a dead invite in their inbox.
+    const membership = await prisma.guildMember.findUnique({ where: { userId: targetId } });
+    if (membership) {
+      return res.status(409).json({
+        success: false,
+        message: membership.guildId === id
+          ? `${target.username} is already in your guild.`
+          : `${target.username} is already in another guild — they'd have to leave it first.`,
+      });
+    }
+
+    // Plain count, like ROLE_CAP — a race overshooting by one is accepted; the
+    // cap is a spam ceiling, not a wall like the member cap.
+    const pending = await prisma.guildInvite.count({ where: { guildId: id } });
+    if (pending >= INVITE_CAP) {
+      return res.status(409).json({
+        success: false,
+        message: `You already have ${INVITE_CAP} invites pending — revoke one first.`,
+      });
+    }
+
+    const invite = await prisma.guildInvite
+      .create({ data: { guildId: id, userId: targetId, invitedBy: actor } })
+      .catch((e) => {
+        if (e?.code === "P2002") return null; // @@unique([guildId, userId])
+        throw e;
+      });
+    if (!invite) {
+      return res.status(409).json({ success: false, message: `${target.username} has already been invited.` });
+    }
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        id: invite.id,
+        guildId: invite.guildId,
+        userId: invite.userId,
+        username: target.username,
+        avatar: target.avatar,
+        invitedBy: invite.invitedBy,
+        createdAt: invite.createdAt,
+        pending: pending + 1,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── GET /api/guilds/:id/invites ─────────────────────────────────────────────
+// Officer-only: who is currently invited. ONE batched user lookup covers both
+// the invitees and the officers who sent them.
+
+export const listInvites = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    const perms = await actorPermsFor(guild, actor);
+    if (!perms.officer) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can see invites." });
+    }
+
+    const invites = await prisma.guildInvite.findMany({
+      where: { guildId: id },
+      orderBy: { createdAt: "desc" },
+    });
+    const ids = Array.from(new Set(invites.flatMap((i) => [i.userId, i.invitedBy])));
+    const users = ids.length
+      ? await prisma.user.findMany({
+          where: { id: { in: ids } },
+          select: { id: true, username: true, avatar: true },
+        })
+      : [];
+    const byId = new Map(users.map((u) => [u.id, u]));
+
+    res.json({
+      success: true,
+      data: invites.map((i) => ({
+        id: i.id,
+        userId: i.userId,
+        username: byId.get(i.userId)?.username || "?",
+        avatar: byId.get(i.userId)?.avatar || null,
+        invitedBy: i.invitedBy,
+        invitedByName: byId.get(i.invitedBy)?.username || "?",
+        createdAt: i.createdAt,
+      })),
+      meta: { total: invites.length, cap: INVITE_CAP },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── DELETE /api/guilds/:id/invites/:inviteId ────────────────────────────────
+
+export const revokeInvite = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const inviteId = req.params.inviteId as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    const perms = await actorPermsFor(guild, actor);
+    if (!perms.officer) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can revoke invites." });
+    }
+
+    // id AND guildId — an invite id from another guild is a 404, not a handle.
+    const gone = await prisma.guildInvite.deleteMany({ where: { id: inviteId, guildId: id } });
+    if (gone.count === 0) {
+      return res.status(404).json({ success: false, message: "Invite not found." });
+    }
+    res.json({ success: true, data: { revoked: inviteId } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── GET /api/guilds/mine/invites ────────────────────────────────────────────
+// MY pending invites. Invites carry a plain guildId (no FK), so an invite
+// whose guild disbanded is simply dropped from the answer rather than
+// rendering as a broken row.
+
+export const myInvites = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to see your invites." });
+    }
+
+    const invites = await prisma.guildInvite.findMany({
+      where: { userId: actor },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!invites.length) return res.json({ success: true, data: [] });
+
+    const guilds = await prisma.guild.findMany({
+      where: { id: { in: Array.from(new Set(invites.map((i) => i.guildId))) } },
+      include: { _count: { select: { members: true } } },
+    });
+    const byId = new Map(guilds.map((g) => [g.id, g]));
+
+    res.json({
+      success: true,
+      data: invites.flatMap((i) => {
+        const g = byId.get(i.guildId);
+        if (!g) return [];
+        const level = guildLevel(g.xp);
+        return [{
+          id: i.id,
+          guildId: g.id,
+          name: g.name,
+          tag: g.tag,
+          avatar: g.avatar,
+          level,
+          memberCount: g._count.members,
+          memberCap: memberCap(level, g.purchasedSlots),
+          isPublic: g.isPublic,
+          minLevel: g.minLevel,
+          invitedBy: i.invitedBy,
+          createdAt: i.createdAt,
+        }];
+      }),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/guilds/invites/:inviteId/accept ───────────────────────────────
+// The INVITEE only. Runs the exact same cap/level gate as a public join —
+// admitMember is the one door — and consumes the invite in that transaction.
+
+export const acceptInvite = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const inviteId = req.params.inviteId as string;
+
+    const invite = await prisma.guildInvite.findUnique({ where: { id: inviteId } });
+    if (!invite) return res.status(404).json({ success: false, message: "Invite not found." });
+    if (invite.userId !== actor) {
+      return res.status(403).json({ success: false, message: "That invite isn't yours." });
+    }
+
+    const existing = await prisma.guildMember.findUnique({ where: { userId: actor } });
+    if (existing) {
+      return res.status(409).json({ success: false, message: "You're already in a guild — leave it first." });
+    }
+
+    const admitted = await admitMember(invite.guildId, actor, true);
+    if (!admitted.ok) {
+      return res.status(admitted.status).json({ success: false, message: admitted.message });
+    }
+    res.json({
+      success: true,
+      data: { guildId: admitted.guildId, name: admitted.guildName, role: admitted.role, joinedAt: admitted.joinedAt },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/guilds/invites/:inviteId/decline ──────────────────────────────
+
+export const declineInvite = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const inviteId = req.params.inviteId as string;
+
+    // id AND userId — declining is only ever your OWN invite, and a miss is a
+    // 404 either way, so this never confirms someone else's invite exists.
+    const gone = await prisma.guildInvite.deleteMany({ where: { id: inviteId, userId: actor } });
+    if (gone.count === 0) {
+      return res.status(404).json({ success: false, message: "Invite not found." });
+    }
+    res.json({ success: true, data: { declined: inviteId } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ═══ TREASURY ═══════════════════════════════════════════════════════════════
+// CLOSED LOOP. Shards come IN (raid kills, the guild's cut of member xp, and
+// donations here) and are only ever SPENT on the purchases below. There is no
+// endpoint, anywhere, that pays treasury shards back into a personal balance —
+// donating is a one-way door and the UI must say so.
+
+const DONATE_MAX = 1_000_000; // one transfer; not a lifetime cap
+
+// ── POST /api/guilds/:id/donate ─────────────────────────────────────────────
+
+export const donateShards = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to donate." });
+    }
+    const id = req.params.id as string;
+
+    // A POSITIVE INTEGER, not a coerced float: 5.9 shards is a client bug, and
+    // silently donating 5 would be answering a question nobody asked.
+    const amount = Number(req.body?.shards);
+    if (!Number.isInteger(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: "Donate a positive whole number of shards." });
+    }
+    if (amount > DONATE_MAX) {
+      return res.status(400).json({ success: false, message: `You can donate at most ${DONATE_MAX.toLocaleString()} shards at once.` });
+    }
+
+    const membership = await prisma.guildMember.findUnique({ where: { userId: actor } });
+    if (!membership || membership.guildId !== id) {
+      return res.status(403).json({ success: false, message: "You're not a member of this guild." });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Conditional decrement — the founding/Rally pattern. An insufficient
+      // balance matches zero rows and the whole donation rolls back, so a
+      // personal balance can never go negative.
+      const paid = await tx.user.updateMany({
+        where: { id: actor, shards: { gte: amount } },
+        data: { shards: { decrement: amount } },
+      });
+      if (paid.count === 0) {
+        throw Object.assign(new Error("donate-poor"), { guildCode: 402 });
+      }
+      // updateMany, not update: a guild disbanded mid-flight matches zero rows
+      // and we roll the debit back instead of burning the member's shards.
+      const credited = await tx.guild.updateMany({
+        where: { id },
+        data: { shards: { increment: amount } },
+      });
+      if (credited.count === 0) {
+        throw Object.assign(new Error("donate-gone"), { guildCode: 404 });
+      }
+      // Ledger trail. amount is 0 ON PURPOSE: PointLog is the ARISE POINTS
+      // ledger (it feeds the daily earning cap and the console's credit/debit
+      // filters), and this moved SHARDS. Logging -amount here would lie about
+      // a currency that never left. The reason string carries the real number,
+      // the same way the free-staff-pull rows do.
+      await tx.pointLog.create({
+        data: { userId: actor, amount: 0, reason: `guild-donate:${id}:${amount}` },
+      });
+      const [me, guild] = await Promise.all([
+        tx.user.findUnique({ where: { id: actor }, select: { shards: true } }),
+        tx.guild.findUnique({ where: { id }, select: { shards: true } }),
+      ]);
+      return { shards: me?.shards ?? 0, treasury: guild?.shards ?? 0 };
+    }).catch((e) => {
+      if (e?.guildCode === 402) return "poor" as const;
+      if (e?.guildCode === 404) return "gone" as const;
+      throw e;
+    });
+
+    if (result === "poor") {
+      return res.status(402).json({ success: false, message: "You don't have that many shards." });
+    }
+    if (result === "gone") {
+      return res.status(404).json({ success: false, message: "Guild not found." });
+    }
+
+    res.json({
+      success: true,
+      data: { donated: amount, shards: result.shards, treasury: result.treasury },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/guilds/:id/purchase ───────────────────────────────────────────
+// LEADER only — spending the treasury is the one power the deputy doesn't
+// share. Every branch takes the guild row lock, then CAS-debits the treasury
+// (`shards: { gte: cost }`), so a double-click can never overdraw it and the
+// balance can never go negative. Nothing here ever pays shards OUT to a person.
+
+type PurchaseItem = "roles" | "xpBoost" | "slots";
+
+export const purchaseUpgrade = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const item = String(req.body?.item || "") as PurchaseItem;
+    if (!["roles", "xpBoost", "slots"].includes(item)) {
+      return res.status(400).json({ success: false, message: "Unknown purchase." });
+    }
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    if (guild.leaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader can spend the treasury." });
+    }
+
+    const cost =
+      item === "roles" ? GUILD_ECONOMY.ROLES_UNLOCK :
+      item === "xpBoost" ? GUILD_ECONOMY.XP_BOOST :
+      GUILD_ECONOMY.MEMBER_SLOTS;
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "Guild" WHERE id = ${id} FOR UPDATE`;
+      const fresh = await tx.guild.findUnique({ where: { id } });
+      if (!fresh) throw Object.assign(new Error("buy-gone"), { guildCode: 404 });
+
+      // The 409s come FIRST, so a purchase that would change nothing is
+      // refused rather than taking the shards.
+      if (item === "roles" && fresh.rolesUnlocked) {
+        throw Object.assign(new Error("buy-owned"), { guildCode: 409, guildWhy: "Custom roles are already unlocked." });
+      }
+      if (item === "slots" && memberCap(guildLevel(fresh.xp), fresh.purchasedSlots) >= GUILD_HARD_MEMBER_CAP) {
+        throw Object.assign(new Error("buy-capped"), {
+          guildCode: 409,
+          guildWhy: `This guild is already at the ${GUILD_HARD_MEMBER_CAP}-member ceiling — extra slots would do nothing.`,
+        });
+      }
+
+      // CAS debit. Under the row lock this can't lose a race, and the
+      // `gte` guard means it can never write a negative treasury even if the
+      // lock were ever dropped. Treasury shards LEAVE here and are not
+      // credited to anyone — spending is a burn, not a transfer.
+      const paid = await tx.guild.updateMany({
+        where: { id, shards: { gte: cost } },
+        data: { shards: { decrement: cost } },
+      });
+      if (paid.count === 0) {
+        throw Object.assign(new Error("buy-poor"), { guildCode: 402, guildHave: fresh.shards });
+      }
+
+      if (item === "roles") {
+        await tx.guild.update({ where: { id }, data: { rolesUnlocked: true } });
+      } else if (item === "slots") {
+        await tx.guild.update({
+          where: { id },
+          data: { purchasedSlots: { increment: GUILD_ECONOMY.SLOTS_PER_PURCHASE } },
+        });
+      } else {
+        // Buying while a boost is live EXTENDS it: from the later of now and
+        // the current expiry, never from now (which would shorten it).
+        const now = new Date();
+        const from = fresh.xpBoostUntil && fresh.xpBoostUntil > now ? fresh.xpBoostUntil : now;
+        await tx.guild.update({
+          where: { id },
+          data: { xpBoostUntil: new Date(from.getTime() + GUILD_ECONOMY.XP_BOOST_DAYS * 86400000) },
+        });
+      }
+
+      const after = await tx.guild.findUnique({ where: { id } });
+      return {
+        treasury: after?.shards ?? 0,
+        rolesUnlocked: after?.rolesUnlocked ?? false,
+        purchasedSlots: after?.purchasedSlots ?? 0,
+        xpBoostUntil: after?.xpBoostUntil ?? null,
+      };
+    }).catch((e) => {
+      if (e?.guildCode === 404) return "gone" as const;
+      if (e?.guildCode === 409) return { conflict: String(e.guildWhy) } as const;
+      if (e?.guildCode === 402) return { poor: Number(e.guildHave) || 0 } as const;
+      throw e;
+    });
+
+    if (result === "gone") {
+      return res.status(404).json({ success: false, message: "Guild not found." });
+    }
+    if ("conflict" in result) {
+      return res.status(409).json({ success: false, message: result.conflict });
+    }
+    if ("poor" in result) {
+      return res.status(402).json({
+        success: false,
+        message: `That costs ${cost.toLocaleString()} shards and the treasury holds ${result.poor.toLocaleString()}.`,
+      });
+    }
+
+    const data = await guildDetailPayload(id, actor);
+    if (!data) return res.status(404).json({ success: false, message: "Guild not found." });
+    res.json({
+      success: true,
+      data: {
+        ...data,
+        purchase: {
+          item,
+          cost,
+          treasury: result.treasury,
+          rolesUnlocked: result.rolesUnlocked,
+          purchasedSlots: result.purchasedSlots,
+          xpBoostUntil: result.xpBoostUntil,
+          xpBoostActive: xpBoostActive(result.xpBoostUntil),
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── DELETE /api/guilds/:id ──────────────────────────────────────────────────
+// LEADER only. One transaction, the same sweep the last-member leave runs —
+// see disbandOps for what cascades and what has to be cleaned by hand. The
+// treasury dies with the guild: closed loop, nothing pays out.
+
+export const disbandGuild = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    if (guild.leaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader can disband the guild." });
+    }
+
+    const done = await prisma.$transaction(disbandOps(id)).catch((e) => {
+      if (e?.code === "P2025") return null; // already gone mid-flight
+      throw e;
+    });
+    if (!done) return res.status(404).json({ success: false, message: "Guild not found." });
+
+    res.json({ success: true, data: { disbanded: id, name: guild.name } });
   } catch (error) {
     next(error);
   }

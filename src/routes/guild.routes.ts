@@ -1,9 +1,11 @@
 import { Router } from "express";
 import {
   createGuild, listGuilds, getGuild, joinGuild, leaveGuild,
-  transferLeadership, kickMember, setCoLeader, updateGuild,
+  transferLeadership, kickMember, setCoLeader, updateGuild, disbandGuild,
   createLoan, endLoan, myLoans, guildOfUser,
   createRole, updateRole, deleteRole, assignRole,
+  inviteMember, listInvites, revokeInvite, myInvites, acceptInvite, declineInvite,
+  donateShards, purchaseUpgrade,
 } from "../controllers/guild.controller";
 
 const router = Router();
@@ -20,9 +22,15 @@ const router = Router();
 router.post("/", createGuild);
 router.get("/", listGuilds);
 router.get("/mine/loans", myLoans);
+router.get("/mine/invites", myInvites);
 router.get("/of/:userId", guildOfUser);
 router.post("/leave", leaveGuild);
 router.delete("/loans/:loanId", endLoan);
+// The invitee's side of an invite. Static "/invites" prefix, so these belong
+// in this block: registered after the /:id family, "invites" would be read as
+// a guild id by any same-shape param route added later.
+router.post("/invites/:inviteId/accept", acceptInvite);
+router.post("/invites/:inviteId/decline", declineInvite);
 router.get("/:id", getGuild);
 router.post("/:id/join", joinGuild);
 router.post("/:id/transfer", transferLeadership);
@@ -32,7 +40,14 @@ router.post("/:id/roles", createRole);
 router.patch("/:id/roles/:roleId", updateRole);
 router.delete("/:id/roles/:roleId", deleteRole);
 router.post("/:id/members/:targetId/role", assignRole);
+// The officers' side of invites (send / list / revoke).
+router.post("/:id/invites", inviteMember);
+router.get("/:id/invites", listInvites);
+router.delete("/:id/invites/:inviteId", revokeInvite);
+router.post("/:id/donate", donateShards);
+router.post("/:id/purchase", purchaseUpgrade);
 router.patch("/:id", updateGuild);
+router.delete("/:id", disbandGuild);
 router.post("/:id/loans", createLoan);
 
 export default router;

@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { processMentions } from "../utils/mentions";
 import { payout } from "../utils/economy";
 import { resolveActor, requireStaff } from "../lib/staff";
+import { creditGuildXp, debitGuildXp } from "../lib/guildXp";
 
 /**
  * ONE author select, used by every path that returns a comment.
@@ -574,6 +575,12 @@ export const createComment = async (req: Request, res: Response, next: NextFunct
       where: { id: userId },
       data: { arisePoints: { increment: commentPayout.ap }, xp: { increment: commentPayout.xp } }
     });
+    // …and the author's guild takes its share of that XP. After the user's
+    // increment succeeds, so a failed award never feeds the guild. Posting has
+    // no dedupe key — the clawback in deleteComment IS the anti-farm rule —
+    // so that clawback reverses this too (debitGuildXp). Leaving the guild's
+    // cut standing would make post→delete a free guild-XP printer.
+    await creditGuildXp(userId, commentPayout.xp);
 
     if (parentId) {
       const parent = await prisma.comment.findUnique({ where: { id: parentId } });
@@ -655,6 +662,11 @@ export const deleteComment = async (req: Request, res: Response, next: NextFunct
       where: { id: comment.userId },
       data: { arisePoints: { decrement: commentPayout.ap }, xp: { decrement: commentPayout.xp } }
     });
+
+    // …and the guild's cut of that XP goes back too, or the loop that this
+    // clawback exists to stop simply farms the guild ladder instead of the
+    // member's. Reversing a mint is not a treasury payout — see debitGuildXp.
+    await debitGuildXp(comment.userId, commentPayout.xp);
 
     await prisma.pointLog.create({
       data: { userId: comment.userId, amount: -commentPayout.ap, reason: "Community view was deleted" }

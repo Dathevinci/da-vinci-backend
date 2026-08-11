@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { finishBonus } from "../utils/economy";
 import { getActorId } from "../lib/jwt";
+import { creditGuildXp } from "../lib/guildXp";
 
 // Award the completion payout for finishing an anime, priced off its RUNTIME —
 // once per anime per user (deduped via the point log), whether the item was
@@ -29,6 +30,11 @@ async function grantFinishBonus(
     where: { id: userId },
     data: { arisePoints: { increment: ap }, xp: { increment: xp } },
   });
+  // Finishing a series feeds the finisher's guild. This helper is the ONE
+  // place the finish bonus is paid and it already returned above on the
+  // `finish:<anilistId>` dedup and on unknown runtime, so both entry points
+  // (created as FINISHED, or updated to it) feed the guild exactly once.
+  await creditGuildXp(userId, xp);
   await prisma.pointLog.create({ data: { userId, amount: ap, reason: finishKey } });
   await prisma.notification.create({
     data: {

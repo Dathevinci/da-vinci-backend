@@ -776,6 +776,23 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
           where: { id: encKey },
           data: { xp: { increment: RAID.GUILD_ATTACK_XP } },
         });
+        // The same amount on the ATTACKER's contribution counter, so raid
+        // damage shows up in the roster's "who fed this guild" column instead
+        // of being invisible guild income. Deliberately NOT routed through
+        // creditGuildXp: this is guild-scoped xp, not a share of member xp,
+        // and it must stay inside this transaction with the attack row.
+        // updateMany for the same reason as the guild write above, and scoped
+        // to encKey too so a membership that moved mid-request credits the
+        // guild that actually took the xp, or nothing at all.
+        //
+        // The `as any` on the args (here and on the kill write below) is the
+        // same temporary noted in lib/guildXp.ts: GuildMember.xpContributed
+        // lands in the schema alongside this, and the cast comes out the
+        // moment `prisma generate` has run against it.
+        await tx.guildMember.updateMany({
+          where: { userId: actor, guildId: encKey },
+          data: { xpContributed: { increment: RAID.GUILD_ATTACK_XP } },
+        } as any);
       }
 
       await tx.raidEncounter.update({
@@ -804,6 +821,13 @@ export const raidAttack = async (req: Request, res: Response, next: NextFunction
             shards: { increment: RAID.GUILD_KILL_SHARDS },
           },
         });
+        // Killing-blow xp counts toward the attacker's contribution too. Only
+        // on the claim, so the one attacker who actually landed the blow gets
+        // it — the same single-winner signal that pays the guild.
+        await tx.guildMember.updateMany({
+          where: { userId: actor, guildId: encKey },
+          data: { xpContributed: { increment: RAID.GUILD_KILL_XP } },
+        } as any);
       }
       await tx.raidEncounter.updateMany({
         where: { id: enc.id, hpLeft: { lt: 0 } },

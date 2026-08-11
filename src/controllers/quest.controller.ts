@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
+import { creditGuildXp } from "../lib/guildXp";
 import {
   ALL_DONE_BONUS,
   QUEST_PREFIX,
@@ -245,6 +246,18 @@ export const claimDailyQuest = async (req: Request, res: Response, next: NextFun
         select: { arisePoints: true, xp: true },
       }),
     ]);
+
+    /**
+     * The claimer's guild takes its share of the quest XP.
+     *
+     * AFTER the transaction, not inside it: this is the ARRAY form of
+     * $transaction, which takes prepared promises and hands out no client to
+     * write against. Placing the credit here also means the double-claim
+     * guards above (the `claimed.has(questId)` check and the day-scoped
+     * `reason`) sit between a repeat request and the guild — a rejected claim
+     * has already returned, so a deduped claim can never feed the guild twice.
+     */
+    await creditGuildXp(userId, xp);
 
     res.json({
       success: true,

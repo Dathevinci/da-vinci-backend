@@ -11,6 +11,7 @@ import {
 import { sanitizeOwnUser, sanitizePublicUser, sanitizePublicUsers } from "../utils/sanitizeUser";
 import { signToken, getActorId } from "../lib/jwt";
 import { liveShowcase } from "../lib/showcase";
+import { creditGuildXp } from "../lib/guildXp";
 
 // ── Profile audio ──────────────────────────────────────────────────────────
 // One audio URL that plays on a profile. AUDIO ONLY — video is rejected by
@@ -504,6 +505,10 @@ export const followUser = async (req: Request, res: Response, next: NextFunction
         where: { id: followerId },
         data: { arisePoints: { increment: ap }, xp: { increment: xp } }
       });
+      // The FOLLOWER's guild — they are the one earning here. Inside the
+      // once-per-target guard, so unfollow/refollow can't feed the guild on a
+      // loop the way it can't refarm the points.
+      await creditGuildXp(followerId, xp);
       await prisma.pointLog.create({
         data: { userId: followerId, amount: ap, reason: followReason }
       });
@@ -621,6 +626,10 @@ export const addXpForWatching = async (req: Request, res: Response, next: NextFu
       where: { id: userId },
       data: { arisePoints: { increment: ap }, xp: { increment: xp } }
     });
+    // Watching feeds the watcher's guild. Past the `watch:<anime>:<ep>` dedup
+    // and the daily-AP-cap early return above, so only an award that actually
+    // happened reaches the guild — a rewatch pays nobody, guild included.
+    await creditGuildXp(userId, xp);
 
     await prisma.pointLog.create({
       data: { userId, amount: ap, reason: dedupKey || "Watched an episode" }
@@ -690,6 +699,10 @@ export const earnPoints = async (req: Request, res: Response, next: NextFunction
       where: { id: userId },
       data: { arisePoints: { increment: ap }, xp: { increment: xp } },
     });
+    // Reading / tracking feeds the reader's guild. Same placement rule as
+    // addXpForWatching: below the per-key dedup and the cap return, so a
+    // re-read of the same chapter adds nothing on either ledger.
+    await creditGuildXp(userId, xp);
     await prisma.pointLog.create({ data: { userId, amount: ap, reason } });
 
     res.json({ success: true, awarded: true, earned: ap, data: { arisePoints: user.arisePoints, xp: user.xp } });

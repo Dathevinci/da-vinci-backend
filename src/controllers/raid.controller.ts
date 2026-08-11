@@ -879,12 +879,94 @@ export const raidLeaderboard = async (req: Request, res: Response, next: NextFun
       orderBy: { _sum: { damage: "desc" } },
       take: 25,
     });
-    const users = per.length
+    // ONE cross-encounter groupBy feeds both new blocks: summed per user it
+    // is the global ladder, counted per encounter it is the distinct-attacker
+    // tally (each row is already a distinct user×encounter pair).
+    const cross = await prisma.raidAttack.groupBy({
+      by: ["userId", "encounterId"],
+      where: { encounter: { bossId: boss.id } },
+      _sum: { damage: true },
+      _count: { _all: true },
+    });
+    const totals = new Map<string, { damage: number; attacks: number }>();
+    const attackersByEnc = new Map<string, number>();
+    for (const r of cross) {
+      const t = totals.get(r.userId) || { damage: 0, attacks: 0 };
+      t.damage += r._sum.damage || 0;
+      t.attacks += r._count._all;
+      totals.set(r.userId, t);
+      attackersByEnc.set(r.encounterId, (attackersByEnc.get(r.encounterId) || 0) + 1);
+    }
+    const globalTop = [...totals].sort((a, b) => b[1].damage - a[1].damage).slice(0, 25);
+
+    // Guild badges follow the settlement's home-encounter rule, not current
+    // membership — the badge must name the fight the damage will PAY on, or
+    // a mid-week guild hop makes the board lie about the coming payout.
+    const home = await homeEncounterByUser(boss.id);
+
+    // The boss row predates the caller's own lazy encounter spawn — fold enc
+    // back in so a just-founded guild isn't missing from the board.
+    const encounters = boss.encounters.some((e) => e.id === enc.id)
+      ? boss.encounters
+      : [...boss.encounters, enc];
+    const guildIdByEnc = new Map(encounters.map((e) => [e.id, e.guildId] as [string, string]));
+    const guildEncs = encounters.filter((e) => e.guildId !== REALM);
+
+    // One guild.findMany dresses both blocks: the global rows' home badges
+    // and the per-guild board's names.
+    const homeGuildIds = globalTop
+      .map(([userId]) => guildIdByEnc.get(home.get(userId) || ""))
+      .filter((g): g is string => !!g && g !== REALM);
+    const guildIds = [...new Set([...guildEncs.map((e) => e.guildId), ...homeGuildIds])];
+    const guildRows = guildIds.length
+      ? await prisma.guild.findMany({
+          where: { id: { in: guildIds } },
+          select: { id: true, name: true, tag: true },
+        })
+      : [];
+    const guildById = new Map(guildRows.map((g) => [g.id, g] as [string, (typeof guildRows)[number]]));
+
+    // One user.findMany dresses the encounter rows AND the global rows.
+    const userIds = [...new Set([...per.map((p) => p.userId), ...globalTop.map(([u]) => u)])];
+    const users = userIds.length
       ? await prisma.user.findMany({
-          where: { id: { in: per.map((p) => p.userId) } },
+          where: { id: { in: userIds } },
           select: { id: true, username: true, avatar: true },
         })
       : [];
+
+    const global = globalTop.map(([userId, t]) => {
+      const u = users.find((x) => x.id === userId);
+      const homeGuildId = guildIdByEnc.get(home.get(userId) || "");
+      const g = homeGuildId && homeGuildId !== REALM ? guildById.get(homeGuildId) : undefined;
+      return {
+        username: u?.username || "?",
+        avatar: u?.avatar || null,
+        damage: t.damage,
+        attacks: t.attacks,
+        guild: g ? { id: g.id, name: g.name, tag: g.tag } : null,
+      };
+    });
+
+    // hpMax − hpLeft is the server-truth of damage dealt (attack rows can
+    // overshoot past the killing blow); clamped because dev HP edits could
+    // leave hpLeft above a shrunk hpMax.
+    const guilds = guildEncs
+      .map((e) => {
+        const g = guildById.get(e.guildId);
+        const dealt = Math.max(0, e.hpMax - e.hpLeft);
+        return {
+          id: e.guildId,
+          name: g?.name || "?",
+          tag: g?.tag || "?",
+          damage: dealt,
+          attackers: attackersByEnc.get(e.id) || 0,
+          killed: !!e.killedAt,
+          dealtRatio: e.hpMax > 0 ? Math.round((dealt / e.hpMax) * 100) / 100 : 0,
+        };
+      })
+      .sort((a, b) => b.damage - a.damage);
+
     res.json({
       success: true,
       data: {
@@ -892,6 +974,8 @@ export const raidLeaderboard = async (req: Request, res: Response, next: NextFun
         boss: { name: def.name, slug: def.slug },
         hpMax: enc.hpMax,
         hpLeft: enc.hpLeft,
+        // rows stays the caller-scoped board, shape untouched — the deployed
+        // frontend reads it during deploy skew.
         rows: per.map((p) => {
           const u = users.find((x) => x.id === p.userId);
           return {
@@ -901,6 +985,8 @@ export const raidLeaderboard = async (req: Request, res: Response, next: NextFun
             attacks: p._count._all,
           };
         }),
+        global,
+        guilds,
       },
     });
   } catch (error) {

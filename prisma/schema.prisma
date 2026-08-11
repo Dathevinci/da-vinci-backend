@@ -826,9 +826,33 @@ model GuildMember {
   // any more than a crafted request can.
   userId   String   @unique
   role     String   @default("member") // "leader" | "member"
+  // One custom role per member (Discord-style), null = plain member. A plain
+  // string, no FK — deleteRole clears every holder in the SAME transaction it
+  // deletes the role in, and every enforcement site re-resolves the role by
+  // id+guildId, so a stale pointer grants nothing.
+  customRoleId String?
   joinedAt DateTime @default(now())
   guild    Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
 
+  @@index([guildId])
+}
+
+// Discord-style custom roles: one per member, a colored name + permission
+// flags. `permissions` is { editGuild, kickMembers, moderateChat } booleans,
+// normalized at write time in the controller — no other key is ever stored.
+// `color` is server-palette-only (the string renders in every member's
+// browser, so it is never client-shaped CSS). Management (create/edit/delete/
+// assign) is leader/co-leader-only; a custom role can NEVER grant role
+// management. No FK to Guild — the disband path sweeps roles explicitly.
+model GuildRole {
+  id          String   @id @default(uuid())
+  guildId     String
+  name        String
+  color       String
+  permissions Json
+  createdAt   DateTime @default(now())
+
+  @@unique([guildId, name])
   @@index([guildId])
 }
 

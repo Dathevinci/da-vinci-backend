@@ -3,6 +3,7 @@ import {
   createGuild, listGuilds, getGuild, joinGuild, leaveGuild,
   transferLeadership, kickMember, setCoLeader, updateGuild,
   createLoan, endLoan, myLoans, guildOfUser,
+  createRole, updateRole, deleteRole, assignRole,
 } from "../controllers/guild.controller";
 
 const router = Router();
@@ -22,6 +23,10 @@ router.post("/:id/join", joinGuild);
 router.post("/:id/transfer", transferLeadership);
 router.post("/:id/kick", kickMember);
 router.post("/:id/co-leader", setCoLeader);
+router.post("/:id/roles", createRole);
+router.patch("/:id/roles/:roleId", updateRole);
+router.delete("/:id/roles/:roleId", deleteRole);
+router.post("/:id/members/:targetId/role", assignRole);
 router.patch("/:id", updateGuild);
 router.post("/:id/loans", createLoan);
 

@@ -183,10 +183,13 @@ export const postMessage = async (req: Request, res: Response, next: NextFunctio
 };
 
 // ── DELETE /api/guilds/:id/messages/:messageId ──────────────────────────────
-// The author, the leader or the co-leader. The message must belong to guild
-// :id — a valid message id under the wrong guild is a 404, not a loophole for
-// officers of one guild to moderate another. Plain delete; chat mints
-// nothing, so there is nothing to claw back.
+// The author, the leader, the co-leader, or a member whose CUSTOM ROLE grants
+// moderateChat. The message must belong to guild :id — a valid message id
+// under the wrong guild is a 404, not a loophole for officers of one guild to
+// moderate another — and the custom-role path re-anchors membership AND role
+// to this same guildId, so moderateChat never reaches outside the holder's
+// own guild. Plain delete; chat mints nothing, so there is nothing to claw
+// back.
 
 export const deleteMessage = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -205,8 +208,24 @@ export const deleteMessage = async (req: Request, res: Response, next: NextFunct
     if (!guild) {
       return res.status(404).json({ success: false, message: "Guild not found." });
     }
-    if (message.userId !== actor.id && guild.leaderId !== actor.id && guild.coLeaderId !== actor.id) {
-      return res.status(403).json({ success: false, message: "Only the author, the leader or the co-leader can delete a message." });
+
+    let allowed =
+      message.userId === actor.id || guild.leaderId === actor.id || guild.coLeaderId === actor.id;
+    if (!allowed) {
+      // Custom-role path, resolved fresh (the standing-fact rule): the actor's
+      // membership in THIS guild, then their role in THIS guild. Permissions
+      // are normalized at write time, so a strict `=== true` read suffices.
+      const member = await membershipIn(guildId, actor.id);
+      const role = member?.customRoleId
+        ? await prisma.guildRole.findFirst({ where: { id: member.customRoleId, guildId } })
+        : null;
+      const perms = role?.permissions;
+      allowed =
+        !!perms && typeof perms === "object" && !Array.isArray(perms) &&
+        (perms as Record<string, unknown>).moderateChat === true;
+    }
+    if (!allowed) {
+      return res.status(403).json({ success: false, message: "Only the author, the leader, the co-leader or a chat moderator can delete a message." });
     }
 
     await prisma.guildMessage.delete({ where: { id: messageId } });

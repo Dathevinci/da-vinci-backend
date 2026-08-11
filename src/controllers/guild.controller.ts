@@ -22,6 +22,93 @@ const GUILD_MEMBER_CAP = 30;
 const LOAN_MAX_ACTIVE = 3;      // per side: lent by an owner / held by a borrower
 const LOAN_DAYS = 7;
 
+// ── Custom roles (Discord-style) ────────────────────────────────────────────
+const ROLE_CAP = 10;      // per guild — plain count; a race overshooting by one is accepted
+const ROLE_NAME_MIN = 2;
+const ROLE_NAME_MAX = 20;
+
+// The ONLY colors a role can wear, exact string match. The value renders as
+// an inline style in every member's browser, so free-form input would be a
+// CSS-injection surface — nothing outside this list is ever stored.
+const ROLE_COLORS = [
+  "#f87171", "#fb923c", "#fbbf24", "#a3e635", "#34d399", "#2dd4bf",
+  "#38bdf8", "#818cf8", "#a78bfa", "#e879f9", "#fb7185", "#94a3b8",
+] as const;
+
+/** The FULL flag set — anything not listed here does not exist as a grant.
+ *  Role management, leadership transfer and co-leader appointment are
+ *  identity-gated (leaderId/coLeaderId) and can never ride in on a role. */
+type RolePermissions = { editGuild: boolean; kickMembers: boolean; moderateChat: boolean };
+
+/** Normalize unknown JSON to the flag set: known keys only, strict `=== true`,
+ *  everything else false — stored permissions never carry surprises. */
+function grantsOf(raw: unknown): RolePermissions {
+  const p = raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+  return {
+    editGuild: p.editGuild === true,
+    kickMembers: p.kickMembers === true,
+    moderateChat: p.moderateChat === true,
+  };
+}
+
+function checkRoleName(raw: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof raw !== "string") return { ok: false, message: "Invalid role name." };
+  const name = raw.trim();
+  if (name.length < ROLE_NAME_MIN || name.length > ROLE_NAME_MAX) {
+    return { ok: false, message: `Role names are ${ROLE_NAME_MIN}-${ROLE_NAME_MAX} characters.` };
+  }
+  return { ok: true, value: name };
+}
+
+function checkRoleColor(raw: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof raw !== "string" || !(ROLE_COLORS as readonly string[]).includes(raw)) {
+    return { ok: false, message: "Pick a color from the role palette." };
+  }
+  return { ok: true, value: raw };
+}
+
+/** Effective powers of one actor. Officer = the persistent leaderId/coLeaderId
+ *  columns (identity-not-username, never the role string); each flag is
+ *  officer-or-granted. Custom grants are a strict SUBSET of co-leader power —
+ *  nothing here unlocks role management, transfer or co-leader appointment. */
+function actorPerms(
+  guild: { id: string; leaderId: string; coLeaderId: string | null },
+  membership: { userId: string; guildId: string; customRoleId: string | null } | null,
+  roles: { id: string; permissions: unknown }[]
+): { officer: boolean } & RolePermissions {
+  const inGuild = membership && membership.guildId === guild.id ? membership : null;
+  const officer = !!inGuild && (guild.leaderId === inGuild.userId || guild.coLeaderId === inGuild.userId);
+  const custom = grantsOf(
+    inGuild?.customRoleId
+      ? roles.find((r) => r.id === inGuild.customRoleId)?.permissions
+      : undefined
+  );
+  return {
+    officer,
+    editGuild: officer || custom.editGuild,
+    kickMembers: officer || custom.kickMembers,
+    moderateChat: officer || custom.moderateChat,
+  };
+}
+
+/** Membership + custom role for one actor, resolved fresh per request — the
+ *  standing-fact rule: a kick or a stripped role bites on the very next call.
+ *  The role is looked up by id AND guildId, so a stale pointer into another
+ *  guild (or a deleted role) grants nothing. */
+async function actorPermsFor(
+  guild: { id: string; leaderId: string; coLeaderId: string | null },
+  actorId: string
+) {
+  const membership = await prisma.guildMember.findUnique({ where: { userId: actorId } });
+  const role =
+    membership && membership.guildId === guild.id && membership.customRoleId
+      ? await prisma.guildRole.findFirst({ where: { id: membership.customRoleId, guildId: guild.id } })
+      : null;
+  return actorPerms(guild, membership, role ? [role] : []);
+}
+
 /** Level is derived, never stored — floor(xp/1000)+1, so it can't drift. */
 const levelOf = (xp: number) => Math.floor(xp / 1000) + 1;
 
@@ -168,8 +255,9 @@ export const listGuilds = async (_req: Request, res: Response, next: NextFunctio
 
 // ── GET /api/guilds/:id ─────────────────────────────────────────────────────
 
-/** The guild-detail payload, shared with setCoLeader — which answers with the
- *  same shape — so the two responses can't drift apart. Null = no such guild. */
+/** The guild-detail payload, shared with setCoLeader and every custom-role
+ *  endpoint — which answer with the same shape — so the responses can't drift
+ *  apart. Null = no such guild. */
 async function guildDetailPayload(id: string, actor: string | null) {
   const guild = await prisma.guild.findUnique({
     where: { id },
@@ -185,6 +273,10 @@ async function guildDetailPayload(id: string, actor: string | null) {
     : [];
 
   const myMembership = actor ? guild.members.find((m) => m.userId === actor) || null : null;
+  const roles = await prisma.guildRole.findMany({
+    where: { guildId: id },
+    orderBy: { createdAt: "asc" },
+  });
   const activeLoanCount = await prisma.guildCardLoan.count({
     where: { guildId: id, expiresAt: { gt: new Date() } },
   });
@@ -197,6 +289,7 @@ async function guildDetailPayload(id: string, actor: string | null) {
     level: levelOf(guild.xp), createdAt: guild.createdAt,
     memberCap: GUILD_MEMBER_CAP,
     memberCount: guild.members.length,
+    roles: roles.map((r) => ({ id: r.id, name: r.name, color: r.color, permissions: r.permissions })),
     members: guild.members.map((m) => {
       const u = users.find((x) => x.id === m.userId);
       return {
@@ -204,10 +297,13 @@ async function guildDetailPayload(id: string, actor: string | null) {
         username: u?.username || "?",
         avatar: u?.avatar || null,
         role: m.role,
+        customRoleId: m.customRoleId,
         joinedAt: m.joinedAt,
       };
     }),
-    myMembership: myMembership ? { role: myMembership.role, joinedAt: myMembership.joinedAt } : null,
+    myMembership: myMembership
+      ? { role: myMembership.role, customRoleId: myMembership.customRoleId, joinedAt: myMembership.joinedAt }
+      : null,
     activeLoanCount,
   };
 }
@@ -348,10 +444,12 @@ export const leaveGuild = async (req: Request, res: Response, next: NextFunction
       if (count > 1) {
         return res.status(409).json({ success: false, message: "Transfer leadership first — a guild can't lose its leader while members remain." });
       }
-      // Last member out turns off the lights: loans, then the guild (which
-      // cascades the membership row).
+      // Last member out turns off the lights: loans, roles (no FK, so no
+      // cascade — without this sweep they'd outlive the guild as unreachable
+      // rows), then the guild (which cascades the membership row).
       await prisma.$transaction([
         prisma.guildCardLoan.deleteMany({ where: { guildId } }),
+        prisma.guildRole.deleteMany({ where: { guildId } }),
         prisma.guild.delete({ where: { id: guildId } }),
       ]);
       return res.json({ success: true, data: { left: true, disbanded: true } });
@@ -408,7 +506,9 @@ export const transferLeadership = async (req: Request, res: Response, next: Next
       // so transferring to anyone else leaves the deputy in place.
       prisma.guild.updateMany({ where: { id, coLeaderId: targetId }, data: { coLeaderId: null } }),
       prisma.guildMember.updateMany({ where: { userId: actor, guildId: id }, data: { role: "member" } }),
-      prisma.guildMember.updateMany({ where: { userId: targetId, guildId: id }, data: { role: "leader" } }),
+      // customRoleId cleared too: assignRole 400s "the leader can't hold a
+      // custom role", so a promotion must not smuggle one past that gate.
+      prisma.guildMember.updateMany({ where: { userId: targetId, guildId: id }, data: { role: "leader", customRoleId: null } }),
     ]);
     res.json({ success: true, data: { leaderId: targetId } });
   } catch (error) {
@@ -432,14 +532,17 @@ export const kickMember = async (req: Request, res: Response, next: NextFunction
 
     const guild = await prisma.guild.findUnique({ where: { id } });
     if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
-    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
-      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can do that." });
+    // Officers, plus any member whose custom role grants kickMembers.
+    const perms = await actorPermsFor(guild, actor);
+    if (!perms.kickMembers) {
+      return res.status(403).json({ success: false, message: "You don't have permission to kick members." });
     }
     if (targetId === actor) {
       return res.status(400).json({ success: false, message: "You can't kick yourself — use leave." });
     }
     // The self-kick check above already covers the leader kicking the leader,
-    // so this only ever bites a co-leader: they outrank members, not the top.
+    // so this only ever bites a co-leader or a custom-role kicker: they
+    // outrank members, not the top.
     if (targetId === guild.leaderId) {
       return res.status(403).json({ success: false, message: "The leader can't be kicked." });
     }
@@ -447,6 +550,22 @@ export const kickMember = async (req: Request, res: Response, next: NextFunction
     const target = await prisma.guildMember.findUnique({ where: { userId: targetId } });
     if (!target || target.guildId !== id) {
       return res.status(404).json({ success: false, message: "That user isn't a member of this guild." });
+    }
+    // A custom-role kicker moves PLAIN members only — not the co-leader, and
+    // not a fellow kick-holder: peers can't purge peers. Officers keep their
+    // existing reach untouched.
+    if (!perms.officer) {
+      if (targetId === guild.coLeaderId) {
+        return res.status(403).json({ success: false, message: "The co-leader can only be kicked by the leader." });
+      }
+      if (target.customRoleId) {
+        const targetRole = await prisma.guildRole.findFirst({
+          where: { id: target.customRoleId, guildId: id },
+        });
+        if (grantsOf(targetRole?.permissions).kickMembers) {
+          return res.status(403).json({ success: false, message: "You can't kick a member who also holds kick powers." });
+        }
+      }
     }
 
     // Same cleanup as leaving: their loans go with them, both directions.
@@ -524,6 +643,229 @@ export const setCoLeader = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// ── POST /api/guilds/:id/roles ──────────────────────────────────────────────
+// Role MANAGEMENT (this and the three below) is OFFICER-only, off the
+// persistent leaderId/coLeaderId columns — never off a custom grant: a role
+// that could mint roles could mint its way to anything. All four answer with
+// guildDetailPayload so the UI refreshes from one shape.
+
+export const createRole = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can manage roles." });
+    }
+
+    const name = checkRoleName(req.body?.name);
+    if (!name.ok) return res.status(400).json({ success: false, message: name.message });
+    const color = checkRoleColor(req.body?.color);
+    if (!color.ok) return res.status(400).json({ success: false, message: color.message });
+    const rawPerms = req.body?.permissions;
+    if (rawPerms !== undefined && rawPerms !== null && (typeof rawPerms !== "object" || Array.isArray(rawPerms))) {
+      return res.status(400).json({ success: false, message: "Invalid permissions." });
+    }
+    const permissions = grantsOf(rawPerms);
+
+    // Plain count — a race overshooting the cap by one is accepted here,
+    // unlike the member cap where 30 is a wall.
+    const count = await prisma.guildRole.count({ where: { guildId: id } });
+    if (count >= ROLE_CAP) {
+      return res.status(409).json({ success: false, message: `Guilds are capped at ${ROLE_CAP} custom roles.` });
+    }
+
+    const role = await prisma.guildRole
+      .create({ data: { guildId: id, name: name.value, color: color.value, permissions } })
+      .catch((e) => {
+        if (e?.code === "P2002") return null; // @@unique([guildId, name])
+        throw e;
+      });
+    if (!role) {
+      return res.status(409).json({ success: false, message: "A role with that name already exists." });
+    }
+
+    const data = await guildDetailPayload(id, actor);
+    if (!data) return res.status(404).json({ success: false, message: "Guild not found." });
+    return res.status(201).json({
+      success: true,
+      data: { ...data, role: { id: role.id, name: role.name, color: role.color, permissions: role.permissions } },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── PATCH /api/guilds/:id/roles/:roleId ─────────────────────────────────────
+
+export const updateRole = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const roleId = req.params.roleId as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can manage roles." });
+    }
+
+    // id AND guildId — a role id from another guild is a 404, not a handle.
+    const existing = await prisma.guildRole.findFirst({ where: { id: roleId, guildId: id } });
+    if (!existing) return res.status(404).json({ success: false, message: "Role not found." });
+
+    const data: { name?: string; color?: string; permissions?: RolePermissions } = {};
+    if (req.body?.name !== undefined) {
+      const name = checkRoleName(req.body.name);
+      if (!name.ok) return res.status(400).json({ success: false, message: name.message });
+      data.name = name.value;
+    }
+    if (req.body?.color !== undefined) {
+      const color = checkRoleColor(req.body.color);
+      if (!color.ok) return res.status(400).json({ success: false, message: color.message });
+      data.color = color.value;
+    }
+    if (req.body?.permissions !== undefined) {
+      const rawPerms = req.body.permissions;
+      if (rawPerms !== null && (typeof rawPerms !== "object" || Array.isArray(rawPerms))) {
+        return res.status(400).json({ success: false, message: "Invalid permissions." });
+      }
+      // Whole-object replace, re-normalized — stored flags never carry more
+      // than the three known keys.
+      data.permissions = grantsOf(rawPerms);
+    }
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ success: false, message: "Nothing to update." });
+    }
+
+    const updated = await prisma.guildRole
+      .update({ where: { id: roleId }, data })
+      .catch((e) => {
+        if (e?.code === "P2002") return "taken" as const;
+        if (e?.code === "P2025") return "gone" as const; // deleted mid-flight
+        throw e;
+      });
+    if (updated === "taken") {
+      return res.status(409).json({ success: false, message: "A role with that name already exists." });
+    }
+    if (updated === "gone") {
+      return res.status(404).json({ success: false, message: "Role not found." });
+    }
+
+    const payload = await guildDetailPayload(id, actor);
+    if (!payload) return res.status(404).json({ success: false, message: "Guild not found." });
+    res.json({ success: true, data: payload });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── DELETE /api/guilds/:id/roles/:roleId ────────────────────────────────────
+// The role and every pointer to it go in ONE transaction — a member row
+// keeping a deleted role's id would be a ghost grant waiting to happen.
+
+export const deleteRole = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const roleId = req.params.roleId as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can manage roles." });
+    }
+
+    const existing = await prisma.guildRole.findFirst({ where: { id: roleId, guildId: id } });
+    if (!existing) return res.status(404).json({ success: false, message: "Role not found." });
+
+    // deleteMany keeps the guildId condition on the destructive half too, and
+    // a role already gone matches zero rows instead of aborting on P2025.
+    await prisma.$transaction([
+      prisma.guildMember.updateMany({ where: { guildId: id, customRoleId: roleId }, data: { customRoleId: null } }),
+      prisma.guildRole.deleteMany({ where: { id: roleId, guildId: id } }),
+    ]);
+
+    const payload = await guildDetailPayload(id, actor);
+    if (!payload) return res.status(404).json({ success: false, message: "Guild not found." });
+    res.json({ success: true, data: payload });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/guilds/:id/members/:targetId/role ─────────────────────────────
+// Assign (roleId) or clear (roleId: null). The leader takes no custom role —
+// the seat already carries everything a role could grant. Membership is
+// re-checked INSIDE the transaction under the same row lock setCoLeader
+// takes, so an assignment can't commit after the target's leave/kick swept
+// their membership row.
+
+export const assignRole = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const targetId = req.params.targetId as string;
+    const raw = req.body?.roleId;
+    const roleId = raw === null || raw === undefined || raw === "" ? null : String(raw);
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
+      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can manage roles." });
+    }
+    if (targetId === guild.leaderId) {
+      return res.status(400).json({ success: false, message: "The leader can't hold a custom role." });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT "userId" FROM "GuildMember" WHERE "userId" = ${targetId} FOR UPDATE`;
+      const member = await tx.guildMember.findUnique({ where: { userId: targetId } });
+      if (!member || member.guildId !== id) {
+        throw Object.assign(new Error("role-target-not-member"), { guildCode: 404, guildWho: "member" });
+      }
+      if (roleId) {
+        // id AND guildId — a role from another guild is not a handle here.
+        const role = await tx.guildRole.findFirst({ where: { id: roleId, guildId: id } });
+        if (!role) {
+          throw Object.assign(new Error("role-not-found"), { guildCode: 404, guildWho: "role" });
+        }
+      }
+      await tx.guildMember.update({ where: { userId: targetId }, data: { customRoleId: roleId } });
+      return "ok" as const;
+    }).catch((e) => {
+      if (e?.guildCode === 404) return e?.guildWho === "role" ? ("no-role" as const) : ("not-member" as const);
+      throw e;
+    });
+    if (result === "not-member") {
+      return res.status(404).json({ success: false, message: "That user isn't a member of this guild." });
+    }
+    if (result === "no-role") {
+      return res.status(404).json({ success: false, message: "Role not found." });
+    }
+
+    const data = await guildDetailPayload(id, actor);
+    if (!data) return res.status(404).json({ success: false, message: "Guild not found." });
+    res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ── PATCH /api/guilds/:id ───────────────────────────────────────────────────
 // Description, avatar and banner only. Name and tag are immutable in v1 —
 // they're unique identity, and renames are exactly the mutable-key trap the
@@ -539,9 +881,11 @@ export const updateGuild = async (req: Request, res: Response, next: NextFunctio
 
     const guild = await prisma.guild.findUnique({ where: { id } });
     if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
-    // Profile edits are shared power; the co-leader carries them too.
-    if (guild.leaderId !== actor && guild.coLeaderId !== actor) {
-      return res.status(403).json({ success: false, message: "Only the guild leader or co-leader can do that." });
+    // Profile edits are shared power: officers, plus any member whose custom
+    // role grants editGuild — exactly this endpoint's fields, nothing more.
+    const perms = await actorPermsFor(guild, actor);
+    if (!perms.editGuild) {
+      return res.status(403).json({ success: false, message: "You don't have permission to edit this guild." });
     }
 
     const data: { description?: string; avatar?: string | null; banner?: string | null } = {};

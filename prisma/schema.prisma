@@ -22,7 +22,7 @@ model User {
   bio       String?
   profileSong String?               // one audio URL that plays on the profile (host/format-gated server-side)
   arisePoints Int      @default(0)   // community currency
-  xp          Int      @default(0)   // drives level (max level 10), separate from currency
+  xp          Int      @default(0)   // drives the profile level (1..100, curve in src/utils/economy.ts), separate from currency
   usernameChanges Int  @default(0)   // first username change is free, then costs Arise Points
   role        String   @default("USER") // LEAD_DEV | ADMIN | USER — tied to the account, survives username changes
   isPrivate   Boolean  @default(false)
@@ -819,7 +819,7 @@ model Guild {
   xp          Int           @default(0)
   // ── Joining ──
   isPublic    Boolean       @default(true) // false = a pending GuildInvite is REQUIRED to join
-  minLevel    Int           @default(1)    // 1..10 — user levels cap at 10 on this site
+  minLevel    Int           @default(1)    // 1..100 — matches USER_MAX_LEVEL in src/utils/economy.ts
   // ── Bought with treasury shards (see GUILD_ECONOMY) ──
   purchasedSlots Int        @default(0)    // +5 member slots each, on top of the level curve, hard-capped at 100
   rolesUnlocked  Boolean    @default(false) // permanent once bought; backfilled true for guilds that already have roles
@@ -922,6 +922,14 @@ model GuildMessage {
   content   String?
   mediaUrl  String?
   createdAt DateTime @default(now())
+  // Set the first time the AUTHOR edits their own message (nobody else can);
+  // null means untouched since posting. The client renders "(edited)" off it.
+  editedAt  DateTime?
+  // The message this one replies to — a plain string, NO FK, deliberately.
+  // Deleting a parent must leave the reply standing (the client shows
+  // "message deleted"), which a cascading relation would not allow; the
+  // POST/PATCH handlers are what guarantee the id belongs to the same guild.
+  replyToId String?
 
   @@index([guildId, createdAt])
 }

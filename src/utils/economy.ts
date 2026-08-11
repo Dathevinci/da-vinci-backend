@@ -1,9 +1,11 @@
 // ═══════════════════════════════════════════════════════════
 // Arise Points (currency) + XP (leveling) economy.
 //
-// XP drives the level (max 10, exponential — see the frontend levels.ts for
-// the thresholds). Arise Points are a separate community currency. Earning AP
-// also grants a small passive amount of XP so the two systems connect.
+// XP drives the profile level — levels 1..100 on a QUADRATIC curve, defined in
+// the USER LEVEL CURVE block below (it used to be max 10 and exponential; the
+// why is in that block). Arise Points are a separate community currency.
+// Earning AP also grants a small passive amount of XP so the two systems
+// connect.
 // ═══════════════════════════════════════════════════════════
 
 export type Role = "LEAD_DEV" | "ADMIN" | "USER";
@@ -19,6 +21,72 @@ export function getRole(username: string | null | undefined): Role {
   if (ADMINS.includes(u)) return "ADMIN";
   return "USER";
 }
+
+// ═══ USER LEVEL CURVE ═══════════════════════════════════════════════════════
+//
+// ⚠ THIS MATH IS DUPLICATED IN THE FRONTEND. da-vinci-frontend
+//   src/lib/levels.ts carries the IDENTICAL formula, and THE TWO MUST NEVER
+//   DRIFT. The server gates off this curve (guild minLevel admission) while
+//   the client draws the bar and the rank title off its own copy — one
+//   character of disagreement and a user is shown a level the server refuses
+//   to honour, or is bounced from a guild the UI said they qualified for.
+//   Change one, change both, in the same commit.
+//
+//   USER_MAX_LEVEL     = 100
+//   userLevelCost(L)   = 100 + (L-1)*80                 xp to go from L to L+1
+//   userTotalXpFor(L)  = 100*(L-1) + 80*(L-1)*(L-2)/2   cumulative xp AT L
+//   userTotalXpFor(100) = 397,980 — the ceiling.
+//
+// WHY IT CHANGED: the old curve was 1000 * 2^(L-1), capped at level 10 —
+// level 10 alone demanded 511,000 xp while the actions on this site grant
+// 5-25 xp a piece. Measured against the LIVE data (59 users: median 20 xp,
+// 22 of them sitting at zero, p25 1,084) progression was simply dead for
+// everyone outside the top four accounts. The replacement is QUADRATIC, not
+// exponential: level 2 costs 100 xp — about an hour of watching at
+// XP_PER_MINUTE, or ~17 comments — and every step after that grows by a flat
+// 80, so the ladder stays climbable all the way to 100 instead of doubling
+// out of reach. Against the same live accounts: 384,307 xp -> L98,
+// 164,930 -> L64, 90,106 -> L47, 71,254 -> L42, 12,779 -> L18, 1,084 -> L5,
+// 20 -> L1 with visible progress. Nobody is stranded at 1, nobody is
+// force-capped at 100.
+//
+// Level is DERIVED from xp and never stored, so it cannot drift from the
+// number that defines it.
+
+export const USER_MAX_LEVEL = 100;
+
+/** Clamp anything a caller hands us into a real level. NaN/Infinity -> 1. */
+const asUserLevel = (level: number): number => {
+  const L = Math.floor(Number(level));
+  if (!Number.isFinite(L)) return 1;
+  return Math.max(1, Math.min(USER_MAX_LEVEL, L));
+};
+
+/** Clamp anything a caller hands us into a real xp total. NaN, Infinity and
+ *  negatives all collapse to 0 rather than poisoning the comparison below —
+ *  xp arrives from a column that should never hold either, but a level is a
+ *  gate and a gate does not get to throw. */
+const asUserXp = (xp: number): number => {
+  const x = Math.floor(Number(xp));
+  return Number.isFinite(x) ? Math.max(0, x) : 0;
+};
+
+/** XP to go from `level` to the next one. Flat past the ceiling. */
+export const userLevelCost = (level: number): number => 100 + (asUserLevel(level) - 1) * 80;
+
+/** Cumulative XP a user must have banked to BE at `level`. */
+export const userTotalXpFor = (level: number): number => {
+  const L = asUserLevel(level);
+  return 100 * (L - 1) + (80 * (L - 1) * (L - 2)) / 2;
+};
+
+/** The largest level in [1,100] whose entry cost this xp has paid. */
+export const userLevel = (xp: number): number => {
+  const x = asUserXp(xp);
+  let level = 1;
+  while (level < USER_MAX_LEVEL && x >= userTotalXpFor(level + 1)) level++;
+  return level;
+};
 
 // ── THE DIAL ───────────────────────────────────────────────────────────────
 // Everything you do here is paid in ENGAGEMENT MINUTES × this rate. One number

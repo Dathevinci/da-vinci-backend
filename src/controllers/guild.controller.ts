@@ -2,6 +2,9 @@ import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { getActorId } from "../lib/jwt";
 import { CARDS } from "../data/cardCatalog";
+// The USER level curve — one owner, imported, never restated (see the USER
+// level note below and the header of economy.ts).
+import { USER_MAX_LEVEL, userLevel } from "../utils/economy";
 
 /**
  * GUILDS — player-founded groups with a shared board, a treasury and card
@@ -240,17 +243,12 @@ const isRecentlyActive = (updatedAt: Date | null | undefined, now: number): bool
   !!updatedAt && now - updatedAt.getTime() <= ACTIVE_WINDOW_MS;
 
 // ── USER level (for the minLevel join gate) ─────────────────────────────────
-// Mirrors the site's leveling curve (frontend src/lib/levels.ts): max level
-// 10, cumulative xp to REACH level L = 1000 * (2^(L-1) - 1). A join gate that
-// guessed at this would let someone in at a level the UI never showed them.
-const USER_MAX_LEVEL = 10;
-const userXpForLevel = (level: number): number => 1000 * (2 ** (Math.max(1, Math.min(USER_MAX_LEVEL, level)) - 1) - 1);
-const userLevelOf = (xp: number): number => {
-  const x = asXp(xp);
-  let level = 1;
-  while (level < USER_MAX_LEVEL && x >= userXpForLevel(level + 1)) level++;
-  return level;
-};
+// NOT restated here. The site's user curve lives in ONE place —
+// src/utils/economy.ts (userLevel / USER_MAX_LEVEL), mirrored by the
+// frontend's src/lib/levels.ts — and this file imports it. A join gate that
+// kept its own copy would let someone in (or bounce them) at a level the UI
+// never showed them, which is exactly what the old duplicated max-10
+// exponential formula did here.
 
 // ── MIGRATION SAFETY: rolesUnlocked backfill ────────────────────────────────
 // Custom roles shipped UNGATED, then became a 15,000-shard purchase. Any guild
@@ -333,11 +331,15 @@ function checkIsPublic(raw: unknown): { ok: true; value: boolean } | { ok: false
   return { ok: true, value: raw };
 }
 
-/** 1..10 — the site's user levels stop at 10, so a higher bar would be a
- *  requirement nobody could ever meet. Clamped, not rejected. */
+/** 1..100 — the ceiling is USER_MAX_LEVEL, imported rather than typed out, so
+ *  the bar a guild can set can never exceed the level a member can reach.
+ *  (It read 1..10 while the user curve capped at 10; the curve now runs to
+ *  100 and this follows it.) Clamped, not rejected. */
 function checkMinLevel(raw: unknown): { ok: true; value: number } | { ok: false; message: string } {
   const n = Math.floor(Number(raw));
-  if (!Number.isFinite(n)) return { ok: false, message: "minLevel must be a number from 1 to 10." };
+  if (!Number.isFinite(n)) {
+    return { ok: false, message: `minLevel must be a number from 1 to ${USER_MAX_LEVEL}.` };
+  }
   return { ok: true, value: Math.max(1, Math.min(USER_MAX_LEVEL, n)) };
 }
 
@@ -821,7 +823,7 @@ async function admitMember(guildId: string, actorId: string, viaInvite: boolean)
         throw admissionError(403, "This guild is invite-only.");
       }
 
-      const level = userLevelOf(user.xp);
+      const level = userLevel(user.xp);
       if (level < guild.minLevel) {
         throw admissionError(
           403,

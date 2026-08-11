@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { prisma } from "../lib/prisma";
 import { resolveActor } from "../lib/staff";
+import { processMentions } from "../utils/mentions";
 
 /**
  * GUILD CHAT — a Discord-style message stream per guild. Members-only BOTH
@@ -354,6 +355,40 @@ export const postMessage = async (req: Request, res: Response, next: NextFunctio
     const author = await prisma.user.findUnique({ where: { id: actor.id }, select: AUTHOR_SELECT });
     const replyTo = await replyPreviewOf(parent);
 
+    // @mentions — MEMBERS ONLY. Chat is a private room, so the notification
+    // must not be a doorbell for people who cannot open the door: mentioning an
+    // outsider (or someone who has since left) pings nobody. The guild's
+    // current roster is resolved fresh and handed to processMentions as an
+    // allow-list — the standing-fact rule every other handler here follows —
+    // and anything mentioned outside it is dropped there.
+    //
+    // The link points at the guild, not /community: processMentions' default
+    // link would land the reader on the wrong page entirely.
+    //
+    // Only runs when the text actually contains an "@", so a normal message
+    // costs no extra query. processMentions never throws (it wraps and logs),
+    // so a mention failure cannot fail a message that is already committed.
+    // The ROSTER READ is guarded too. processMentions is bulletproof, but the
+    // query that feeds it was not, and it runs AFTER the message row has
+    // already committed — so a hiccup there returned 500 for a message every
+    // other member could already see on their next poll.
+    if (content.includes("@")) {
+      try {
+        const members = await prisma.guildMember.findMany({
+          where: { guildId },
+          select: { userId: true },
+        });
+        await processMentions(
+          content,
+          actor.id,
+          `/guild/${guildId}`,
+          members.map((m) => m.userId)
+        );
+      } catch (e) {
+        console.error("guild chat mention fan-out failed:", e);
+      }
+    }
+
     res.status(201).json({ success: true, data: shapeMessage(message, author, replyTo) });
   } catch (error) {
     next(error);
@@ -420,6 +455,29 @@ export const editMessage = async (req: Request, res: Response, next: NextFunctio
     const author = await prisma.user.findUnique({ where: { id: actor.id }, select: AUTHOR_SELECT });
     const parent = message.replyToId ? await findParentInGuild(guildId, message.replyToId) : null;
     const replyTo = await replyPreviewOf(parent);
+
+    // Editing a name IN counts as mentioning them. Without this the composer's
+    // autocomplete renders a live @link in an edited message that pings nobody
+    // — the dropdown promises a notification the server never sends. Same
+    // members-only allow-list and same non-throwing guard as the post path.
+    // (A name already in the previous text gets re-notified; a duplicate ping
+    // is a smaller wrong than a silent one, and edits are rare.)
+    if (checked.value.includes("@")) {
+      try {
+        const members = await prisma.guildMember.findMany({
+          where: { guildId },
+          select: { userId: true },
+        });
+        await processMentions(
+          checked.value,
+          actor.id,
+          `/guild/${guildId}`,
+          members.map((m) => m.userId)
+        );
+      } catch (e) {
+        console.error("guild chat edit mention fan-out failed:", e);
+      }
+    }
 
     res.json({ success: true, data: shapeMessage(message, author, replyTo) });
   } catch (error) {

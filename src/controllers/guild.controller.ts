@@ -158,6 +158,23 @@ export const guildLevel = (xp: number): number => {
   return level;
 };
 
+// ── Custom emoji slots ──────────────────────────────────────────────────────
+// A LEVEL REWARD, not a purchase: no new currency, no new column, nothing to
+// buy. Guild xp already gates member seats; this gives it a second meaning on
+// the SAME curve, so levelling past the seat ceiling still pays for something.
+//
+//   emojiSlots(level) = min(25, 5 + floor(level / 5))
+//   L1 = 5 · L25 = 10 · L50 = 15 · L100 = 25 (and 25 is the ceiling)
+//
+// Derived from level like every other guild number, so capacity can never
+// drift from the xp that defines it.
+export const EMOJI_SLOTS_BASE = 5;
+export const EMOJI_SLOTS_MAX = 25;
+const EMOJI_LEVELS_PER_SLOT = 5;
+
+export const emojiSlots = (level: number): number =>
+  Math.min(EMOJI_SLOTS_MAX, EMOJI_SLOTS_BASE + Math.floor(asLevel(level) / EMOJI_LEVELS_PER_SLOT));
+
 /** Seats: 10 at level 1, +0.8 per level, plus whatever the treasury bought —
  *  never past the hard cap of 100. (L79 = 72, L100 = 89, + bought slots.) */
 export const memberCap = (level: number, purchasedSlots: number): number => {
@@ -290,16 +307,18 @@ const NAME_MIN = 3;
 const NAME_MAX = 24;
 const TAG_RE = /^[A-Z]{2,5}$/;
 
-// ── Guild imagery (avatar + banner) ─────────────────────────────────────────
+// ── Guild imagery (avatar + banner + custom emoji) ──────────────────────────
 // Same posture as the profileSong check in user.controller.ts: the URL loads
 // in VISITORS' browsers, so the gate is https + a host allow-list — Cloudinary
 // only, the CDN the rest of the product already serves art from. ONE checker
-// for both fields, so the avatar and banner rules can never drift apart.
+// for every guild-art field, so the avatar, banner and emoji rules can never
+// drift apart — a second URL validator is exactly how one of them ends up
+// accepting a host the others reject.
 const GUILD_IMAGE_HOSTS = new Set(["res.cloudinary.com"]);
 
 function checkGuildImage(
   raw: unknown,
-  label: "avatar" | "banner"
+  label: "avatar" | "banner" | "emoji"
 ): { ok: true; value: string | null } | { ok: false; message: string } {
   if (raw === null) return { ok: true, value: null };
   if (typeof raw !== "string") return { ok: false, message: `Invalid ${label} link.` };
@@ -587,6 +606,11 @@ async function guildDetailPayload(id: string, actor: string | null) {
   const activeLoanCount = await prisma.guildCardLoan.count({
     where: { guildId: id, expiresAt: { gt: now } },
   });
+  // Capacity only — a COUNT, never the rows. The emoji CATALOG (names + urls)
+  // is members-only and lives on GET /:id/emojis; this payload is a PUBLIC
+  // read, so it carries the number the guild page needs to draw "7 / 15" and
+  // nothing a non-member shouldn't see.
+  const emojiUsed = await prisma.guildEmoji.count({ where: { guildId: id } });
 
   const nowMs = now.getTime();
   const members = guild.members.map((m) => {
@@ -638,6 +662,10 @@ async function guildDetailPayload(id: string, actor: string | null) {
         ? { userId: best.userId, username: best.username, avatar: best.avatar, xpContributed: best.xpContributed }
         : null,
     },
+    // Capacity WITHOUT the catalog, so the guild page can draw the meter
+    // without a second call — and without leaking a members-only list into a
+    // public read. total is a pure function of level (see emojiSlots).
+    emojiSlots: { used: emojiUsed, total: emojiSlots(guildLevel(guild.xp)) },
     roles: roles.map((r) => ({ id: r.id, name: r.name, color: r.color, permissions: r.permissions })),
     members,
     myMembership: myMembership
@@ -904,6 +932,10 @@ const disbandOps = (guildId: string) => [
   prisma.guildRole.deleteMany({ where: { guildId } }),
   prisma.guildInvite.deleteMany({ where: { guildId } }),
   prisma.guildMessage.deleteMany({ where: { guildId } }),
+  // Custom emoji carry a plain guildId like roles and invites, so they need an
+  // explicit sweep — a disbanded guild's emoji would otherwise sit forever as
+  // unreachable rows still holding the @@unique([guildId, name]) pairs.
+  prisma.guildEmoji.deleteMany({ where: { guildId } }),
   prisma.guild.delete({ where: { id: guildId } }), // cascades GuildMember
 ];
 
@@ -1370,6 +1402,216 @@ export const assignRole = async (req: Request, res: Response, next: NextFunction
     const data = await guildDetailPayload(id, actor);
     if (!data) return res.status(404).json({ success: false, message: "Guild not found." });
     res.json({ success: true, data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ═══ CUSTOM EMOJI ═══════════════════════════════════════════════════════════
+// Discord-style :shortcode: emoji, per guild, used in GUILD CHAT — a
+// members-only room. That is why the CATALOG read is members-only too: an
+// outsider has nowhere to type them, and the list is the guild's own art.
+// These are NOT global site emoji and are never resolved outside their guild.
+//
+// STORAGE: the image goes to Cloudinary through the same unsigned-preset
+// upload the crest and banner already use; only the returned secure_url
+// reaches us, and it is host-walled by checkGuildImage — the SAME checker, not
+// a copy. The url renders in every member's browser, so an arbitrary host is
+// never stored.
+//
+// CAPACITY is a LEVEL REWARD — emojiSlots(guildLevel(xp)), no purchase and no
+// new currency. Like ROLE_CAP (and unlike the member cap, which is a wall
+// under a row lock) the check is a plain count: two racing uploads could
+// overshoot by one, which costs one extra emoji and nothing of value.
+//
+// WRITES are editGuild — officers, plus any custom role granted editGuild —
+// resolved through actorPermsFor, the same call updateGuild uses. Guild art is
+// guild art; there is no separate emoji power to get out of sync.
+
+const EMOJI_NAME_RE = /^[a-z0-9_]{2,24}$/;
+const EMOJI_URL_MAX = 400; // a Cloudinary secure_url is ~100; this is the ceiling, not a target
+
+/** Lowercased and trimmed BEFORE the test, so `:Sparkle:` is stored as
+ *  `sparkle` rather than rejected — the shortcode is case-insensitive by
+ *  construction, which is also what makes @@unique([guildId, name]) mean
+ *  "one :sparkle: per guild" instead of one per capitalisation. */
+function checkEmojiName(raw: unknown): { ok: true; value: string } | { ok: false; message: string } {
+  if (typeof raw !== "string") return { ok: false, message: "Emoji names are text, typed as :name:." };
+  const name = raw.trim().toLowerCase();
+  if (!EMOJI_NAME_RE.test(name)) {
+    return {
+      ok: false,
+      message: "Emoji names are 2-24 characters — lowercase letters, numbers and underscores only, typed as :name:.",
+    };
+  }
+  return { ok: true, value: name };
+}
+
+/** The wire shape for one emoji, in ONE place: the catalog and the create
+ *  response answer with the same object, and NEITHER exposes createdAt or
+ *  createdBy — the chat picker needs the name, the image and whether to play
+ *  it, nothing else. */
+const shapeEmoji = (e: { id: string; name: string; url: string; animated: boolean }) => ({
+  id: e.id,
+  name: e.name,
+  url: e.url,
+  animated: e.animated,
+});
+
+/** used/total for one guild, from the level curve. total is derived, never
+ *  stored, so a guild that levels up gains the slot the same instant. */
+async function emojiCapacity(guildId: string, xp: number) {
+  const used = await prisma.guildEmoji.count({ where: { guildId } });
+  return { used, total: emojiSlots(guildLevel(xp)) };
+}
+
+// ── GET /api/guilds/:id/emojis ──────────────────────────────────────────────
+// MEMBERS ONLY, both walls: a verified JWT and current membership of THIS
+// guild, re-resolved per request like guild chat — leaving or being kicked
+// closes the catalog on the very next call. A member of ANOTHER guild is 403,
+// not 404: the guild exists, this room just isn't theirs.
+
+export const listEmojis = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to see this guild's emoji." });
+    }
+    const id = req.params.id as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id }, select: { id: true, xp: true } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+
+    // GuildMember.userId is unique, so ONE lookup answers both "in a guild"
+    // and "in this one".
+    const membership = await prisma.guildMember.findUnique({ where: { userId: actor } });
+    if (!membership || membership.guildId !== id) {
+      return res.status(403).json({ success: false, message: "Guild emoji are members-only." });
+    }
+
+    const [emojis, slots] = await Promise.all([
+      prisma.guildEmoji.findMany({ where: { guildId: id }, orderBy: { name: "asc" } }),
+      emojiCapacity(id, guild.xp),
+    ]);
+
+    res.json({ success: true, data: { emojis: emojis.map(shapeEmoji), slots } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── POST /api/guilds/:id/emojis ─────────────────────────────────────────────
+// editGuild — officers, or a custom role granted it (actorPermsFor, the same
+// resolution updateGuild uses; a non-member's flags all read false, so this
+// gate is also the membership check).
+
+export const createEmoji = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    const perms = await actorPermsFor(guild, actor);
+    if (!perms.editGuild) {
+      return res.status(403).json({ success: false, message: "You don't have permission to manage this guild's emoji." });
+    }
+
+    const name = checkEmojiName(req.body?.name);
+    if (!name.ok) return res.status(400).json({ success: false, message: name.message });
+
+    // Length FIRST — checkGuildImage runs `new URL()`, and there is no reason
+    // to parse an unbounded string before capping it.
+    const rawUrl = typeof req.body?.url === "string" ? req.body.url.trim() : req.body?.url;
+    if (typeof rawUrl === "string" && rawUrl.length > EMOJI_URL_MAX) {
+      return res.status(400).json({ success: false, message: "That image link is too long." });
+    }
+    // The SAME host wall the crest and banner use.
+    const url = checkGuildImage(rawUrl, "emoji");
+    if (!url.ok) return res.status(400).json({ success: false, message: url.message });
+    // checkGuildImage treats empty/null as "clear the field", which is a real
+    // answer for an avatar and a nonsense one here: an emoji IS its image.
+    if (!url.value) {
+      return res.status(400).json({ success: false, message: "Upload an image for the emoji first." });
+    }
+
+    // Strict `=== true`, the grantsOf posture: a client hint about whether to
+    // render a still frame. Nothing on the server behaves differently.
+    const animated = req.body?.animated === true;
+
+    // Plain count (see the ROLE_CAP note): the cap is a ceiling, not the
+    // member wall. The numbers ride along on the refusal so the UI can say
+    // "12 / 12 — level up for more" without a second call.
+    const slots = await emojiCapacity(id, guild.xp);
+    if (slots.used >= slots.total) {
+      return res.status(409).json({
+        success: false,
+        message: `This guild's emoji slots are full (${slots.used}/${slots.total}). Guild levels unlock more — one every 5 levels, up to ${EMOJI_SLOTS_MAX}.`,
+        slots,
+      });
+    }
+
+    // Pre-check for the good message; the @@unique([guildId, name]) violation
+    // below is what actually holds under a race.
+    const clash = await prisma.guildEmoji.findFirst({
+      where: { guildId: id, name: name.value },
+      select: { id: true },
+    });
+    if (clash) {
+      return res.status(409).json({ success: false, message: `:${name.value}: already exists in this guild.` });
+    }
+
+    const created = await prisma.guildEmoji
+      .create({ data: { guildId: id, name: name.value, url: url.value, animated, createdBy: actor } })
+      .catch((e) => {
+        if (e?.code === "P2002") return null; // @@unique([guildId, name])
+        throw e;
+      });
+    if (!created) {
+      return res.status(409).json({ success: false, message: `:${name.value}: already exists in this guild.` });
+    }
+
+    // Re-counted rather than used + 1: under a race the increment would be a
+    // guess, and this number is what the meter draws.
+    const after = await emojiCapacity(id, guild.xp);
+    return res.status(201).json({ success: true, data: { emoji: shapeEmoji(created), slots: after } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ── DELETE /api/guilds/:id/emojis/:emojiId ──────────────────────────────────
+// Same gate as create. The delete keeps the guildId condition on the
+// destructive half — an emoji id from ANOTHER guild matches zero rows and
+// answers 404, so this can never reach across a guild wall — and a
+// double-click's second request 404s instead of throwing P2025.
+
+export const deleteEmoji = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const actor = getActorId(req);
+    if (!actor) {
+      return res.status(401).json({ success: false, message: "Sign in again to do that." });
+    }
+    const id = req.params.id as string;
+    const emojiId = req.params.emojiId as string;
+
+    const guild = await prisma.guild.findUnique({ where: { id } });
+    if (!guild) return res.status(404).json({ success: false, message: "Guild not found." });
+    const perms = await actorPermsFor(guild, actor);
+    if (!perms.editGuild) {
+      return res.status(403).json({ success: false, message: "You don't have permission to manage this guild's emoji." });
+    }
+
+    const gone = await prisma.guildEmoji.deleteMany({ where: { id: emojiId, guildId: id } });
+    if (gone.count === 0) {
+      return res.status(404).json({ success: false, message: "Emoji not found." });
+    }
+
+    const slots = await emojiCapacity(id, guild.xp);
+    res.json({ success: true, data: { deleted: emojiId, slots } });
   } catch (error) {
     next(error);
   }

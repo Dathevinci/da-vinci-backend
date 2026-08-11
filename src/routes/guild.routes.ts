@@ -4,6 +4,7 @@ import {
   transferLeadership, kickMember, setCoLeader, updateGuild, disbandGuild,
   createLoan, endLoan, myLoans, guildOfUser,
   createRole, updateRole, deleteRole, assignRole,
+  listEmojis, createEmoji, deleteEmoji,
   inviteMember, listInvites, revokeInvite, myInvites, acceptInvite, declineInvite,
   donateShards, purchaseUpgrade,
 } from "../controllers/guild.controller";
@@ -40,6 +41,19 @@ router.post("/:id/roles", createRole);
 router.patch("/:id/roles/:roleId", updateRole);
 router.delete("/:id/roles/:roleId", deleteRole);
 router.post("/:id/members/:targetId/role", assignRole);
+// Custom emoji. In the /:id family, with a LITERAL second segment ("emojis"),
+// so nothing above can swallow them: "/:id" matches a single segment only, and
+// the /:id/roles and /:id/members families claim different literals. The GET
+// is members-only inside the handler (this is guild-chat art, not a public
+// list); both writes ride the same editGuild gate as PATCH /:id.
+//
+// These live on the MAIN mount, below the global limiter, deliberately: the
+// chat router above the limiter matches only /:id/messages*, and an emoji
+// catalog is fetched once per room open, not polled every 8s — it has no
+// reason to spend the chat budget.
+router.get("/:id/emojis", listEmojis);
+router.post("/:id/emojis", createEmoji);
+router.delete("/:id/emojis/:emojiId", deleteEmoji);
 // The officers' side of invites (send / list / revoke).
 router.post("/:id/invites", inviteMember);
 router.get("/:id/invites", listInvites);

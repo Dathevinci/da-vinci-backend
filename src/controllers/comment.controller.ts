@@ -912,6 +912,15 @@ export const editComment = async (req: Request, res: Response, next: NextFunctio
       }
     });
 
+    // Editing a name IN counts as mentioning them. The composer now offers
+    // @-autocomplete in edit boxes too, so without this the picked name
+    // renders as a live @link that pings nobody — the UI promising a
+    // notification the server never sends. processMentions is non-throwing,
+    // so a failure here cannot undo an edit that already committed.
+    if (typeof content === "string" && content.includes("@")) {
+      await processMentions(content, updatedComment.userId, commentDeepLink(updatedComment));
+    }
+
     res.json({ success: true, data: updatedComment });
   } catch (error) {
     next(error);

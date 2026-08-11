@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs, addXpForWatching, earnPoints, changeUsername } from "../controllers/user.controller";
+import { createUser, getUser, updateUser, deleteUser, getUserByUsername, getAllUsers, followUser, unfollowUser, getUserPointLogs, addXpForWatching, earnPoints, changeUsername, mentionSearch } from "../controllers/user.controller";
 import { getUserActivity, getUserActivityDay } from "../controllers/activity.controller";
 import { getUserNotifications, markNotificationAsRead, markAllAsRead } from "../controllers/notification.controller";
 import { giftItem, purchaseItem, purchaseBundle } from "../controllers/gift.controller";
@@ -8,6 +8,17 @@ import { validateRequest } from "../middleware/validateRequest";
 import { createUserSchema } from "../schemas/watchlist.schema";
 
 const router = Router();
+
+// @-mention autocomplete. LITERAL single-segment path, so it MUST stay above
+// the "/:id" GET further down (line ~30) or Express reads "mention-search" as a
+// user id and answers 404 from getUser. Declared here with the other
+// literal-prefix reads ("/username/...", "/gift", "/purchase") for exactly that
+// reason. Nothing above it can swallow it either: "/username/:username" is two
+// segments and this is one.
+//
+// It also exists to STOP the composers from calling getAllUsers below —
+// autocompleting a name was pulling the entire user table on every mount.
+router.get("/mention-search", mentionSearch);
 
 router.get("/username/:username", getUserByUsername);
 router.get("/", getAllUsers);

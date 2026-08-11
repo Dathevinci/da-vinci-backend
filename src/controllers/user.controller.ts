@@ -475,6 +475,80 @@ export const getAllUsers = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
+// ── Mention autocomplete ────────────────────────────────────────────────────
+// GET /api/users/mention-search?q=<prefix>&limit=<n>   PUBLIC, no auth.
+//
+// This exists to kill a full-table read. The @-mention composers
+// (MentionsTextarea / MentionsInput) used to GET /api/users on mount — the
+// ENTIRE user table, every column, every follower relation, sanitized row by
+// row — just to autocomplete a handful of names. Every composer mount paid for
+// the whole userbase.
+//
+// The answer here is deliberately the THINNEST possible row: id, username,
+// avatar. Nothing else — no xp, no arisePoints, no email, no counts. A
+// dropdown needs a name and a face; anything more is a data leak with a
+// convenient API in front of it. Public because usernames and avatars already
+// render publicly everywhere on the site, and requiring a token would break
+// autocomplete for the logged-out preview.
+const MENTION_LIMIT_DEFAULT = 8;
+const MENTION_LIMIT_MAX = 20;
+const MENTION_Q_MAX = 32;
+
+export const mentionSearch = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // q is TRIMMED and clamped to 32 chars rather than 400'd when it's longer:
+    // a username is at most 20 characters (see changeUsername), so a longer
+    // query simply cannot match anything, and an autocomplete that errors while
+    // someone is mid-word is worse than one that returns []. Characters a
+    // username can't contain are left in on purpose — they naturally match
+    // nothing instead of being silently stripped into a different search.
+    const raw = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    const q = raw.slice(0, MENTION_Q_MAX);
+
+    const rawLimit = Number(req.query.limit);
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(Math.floor(rawLimit), 1), MENTION_LIMIT_MAX)
+      : MENTION_LIMIT_DEFAULT;
+
+    // ONE findMany, either way. With a prefix it's a case-insensitive
+    // startsWith; with no prefix it's the default set — the most recently
+    // active users — so the dropdown has something to show the instant someone
+    // types "@" and before they've typed a letter. There is no lastActive
+    // column, so `updatedAt` stands in for it: it ticks on every profile save,
+    // points award and xp gain, which is as close to "recently active" as this
+    // schema gets.
+    //
+    // STRICT prefix, not contains. A `contains` OR would need to over-fetch to
+    // stay correct — with take = limit the database could hand back N substring
+    // matches and crowd out the prefix matches the user actually meant — so the
+    // one query stays a pure prefix match and take is exactly the capped limit.
+    const users = await prisma.user.findMany({
+      where: q ? { username: { startsWith: q, mode: "insensitive" } } : undefined,
+      orderBy: q ? { username: "asc" } : { updatedAt: "desc" },
+      take: limit,
+      select: { id: true, username: true, avatar: true },
+    });
+
+    // Exact-prefix matches lead. Alphabetical order already puts "ash" ahead of
+    // "ashley", but collation makes that a promise the database doesn't quite
+    // keep across cases ("Ash" vs "ash"), so the exact hit is pinned to the
+    // front here. This only REORDERS the rows already fetched — at most 20 —
+    // it never changes which rows came back.
+    if (q) {
+      const needle = q.toLowerCase();
+      users.sort((a, b) => {
+        const aExact = a.username.toLowerCase() === needle ? 0 : 1;
+        const bExact = b.username.toLowerCase() === needle ? 0 : 1;
+        return aExact - bExact;
+      });
+    }
+
+    res.json({ success: true, data: users });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const followUser = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { followerId } = req.body; // The user who is doing the following

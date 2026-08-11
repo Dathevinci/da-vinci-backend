@@ -944,3 +944,38 @@ model GuildMessage {
 
   @@index([guildId, createdAt])
 }
+
+// ═══ GUILD CUSTOM EMOJI ════════════════════════════════════════════════════
+// Discord-style :shortcode: emoji, scoped to ONE guild and used in that
+// guild's members-only chat room. NOT global site emoji — the catalog read is
+// members-only for the same reason the messages are.
+//
+// `name` is [a-z0-9_]{2,24}, lowercased on write in the controller, and the
+// unique pair below is what actually enforces one shortcode per guild (the
+// pre-check is a courtesy; P2002 is the wall). It is always written AND
+// rendered as :name:, so a client that can't resolve the image still shows
+// readable text.
+//
+// `url` is a Cloudinary secure_url, host-walled by the SAME checkGuildImage
+// the crest and banner use — this string loads in every member's browser, so
+// an arbitrary host is never accepted.
+//
+// SLOTS ARE A LEVEL REWARD, not a purchase and not a column: capacity is
+// emojiSlots(guildLevel(xp)) = min(25, 5 + floor(level/5)), computed server-
+// side like every other guild number, so it can never drift from the xp that
+// defines it.
+//
+// No FK to Guild — the GuildRole/GuildInvite pattern — so the disband path
+// sweeps emoji explicitly (see disbandOps in guild.controller.ts).
+model GuildEmoji {
+  id        String   @id @default(uuid())
+  guildId   String
+  name      String   // the shortcode WITHOUT colons — stored lowercase
+  url       String
+  animated  Boolean  @default(false) // client hint only (still-frame vs. playing); no server behaviour rides on it
+  createdBy String   // plain string, no FK — the duel pattern
+  createdAt DateTime @default(now())
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}

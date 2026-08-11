@@ -908,6 +908,72 @@ export const raidLeaderboard = async (req: Request, res: Response, next: NextFun
   }
 };
 
+// ── GET /api/raid/guild/:guildId ────────────────────────────────────────────
+
+export const getGuildRaid = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    // Public read for a guild page's boss panel — no auth, and read-only
+    // beyond ensureWeek's own lazy spawn. The guild must EXIST before
+    // ensureWeek runs: ensureWeek spawns an encounter for whatever key it is
+    // given, so a garbage id must 404, never mint a fight. The realm sentinel
+    // is rejected the same way — the realm fight is not a guild's.
+    const guildId = String(req.params.guildId || "");
+    const guild =
+      guildId && guildId !== REALM
+        ? await prisma.guild.findUnique({
+            where: { id: guildId },
+            select: { id: true, name: true, tag: true },
+          })
+        : null;
+    if (!guild) {
+      return res.status(404).json({ success: false, message: "No such guild." });
+    }
+
+    const { week, boss, enc } = await ensureWeek(guild.id);
+    const def = bossBySlug(boss.slug);
+
+    // One groupBy carries both numbers: its row count IS the distinct
+    // attacker count, and its head is the damage ladder — then one findMany
+    // dresses the top 3, the same pattern getRaid's standings use.
+    const per = await prisma.raidAttack.groupBy({
+      by: ["userId"],
+      where: { encounterId: enc.id },
+      _sum: { damage: true },
+      orderBy: { _sum: { damage: "desc" } },
+    });
+    const top = per.slice(0, 3);
+    const users = top.length
+      ? await prisma.user.findMany({
+          where: { id: { in: top.map((t) => t.userId) } },
+          select: { id: true, username: true, avatar: true },
+        })
+      : [];
+    const topDamage = top.map((t) => {
+      const u = users.find((x) => x.id === t.userId);
+      return { username: u?.username || "?", avatar: u?.avatar || null, damage: t._sum.damage || 0 };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        week,
+        guild,
+        boss: {
+          slug: def.slug, name: def.name, series: def.series, art: def.art,
+          gimmickText: def.gimmickText,
+        },
+        hpMax: enc.hpMax,
+        hpLeft: enc.hpLeft,
+        killedAt: enc.killedAt,
+        attackers: per.length,
+        topDamage,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // ── GET /api/raid/history ───────────────────────────────────────────────────
 
 export const raidHistory = async (req: Request, res: Response, next: NextFunction) => {

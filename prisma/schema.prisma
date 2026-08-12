@@ -691,7 +691,27 @@ model NovelBookmark {
   title           String?  // denormalized for profile rendering
   coverImage      String?  // raw source cover URL (proxied client-side via /api/novel-image)
   status          String   @default("READING") // READING, FINISHED, WAITING, INTERESTED, DROPPED
-  lastReadChapter String?  // optional reading-progress pointer (plain string; no FK)
+  // ── LIBRARY MEMBERSHIP ────────────────────────────────────────────────────
+  // WHEN the reader deliberately added this title to their library. This row is
+  // NOT membership on its own: POST /progress creates one for any title whose
+  // chapter you open, so a row can be nothing more than a private "you're on
+  // chapter 41" pointer. Reading one chapter must not publish a title to a
+  // public shelf — `trackedAt` is what separates the two.
+  //
+  // NULL DOES NOT SIMPLY MEAN "not tracked". Every row that existed before this
+  // column did was created by a genuine add, and they all have NULL. Reading
+  // NULL as "not tracked" would silently empty every existing library shelf, so
+  // read sites MUST go through src/lib/bookmarkTracking.ts — never test this
+  // column bare. That helper is the single definition of the rule.
+  trackedAt       DateTime?
+  lastReadChapter String?  // legacy pointer, never written — superseded by lastChapterId
+  // ── Cross-device reading progress ──────────────────────────────────────────
+  // WHICH chapter the reader is on, so progress follows the account instead of
+  // living only in one browser's localStorage. lastReadAt is the last-write-wins
+  // clock the client reconciles against: server wins when it is NEWER, local
+  // wins when the server has nothing or is older.
+  lastChapterId   String?  // source chapter id (opaque; used verbatim in the URL)
+  lastReadAt      DateTime?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -707,6 +727,18 @@ model ManhwaBookmark {
   title      String
   coverImage String?
   status     String   @default("READING") // READING, COMPLETED, ON_HOLD, DROPPED, PLAN_TO_READ
+  // ── LIBRARY MEMBERSHIP ──────────────────────────────────────────────────
+  // See NovelBookmark.trackedAt for the full reasoning. Short version: a row
+  // here can be a progress-only pointer created by POST /progress, so the row
+  // is NOT membership — `trackedAt` is. NULL is ambiguous by construction
+  // (every pre-column row is a genuine add and has NULL), so read sites MUST
+  // use src/lib/bookmarkTracking.ts rather than testing this column bare.
+  trackedAt  DateTime?
+  // ── Cross-device reading progress ────────────────────────────────────────
+  // See NovelBookmark: WHICH chapter the reader is on, plus the last-write-wins
+  // clock the client reconciles against.
+  lastChapterId String?  // AsuraScans chapter id (opaque; used verbatim in the URL)
+  lastReadAt    DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

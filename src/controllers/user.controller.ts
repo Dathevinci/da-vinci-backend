@@ -11,7 +11,31 @@ import {
 import { sanitizeOwnUser, sanitizePublicUser, sanitizePublicUsers } from "../utils/sanitizeUser";
 import { signToken, getActorId } from "../lib/jwt";
 import { liveShowcase } from "../lib/showcase";
+import { trackedBookmarkFilter } from "../lib/bookmarkTracking";
 import { creditGuildXp } from "../lib/guildXp";
+
+/**
+ * THE PUBLIC SHELF — library titles only.
+ *
+ * A ManhwaBookmark / NovelBookmark row is no longer proof of membership: POST
+ * /api/manhwa-bookmarks/progress creates one for any title whose chapter you
+ * open, so including these relations wholesale published a series to every
+ * visitor of your profile the moment you read one chapter of it. These two
+ * filters are what stop that — a progress-only row appears on nobody's shelf,
+ * least of all a stranger's view of it.
+ *
+ * The rule is NOT `trackedAt != null`: every row predating that column is a
+ * genuine add and carries NULL. See src/lib/bookmarkTracking.ts — read sites
+ * go through it, never test the column bare.
+ */
+const publicShelfInclude = {
+  watchlist: true,
+  manhwaBookmarks: { where: trackedBookmarkFilter() },
+  novelBookmarks: { where: trackedBookmarkFilter() },
+  likes: true,
+  followers: { include: { follower: true } },
+  following: { include: { following: true } },
+};
 
 // ── Profile audio ──────────────────────────────────────────────────────────
 // One audio URL that plays on a profile. AUDIO ONLY — video is rejected by
@@ -126,14 +150,9 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.params.id as string },
-      include: {
-        watchlist: true,
-        manhwaBookmarks: true,
-        novelBookmarks: true,
-        likes: true,
-        followers: { include: { follower: true } },
-        following: { include: { following: true } }
-      },
+      // sanitizePublicUser — this is a PUBLIC view of an account, so it gets
+      // the library-only shelf, same as the by-username read below.
+      include: publicShelfInclude,
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
     // Drop pins for cards that are no longer this user's — see lib/showcase.ts.
@@ -419,14 +438,9 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
     // an account stored as "Ash", breaking lowercase links and @mentions.
     const user = await prisma.user.findFirst({
       where: { username: { equals: req.params.username as string, mode: "insensitive" } },
-      include: {
-        watchlist: true,
-        manhwaBookmarks: true,
-        novelBookmarks: true,
-        likes: true,
-        followers: { include: { follower: true } },
-        following: { include: { following: true } }
-      },
+      // Library titles only — a progress-only bookmark is a private pointer,
+      // not a shelf entry. See publicShelfInclude.
+      include: publicShelfInclude,
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
@@ -778,6 +792,48 @@ export const earnPoints = async (req: Request, res: Response, next: NextFunction
     // re-read of the same chapter adds nothing on either ledger.
     await creditGuildXp(userId, xp);
     await prisma.pointLog.create({ data: { userId, amount: ap, reason } });
+
+    /**
+     * TELL THEM IT HAPPENED — the manhwa/novel twin of the watchlist-add
+     * notification.
+     *
+     * Adding an ANIME to your list writes a real Notification row
+     * (watchlist.controller.ts addToWatchlist), which is why the bell has
+     * always had something in it for anime users. Every manhwa and novel
+     * library add comes through HERE instead, and here wrote only to the
+     * ledger — so the reading side of the site produced no notifications at
+     * all. The client's toast is not a substitute: it is gone in four
+     * seconds, it is not a record, and it never reaches a second device.
+     *
+     * `track` ONLY. It is a once-per-title event and the per-key dedup above
+     * has already returned for a repeat, so this fires exactly once per title
+     * ever. `read` fires on every chapter and would turn the bell into a
+     * firehose — the same reason addXpForWatching does not notify per episode.
+     *
+     * Linked by USERNAME: `/profile` is not a route in this app (see the note
+     * in watchlist.controller.ts) and every notification that used it 404s.
+     *
+     * A failed notification must never fail a payment that already happened —
+     * the points are banked and logged by this point, so this one write is
+     * allowed to be best-effort rather than taking the whole request down
+     * with it and telling the client nothing was awarded.
+     */
+    if (action === "track") {
+      const kind = key.startsWith("novel:") ? "novel" : "manhwa";
+      await prisma.notification
+        .create({
+          data: {
+            userId,
+            actorId: userId,
+            type: "ARISE_POINTS_LIBRARY",
+            message: `You earned ${ap} Arise Points for adding a ${kind} to your library!`,
+            link: `/user/${encodeURIComponent(user.username)}`,
+          },
+        })
+        .catch((e) => {
+          console.error("Failed to write library-add notification:", e);
+        });
+    }
 
     res.json({ success: true, awarded: true, earned: ap, data: { arisePoints: user.arisePoints, xp: user.xp } });
   } catch (error) {

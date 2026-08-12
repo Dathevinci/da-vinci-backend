@@ -5,21 +5,33 @@ import { prisma } from "../lib/prisma";
  * ACTIVITY HISTORY — the contribution grid on a public profile.
  *
  * NOTHING NEW IS RECORDED HERE. The PointLog ledger already holds one row per
- * episode watched and per chapter read, and every one of those writes is
- * deduped at write time (see addXpForWatching / earnPoints in
- * user.controller.ts — both bail before the insert if a row with the same
- * `reason` exists). That is what makes counting ROWS an honest count of
- * activity rather than a count of clicks: the same episode can never appear
- * twice, so a rewatch adds nothing to the grid the way it adds nothing to the
- * wallet.
+ * episode watched, per chapter read and per series finished, and every one of
+ * those writes is deduped at write time (see addXpForWatching / earnPoints in
+ * user.controller.ts and grantFinishBonus in watchlist.controller.ts — each
+ * bails before the insert if a row with the same `reason` exists). That is what
+ * makes counting ROWS an honest count of activity rather than a count of
+ * clicks: the same episode can never appear twice, so a rewatch adds nothing to
+ * the grid the way it adds nothing to the wallet.
  *
- * WHICH REASONS COUNT — only these two families:
+ * WHICH REASONS COUNT — only these three families:
  *   watch:<anilistId>:<episode>          one episode watched
  *   read:manhwa:<mangaId>:<chapterId>    one manhwa chapter read
  *   read:novel:<novelId>:<chapterId>     one novel chapter read
- * `track:*`, `follow:*`, `comment`, shop spends and the prose reasons
- * ("Updated Banner Image", "Username change to …") are NOT activity and are
- * filtered out in SQL by the startsWith pair, then again by the parser.
+ *   finish:<anilistId>                   one series completed
+ *
+ * `finish:` is here because on this site it is the DOMINANT record of anime
+ * engagement — the per-episode `watch:` rows barely exist outside the accounts
+ * that use the built-in player, while the watchlist writes a finish every time
+ * someone marks a series complete. Counting only watch:/read: rendered the two
+ * heaviest anime watchers on the site (one with 1,121 finished series) as
+ * blank grids.
+ *
+ * `add:*` and `track:*` are deliberately NOT counted. Bookmarking something is
+ * not consuming it, and this graph is a record of what a person actually
+ * watched and read — counting the add would make a list-builder look like a
+ * viewer. `follow:*`, `comment`, shop spends and the prose reasons ("Updated
+ * Banner Image", "Username change to …") are not activity either, and all of it
+ * is filtered out in SQL by the startsWith set, then again by the parser.
  *
  * ⚠ PRIVACY — PointLog is also the MONEY ledger: every row carries an `amount`.
  * These endpoints are public reads, so they must never leak the economy. Two
@@ -60,6 +72,7 @@ const NUMERIC = /^\d+(?:\.\d+)?$/;
 const ACTIVITY_REASON_FILTER = [
   { reason: { startsWith: "watch:" } },
   { reason: { startsWith: "read:" } },
+  { reason: { startsWith: "finish:" } },
 ];
 
 // ── UTC day helpers ────────────────────────────────────────────────────────
@@ -96,6 +109,14 @@ interface ParsedActivity {
   id: string;
   /** Raw last segment — an episode number, a chapter number, or a chapter slug. */
   unit: string | null;
+  /**
+   * True only for `finish:<anilistId>` — a whole series completed, not a unit
+   * consumed. It is what separates a finish from a bare `watch:21` (an episode
+   * whose number was never recorded): both are anime with a null `unit`, and
+   * only this flag says which counter the row belongs in. Every counter below
+   * tests `finish` BEFORE `kind`, so a finish never lands in `episodes`.
+   */
+  finish: boolean;
 }
 
 /**
@@ -131,7 +152,21 @@ export function parseActivityReason(reason: unknown): ParsedActivity | null {
     const { head, tail } = splitLast(reason.slice(6));
     const id = head.trim();
     if (!id) return null; // "watch:" with no anime — unusable, skip
-    return { kind: "anime", id, unit: tail && tail.trim() ? tail.trim() : null };
+    return { kind: "anime", id, unit: tail && tail.trim() ? tail.trim() : null, finish: false };
+  }
+
+  /**
+   * `finish:<anilistId>` — written by grantFinishBonus, one row per anime per
+   * user forever. No splitLast here: the key has exactly one separator and the
+   * whole tail IS the id, so splitting would throw the id away. There is no
+   * unit — you do not finish an episode 12 of something — hence `unit: null`,
+   * which also gives it the series link (`/anime/<id>`) rather than a
+   * per-episode one.
+   */
+  if (reason.startsWith("finish:")) {
+    const id = reason.slice(7).trim();
+    if (!id) return null; // "finish:" with no anime — unusable, skip
+    return { kind: "anime", id, unit: null, finish: true };
   }
 
   if (reason.startsWith("read:")) {
@@ -145,14 +180,16 @@ export function parseActivityReason(reason: unknown): ParsedActivity | null {
     const { head, tail } = splitLast(rest.slice(cut + 1));
     const id = head.trim();
     if (!id) return null;
-    return { kind: source, id, unit: tail && tail.trim() ? tail.trim() : null };
+    return { kind: source, id, unit: tail && tail.trim() ? tail.trim() : null, finish: false };
   }
 
   return null;
 }
 
-/** "Episode 12" / "Chapter 30", or the bare noun when the unit isn't a number. */
+/** "Episode 12" / "Chapter 30" / "Finished", or the bare noun when the unit isn't a number. */
 const unitLabel = (p: ParsedActivity): string => {
+  // Same register as the other two labels: what the row IS, not a sentence.
+  if (p.finish) return "Finished";
   const noun = p.kind === "anime" ? "Episode" : "Chapter";
   if (p.unit && NUMERIC.test(p.unit)) return `${noun} ${Number(p.unit)}`;
   return noun;
@@ -227,17 +264,21 @@ export const getUserActivity = async (req: Request, res: Response, next: NextFun
 
     const truncated = rows.length >= RANGE_ROW_CAP;
 
-    const buckets = new Map<string, { episodes: number; chapters: number }>();
+    const buckets = new Map<string, { episodes: number; chapters: number; finished: number }>();
     for (const row of rows) {
       const parsed = parseActivityReason(row.reason);
       if (!parsed) continue;
       const key = dayKey(row.createdAt);
       let bucket = buckets.get(key);
       if (!bucket) {
-        bucket = { episodes: 0, chapters: 0 };
+        bucket = { episodes: 0, chapters: 0, finished: 0 };
         buckets.set(key, bucket);
       }
-      if (parsed.kind === "anime") bucket.episodes++;
+      // Finishes get their OWN counter, never folded into `episodes` — a
+      // finished series is not an episode watched, and merging them would make
+      // "3 episodes" on the card mean "3 series completed".
+      if (parsed.finish) bucket.finished++;
+      else if (parsed.kind === "anime") bucket.episodes++;
       else bucket.chapters++;
     }
 
@@ -268,12 +309,17 @@ export const getUserActivity = async (req: Request, res: Response, next: NextFun
         date,
         episodes: b.episodes,
         chapters: b.chapters,
-        total: b.episodes + b.chapters,
+        finished: b.finished,
+        // `total` is the sum of ALL THREE and is what the grid's intensity and
+        // both streaks key off. Anything added as a fourth counter later has to
+        // be added here too or that day goes dark on the grid.
+        total: b.episodes + b.chapters + b.finished,
       }));
 
     const episodes = dayList.reduce((n, d) => n + d.episodes, 0);
     const chapters = dayList.reduce((n, d) => n + d.chapters, 0);
-    const items = episodes + chapters;
+    const finished = dayList.reduce((n, d) => n + d.finished, 0);
+    const items = episodes + chapters + finished;
 
     const spanDays = Math.max(
       1,
@@ -312,7 +358,7 @@ export const getUserActivity = async (req: Request, res: Response, next: NextFun
       success: true,
       data: {
         days: dayList,
-        totals: { items, episodes, chapters, dailyAverage, currentStreak, bestStreak },
+        totals: { items, episodes, chapters, finished, dailyAverage, currentStreak, bestStreak },
         // `timezone` is not decoration: it tells the client these keys are
         // already UTC days and must be rendered, not re-derived.
         range: { from, to: todayKey, days: spanDays, timezone: "UTC" },
@@ -366,20 +412,26 @@ export const getUserActivityDay = async (req: Request, res: Response, next: Next
     });
 
     // Counts come from every row; the ITEM list is capped. Newest-first means
-    // the 50 shown are the 50 most recent, and `episodes`/`chapters` still
-    // agree with the same day's numbers in the range endpoint above.
+    // the 50 shown are the 50 most recent, and `episodes`/`chapters`/`finished`
+    // still agree with the same day's numbers in the range endpoint above —
+    // which requires this split to stay identical to the bucketing there.
     let episodes = 0;
     let chapters = 0;
+    let finished = 0;
     const itemRows: ParsedActivity[] = [];
     for (const row of rows) {
       const parsed = parseActivityReason(row.reason);
       if (!parsed) continue;
-      if (parsed.kind === "anime") episodes++;
+      if (parsed.finish) finished++;
+      else if (parsed.kind === "anime") episodes++;
       else chapters++;
       if (itemRows.length < DAY_ITEM_CAP) itemRows.push(parsed);
     }
 
-    // Ids only for what is actually rendered.
+    // Ids only for what is actually rendered. Finishes are `kind: "anime"`, so
+    // they resolve through THIS list and the one watchlist query below — the
+    // batch lookup the watch: path already does. No second query for finishes:
+    // an episode and a finish of the same series share one id here.
     const animeIds = Array.from(
       new Set(
         itemRows
@@ -395,7 +447,10 @@ export const getUserActivityDay = async (req: Request, res: Response, next: Next
 
     // Best-effort resolution from what this user already tracks. Each lookup is
     // skipped when its id list is empty, so a pure-reading day never touches
-    // the watchlist table.
+    // the watchlist table. A miss is not a filter: someone who finished a
+    // series and later deleted it from their list keeps the finish, it just
+    // renders under fallbackTitle — the ledger is the record, the watchlist is
+    // only the prettifier.
     const [watchRows, manhwaRows, novelRows] = await Promise.all([
       animeIds.length
         ? prisma.watchlistItem.findMany({
@@ -448,6 +503,7 @@ export const getUserActivityDay = async (req: Request, res: Response, next: Next
         date,
         episodes,
         chapters,
+        finished,
         items,
         timezone: "UTC",
         // Only if a single day somehow blew past DAY_ROW_CAP rows.

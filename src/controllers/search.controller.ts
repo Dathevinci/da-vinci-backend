@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { searchAnimeData } from "../services/anime.service";
+import { anilistTotals, pageInfoOf } from "../utils/explorePaging";
 
 export const searchAnime = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -26,7 +27,16 @@ export const searchAnime = async (req: Request, res: Response, next: NextFunctio
     }
 
     const { data, cached } = await searchAnimeData(variables);
-    res.json({ success: true, data, source: "AniList", cached });
+    /**
+     * Totals ride ALONGSIDE the existing envelope, never inside `data`.
+     *
+     * `data` is AniList's own payload passed through verbatim, and callers
+     * already read `data.Page.pageInfo` — reshaping it to add totals would
+     * break them for no gain. These are additive top-level fields, absent
+     * whenever AniList didn't report a usable count, which is what lets the
+     * client tell "unknown" apart from "one page".
+     */
+    res.json({ success: true, data, source: "AniList", cached, ...anilistTotals(pageInfoOf(data)) });
   } catch (error) {
     next(error);
   }

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { getAnimeDetails, getAnimeByStatus } from "../services/anime.service";
+import { anilistTotals, pageInfoOf } from "../utils/explorePaging";
 
 export const getDetails = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -24,7 +25,9 @@ export const getByStatus = async (req: Request, res: Response, next: NextFunctio
     }
 
     const { data, cached } = await getAnimeByStatus(status, page);
-    res.json({ success: true, data, source: "AniList", cached });
+    // Browse-by-status runs the same paginated AniList query as search, so it
+    // carries the same pageInfo and gets the same additive totals.
+    res.json({ success: true, data, source: "AniList", cached, ...anilistTotals(pageInfoOf(data)) });
   } catch (error) {
     next(error);
   }

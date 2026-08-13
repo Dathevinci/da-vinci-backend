@@ -36,6 +36,7 @@ import auctionRoutes from "./routes/auction.routes";
 import cardRoutes from "./routes/card.routes";
 import duelRoutes from "./routes/duel.routes";
 import marketRoutes from "./routes/market.routes";
+import proxyRoutes from "./routes/proxy.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -126,6 +127,7 @@ app.use("/api/auctions", auctionRoutes);
 app.use("/api/cards", cardRoutes);
 app.use("/api/duels", duelRoutes);
 app.use("/api/market", marketRoutes);
+app.use("/api/proxy", proxyRoutes);
 
 // Error Handler must be last
 app.use(errorHandler);

@@ -9,7 +9,10 @@ const ALLOWED_IMAGE_HOSTS = [
   "waitst.com",
   "compsci88.com",
   "planeptune.us",
+  "lastation.us",
   "mangasee123.com",
+  "manga4life.com",
+  "weebcentral.com",
   "lowee.us",
   "leanbox.us",
   "epicstream.com",
@@ -26,7 +29,17 @@ function getRefererForHost(hostname: string): string {
   if (hostname.includes("manganato") || hostname.includes("2xstorage") || hostname.includes("waitst")) {
     return "https://www.manganato.gg/";
   }
-  if (hostname.includes("compsci88") || hostname.includes("planeptune") || hostname.includes("mangasee") || hostname.includes("lowee") || hostname.includes("leanbox")) {
+  if (
+    hostname.includes("compsci88") ||
+    hostname.includes("planeptune") ||
+    hostname.includes("lastation") ||
+    hostname.includes("mangasee") ||
+    hostname.includes("manga4life") ||
+    hostname.includes("weebcentral") ||
+    hostname.includes("lowee") ||
+    hostname.includes("leanbox") ||
+    hostname.includes("epicstream")
+  ) {
     return "https://weebcentral.com/";
   }
   if (hostname.includes("vortexscans")) {

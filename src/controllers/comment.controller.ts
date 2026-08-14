@@ -169,22 +169,26 @@ export const getComments = async (req: Request, res: Response, next: NextFunctio
     }
     if (tag && tag !== 'All') where.tag = tag;
 
-    // ── GLOBAL COMMENT FEED ────────────────────────────────────────────────
-    // The mirror of `forum`: only comments that ARE attached to something you
-    // can read or watch. Without this the global feed would also list forum
-    // posts, which now live in their own place — the two views would show each
-    // other's content and neither would mean anything.
+    // ── GLOBAL COMMENT FEED (CHAPTERS ONLY) ───────────────────────────────
+    // Only comments that ARE attached to a specific chapter or episode.
     const globalFeed = req.query.global === 'true';
+    const chaptersOnly = req.query.chaptersOnly === 'true';
     const source = req.query.source as string | undefined; // anime | manhwa | novel
-    if (globalFeed) {
-      if (source === 'anime') where.animeId = { not: null };
-      else if (source === 'manhwa') where.mangaId = { not: null };
-      else if (source === 'novel') where.novelId = { not: null };
-      else {
+    if (globalFeed || chaptersOnly) {
+      if (source === 'anime') {
+        where.animeId = { not: null };
+        where.episodeNo = { not: null };
+      } else if (source === 'manhwa') {
+        where.mangaId = { not: null };
+        where.chapterId = { not: null };
+      } else if (source === 'novel') {
+        where.novelId = { not: null };
+        where.chapterId = { not: null };
+      } else {
         where.OR = [
-          { animeId: { not: null } },
-          { mangaId: { not: null } },
-          { novelId: { not: null } },
+          { AND: [{ animeId: { not: null } }, { episodeNo: { not: null } }] },
+          { AND: [{ mangaId: { not: null } }, { chapterId: { not: null } }] },
+          { AND: [{ novelId: { not: null } }, { chapterId: { not: null } }] },
         ];
       }
     }

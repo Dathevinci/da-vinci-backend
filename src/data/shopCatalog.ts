@@ -53,6 +53,7 @@ export const SHOP_CATALOG: Record<string, CatalogEntry> = {
   // Dimension C-137 — SSS, shipped 2026-08-09. Same price-sync rule.
   effect_portal: { type: "effect", price: 8000 },
   effect_bankai: { type: "effect", price: 16000 },
+  effect_dandadan: { type: "effect", price: 14000 },
   effect_mango: { type: "effect", price: 3800 },
   effect_jungle: { type: "effect", price: 3800 },
   effect_samurai: { type: "effect", price: 3600 },

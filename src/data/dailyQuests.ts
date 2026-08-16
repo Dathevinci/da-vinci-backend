@@ -61,7 +61,7 @@ export const ANCHOR_QUEST: DailyQuest = {
   label: "Daily check-in",
   hint: "Just show up. Claim it and go.",
   target: 1,
-  ap: 5,
+  ap: 12,
   xp: 5,
   match: { kind: "checkin" },
 };
@@ -77,31 +77,38 @@ export const ANCHOR_QUEST: DailyQuest = {
  */
 const POOL: Record<string, DailyQuest[]> = {
   watch: [
-    { id: "watch1", label: "Watch an episode", hint: "Any anime. One episode is enough.", target: 1, ap: 8, xp: 12, match: { kind: "prefix", value: "watch:" } },
-    { id: "watch3", label: "Watch 3 episodes", hint: "Any anime, any series — new episodes only.", target: 3, ap: 15, xp: 30, match: { kind: "prefix", value: "watch:" } },
-    { id: "watch5", label: "Marathon 5 episodes", hint: "A proper sitting. New episodes only.", target: 5, ap: 25, xp: 45, match: { kind: "prefix", value: "watch:" } },
+    { id: "watch1", label: "Watch an episode", hint: "Any anime. One episode is enough.", target: 1, ap: 18, xp: 12, match: { kind: "prefix", value: "watch:" } },
+    { id: "watch3", label: "Watch 3 episodes", hint: "Any anime, any series — new episodes only.", target: 3, ap: 32, xp: 30, match: { kind: "prefix", value: "watch:" } },
+    { id: "watch5", label: "Marathon 5 episodes", hint: "A proper sitting. New episodes only.", target: 5, ap: 55, xp: 45, match: { kind: "prefix", value: "watch:" } },
   ],
   read: [
-    { id: "read3", label: "Read 3 chapters", hint: "Manhwa or light novels both count.", target: 3, ap: 10, xp: 20, match: { kind: "prefix", value: "read:" } },
-    { id: "read5", label: "Read 5 chapters", hint: "Manhwa or light novels both count.", target: 5, ap: 15, xp: 30, match: { kind: "prefix", value: "read:" } },
-    { id: "read10", label: "Binge 10 chapters", hint: "One more chapter. Just one more.", target: 10, ap: 28, xp: 50, match: { kind: "prefix", value: "read:" } },
+    { id: "read3", label: "Read 3 chapters", hint: "Manhwa or light novels both count.", target: 3, ap: 22, xp: 20, match: { kind: "prefix", value: "read:" } },
+    { id: "read5", label: "Read 5 chapters", hint: "Manhwa or light novels both count.", target: 5, ap: 32, xp: 30, match: { kind: "prefix", value: "read:" } },
+    { id: "read10", label: "Binge 10 chapters", hint: "One more chapter. Just one more.", target: 10, ap: 60, xp: 50, match: { kind: "prefix", value: "read:" } },
+    // read keys encode their library (read:manhwa:… / read:novel:…), so these
+    // two are mode-scoped for free — verified in economy.ts readMinutes().
+    { id: "readm4", label: "Read 4 manhwa chapters", hint: "Comics only for this one.", target: 4, ap: 30, xp: 28, match: { kind: "prefix", value: "read:manhwa:" } },
+    { id: "readn3", label: "Read 3 novel chapters", hint: "Prose only for this one.", target: 3, ap: 30, xp: 28, match: { kind: "prefix", value: "read:novel:" } },
   ],
   social: [
-    { id: "comment1", label: "Share a view", hint: "Post once in the community or on any title.", target: 1, ap: 10, xp: 15, match: { kind: "exact", value: COMMENT_REASON } },
-    { id: "comment3", label: "Start 3 conversations", hint: "Three posts anywhere on Da Vinci.", target: 3, ap: 22, xp: 35, match: { kind: "exact", value: COMMENT_REASON } },
-    { id: "track1", label: "Add to your library", hint: "Track a manhwa or novel you're following.", target: 1, ap: 10, xp: 10, match: { kind: "prefix", value: "track:" } },
+    { id: "comment1", label: "Share a view", hint: "Post once in the community or on any title.", target: 1, ap: 20, xp: 15, match: { kind: "exact", value: COMMENT_REASON } },
+    { id: "comment3", label: "Start 3 conversations", hint: "Three posts anywhere on Da Vinci.", target: 3, ap: 45, xp: 35, match: { kind: "exact", value: COMMENT_REASON } },
+    { id: "track1", label: "Add to your library", hint: "Track a manhwa or novel you're following.", target: 1, ap: 25, xp: 10, match: { kind: "prefix", value: "track:" } },
+    // follow pays once per TARGET (follow:<id> is deduped forever), so this
+    // quest asks for a NEW follow — verified in user.controller followReason.
+    { id: "follow1", label: "Follow a member", hint: "Someone whose taste you trust.", target: 1, ap: 22, xp: 12, match: { kind: "prefix", value: "follow:" } },
   ],
   mixed: [
-    { id: "mix5", label: "5 episodes or chapters", hint: "Watching and reading both count toward this.", target: 5, ap: 18, xp: 30, match: { kind: "prefixAny", values: ["watch:", "read:"] } },
-    { id: "mix10", label: "10 episodes or chapters", hint: "Any mix of watching and reading.", target: 10, ap: 30, xp: 55, match: { kind: "prefixAny", values: ["watch:", "read:"] } },
-    { id: "mix3", label: "3 episodes or chapters", hint: "An easy one. Anything counts.", target: 3, ap: 12, xp: 20, match: { kind: "prefixAny", values: ["watch:", "read:"] } },
+    { id: "mix5", label: "5 episodes or chapters", hint: "Watching and reading both count toward this.", target: 5, ap: 38, xp: 30, match: { kind: "prefixAny", values: ["watch:", "read:"] } },
+    { id: "mix10", label: "10 episodes or chapters", hint: "Any mix of watching and reading.", target: 10, ap: 65, xp: 55, match: { kind: "prefixAny", values: ["watch:", "read:"] } },
+    { id: "mix3", label: "3 episodes or chapters", hint: "An easy one. Anything counts.", target: 3, ap: 25, xp: 20, match: { kind: "prefixAny", values: ["watch:", "read:"] } },
   ],
 };
 
 const BUCKET_ORDER = ["watch", "read", "social", "mixed"] as const;
 
 /** Completing every quest on the current board pays this on top. */
-export const ALL_DONE_BONUS = { id: "allclear", ap: 25, xp: 40 };
+export const ALL_DONE_BONUS = { id: "allclear", ap: 60, xp: 40 };
 
 /** Which rotation cycle a given moment falls in. */
 export function cycleIndex(d: Date = new Date()): number {

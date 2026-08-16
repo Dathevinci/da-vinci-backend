@@ -436,13 +436,51 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
     // case-insensitive uniqueness (line ~124), so "Ash" and "ash" can never be
     // two different people — but an exact findUnique still 404'd /user/ash for
     // an account stored as "Ash", breaking lowercase links and @mentions.
-    const user = await prisma.user.findFirst({
-      where: { username: { equals: req.params.username as string, mode: "insensitive" } },
-      // Library titles only — a progress-only bookmark is a private pointer,
-      // not a shelf entry. See publicShelfInclude.
-      include: publicShelfInclude,
-    });
+    //
+    // WHITESPACE-TOLERANT too, via raw SQL, because Prisma cannot trim the
+    // stored column: signup historically stored usernames untrimmed, and an
+    // account saved as "Serena " was unreachable from every link built from
+    // the name people can actually SEE. Signup now trims, but the damaged
+    // rows are real members.
+    const wanted = String(req.params.username ?? "").trim();
+    const idRow = await prisma.$queryRaw<Array<{ id: string; username: string }>>`
+      SELECT "id", "username" FROM "User" WHERE LOWER(TRIM("username")) = LOWER(${wanted}) LIMIT 1
+    `;
+    const user = idRow.length
+      ? await prisma.user.findFirst({
+          where: { id: idRow[0].id },
+          // Library titles only — a progress-only bookmark is a private pointer,
+          // not a shelf entry. See publicShelfInclude.
+          include: publicShelfInclude,
+        })
+      : null;
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
+
+    /**
+     * SELF-HEAL ON VISIT: when the stored username still carries the
+     * whitespace this lookup just saw through, trim it in place — every other
+     * exact-match surface (mentions, guild rosters, old links) starts working
+     * the moment the profile is first opened. Guarded by the same
+     * trim-tolerant uniqueness the signup check uses, so healing can never
+     * collide two accounts; on a conflict the tolerant lookup keeps carrying
+     * the damaged row instead.
+     */
+    if (user.username !== user.username.trim()) {
+      const cleaned = user.username.trim();
+      const taken = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "User" WHERE LOWER(TRIM("username")) = LOWER(${cleaned}) AND "id" <> ${user.id} LIMIT 1
+      `;
+      if (taken.length === 0) {
+        await prisma.user
+          .update({ where: { id: user.id }, data: { username: cleaned } })
+          .then(() => {
+            user.username = cleaned;
+          })
+          .catch(() => {
+            /* healing is best-effort; the tolerant lookup still works */
+          });
+      }
+    }
 
     // Privacy Filter
     if (user.isPrivate) {

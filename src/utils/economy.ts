@@ -150,35 +150,22 @@ export function payout(action: EconomyAction): { ap: number; xp: number } {
 /**
  * How much of `want` this user may still be paid today.
  *
- * Derived from the pointLog ledger — no new column, no migration, and it can
- * never drift out of sync with the balance it governs. Only POSITIVE entries
- * count, so spending in the shop doesn't hand back earning headroom.
+ * THE DAILY CAP IS OFF — owner's decision, 2026-08-16: watching and reading
+ * pay in full no matter how much a member grinds in a day. This function is
+ * kept as the single choke-point (both the watch-time award and the
+ * read/track earn route through it) so restoring a cap, if abuse ever forces
+ * one, is this body and nothing else. The per-key dedupe is unaffected and
+ * remains the real anti-farm line — the same chapter still never pays twice.
  *
- * Returns 0 when the cap is already spent; the caller should then award
- * nothing and say so rather than silently paying less than it logged.
+ * DAILY_AP_CAP and the ledger-summing implementation this replaced live in
+ * git history at this file, should the cap return.
  */
 export async function remainingDailyAp(
-  prisma: { pointLog: { aggregate: Function } },
-  userId: string,
+  _prisma: { pointLog: { aggregate: Function } },
+  _userId: string,
   want: number
 ): Promise<number> {
-  const since = new Date();
-  since.setUTCHours(0, 0, 0, 0);
-  const agg = await prisma.pointLog.aggregate({
-    // Only CONTENT earnings count toward the grind cap. Auction refunds land in
-    // the ledger as positive entries too (points coming back to your wallet
-    // when you're outbid), and counting those as "earned today" would let a
-    // bidding war silently eat your ability to earn from watching.
-    where: {
-      userId,
-      amount: { gt: 0 },
-      createdAt: { gte: since },
-      NOT: { reason: { startsWith: "auction" } },
-    },
-    _sum: { amount: true },
-  });
-  const earnedToday = (agg?._sum?.amount as number) || 0;
-  return Math.max(0, Math.min(want, DAILY_AP_CAP - earnedToday));
+  return Math.max(0, want);
 }
 
 // ── Watch TIME ─────────────────────────────────────────────────────────────

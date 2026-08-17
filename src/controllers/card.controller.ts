@@ -987,7 +987,7 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
     const userId = req.params.userId as string;
     const u = await prisma.user.findUnique({
       where: { id: userId },
-      select: { claimedSets: true, cardTitle: true, equippedTitles: true },
+      select: { username: true, claimedSets: true, cardTitle: true, equippedTitles: true },
     });
     if (!u) return res.status(404).json({ success: false, message: "User not found." });
     const owned = (u.claimedSets || [])
@@ -998,7 +998,16 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
     if (u.cardTitle && !owned.some((o) => o.title === u.cardTitle)) {
       owned.push({ set: "", title: u.cardTitle });
     }
-    res.json({ success: true, data: { owned, equipped: u.equippedTitles || [] } });
+    // Custom title for Riv333
+    const isRiv = (u.username || "").toLowerCase() === "riv333";
+    if (isRiv && !owned.some((o) => o.title.toLowerCase() === "bug detective")) {
+      owned.unshift({ set: "Special", title: "Bug Detective" });
+    }
+    let equipped = u.equippedTitles || [];
+    if (isRiv && !equipped.some((t: string) => t.toLowerCase() === "bug detective")) {
+      equipped = ["Bug Detective", ...equipped].slice(0, 3);
+    }
+    res.json({ success: true, data: { username: u.username, owned, equipped } });
   } catch (error) { next(error); }
 };
 
@@ -1012,10 +1021,12 @@ export const setTitles = async (req: Request, res: Response, next: NextFunction)
     if (actor && actor !== userId) {
       return res.status(403).json({ success: false, message: "You can only change your own titles." });
     }
-    const u = await prisma.user.findUnique({ where: { id: userId }, select: { claimedSets: true, cardTitle: true } });
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { username: true, claimedSets: true, cardTitle: true } });
     if (!u) return res.status(404).json({ success: false, message: "User not found." });
     const ownable = new Set((u.claimedSets || []).map((s) => SET_REWARDS[s]?.title).filter(Boolean));
     if (u.cardTitle) ownable.add(u.cardTitle);
+    const isRiv = (u.username || "").toLowerCase() === "riv333";
+    if (isRiv) ownable.add("Bug Detective");
     const chosen = [...new Set((Array.isArray(titles) ? titles : [])
       .filter((t) => typeof t === "string" && ownable.has(t)))].slice(0, 3);
     await prisma.user.update({ where: { id: userId }, data: { equippedTitles: chosen } });

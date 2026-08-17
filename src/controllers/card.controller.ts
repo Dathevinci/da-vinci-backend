@@ -1009,9 +1009,6 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
       owned.unshift({ set: "Staff Exclusive", title: "Lucifer,the fallen angel" });
     }
     let equipped = u.equippedTitles || [];
-    if (isRiv && !equipped.some((t: string) => t.toLowerCase() === "bug detective")) {
-      equipped = ["Bug Detective", ...equipped].slice(0, 3);
-    }
     res.json({ success: true, data: { username: u.username, owned, equipped } });
   } catch (error) { next(error); }
 };
@@ -1036,7 +1033,7 @@ export const setTitles = async (req: Request, res: Response, next: NextFunction)
     if (isLead) ownable.add("Lucifer,the fallen angel");
     const chosen = [...new Set((Array.isArray(titles) ? titles : [])
       .filter((t) => typeof t === "string" && ownable.has(t)))].slice(0, 3);
-    await prisma.user.update({ where: { id: userId }, data: { equippedTitles: chosen } });
+    await prisma.user.update({ where: { id: userId }, data: { equippedTitles: chosen, cardTitle: chosen[0] || null } });
     res.json({ success: true, data: { equipped: chosen } });
   } catch (error) { next(error); }
 };

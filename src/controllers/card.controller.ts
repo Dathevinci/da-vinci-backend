@@ -1003,6 +1003,11 @@ export const getTitles = async (req: Request, res: Response, next: NextFunction)
     if (isRiv && !owned.some((o) => o.title.toLowerCase() === "bug detective")) {
       owned.unshift({ set: "Special", title: "Bug Detective" });
     }
+    // Exclusive title for Lead Dev (Dejavuh)
+    const isLead = (u.username || "").toLowerCase() === "dejavuh" || (u as any).role === "LEAD_DEV";
+    if (isLead && !owned.some((o) => o.title.toLowerCase().includes("lucifer"))) {
+      owned.unshift({ set: "Staff Exclusive", title: "Lucifer,the fallen angel" });
+    }
     let equipped = u.equippedTitles || [];
     if (isRiv && !equipped.some((t: string) => t.toLowerCase() === "bug detective")) {
       equipped = ["Bug Detective", ...equipped].slice(0, 3);
@@ -1021,12 +1026,14 @@ export const setTitles = async (req: Request, res: Response, next: NextFunction)
     if (actor && actor !== userId) {
       return res.status(403).json({ success: false, message: "You can only change your own titles." });
     }
-    const u = await prisma.user.findUnique({ where: { id: userId }, select: { username: true, claimedSets: true, cardTitle: true } });
+    const u = await prisma.user.findUnique({ where: { id: userId }, select: { username: true, claimedSets: true, cardTitle: true, role: true } });
     if (!u) return res.status(404).json({ success: false, message: "User not found." });
     const ownable = new Set((u.claimedSets || []).map((s) => SET_REWARDS[s]?.title).filter(Boolean));
     if (u.cardTitle) ownable.add(u.cardTitle);
     const isRiv = (u.username || "").toLowerCase() === "riv333";
     if (isRiv) ownable.add("Bug Detective");
+    const isLead = (u.username || "").toLowerCase() === "dejavuh" || u.role === "LEAD_DEV";
+    if (isLead) ownable.add("Lucifer,the fallen angel");
     const chosen = [...new Set((Array.isArray(titles) ? titles : [])
       .filter((t) => typeof t === "string" && ownable.has(t)))].slice(0, 3);
     await prisma.user.update({ where: { id: userId }, data: { equippedTitles: chosen } });

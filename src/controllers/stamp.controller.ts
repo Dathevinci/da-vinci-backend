@@ -177,15 +177,34 @@ function gradeFor(score: number): string {
 }
 
 /**
+ * The headroom every stamp has before it has earned anything.
+ *
+ * Without it the system cold-starts locked: boosted is capped at what a stamp
+ * EARNED, so on day one — nobody voted yet, every organic is 0 — the ceiling
+ * was 0 for everyone and Arise Points could not move a single grade. The
+ * feature existed and did nothing, which is exactly how it was reported.
+ *
+ * 25 is deliberately small: it is the B band's floor (10) with room to spare
+ * but nowhere near A (30), so a stamp nobody has ever voted on can be lifted
+ * to "promising" and no further. Everything above that still has to be earned.
+ */
+const BOOST_FLOOR = 25;
+
+/**
  * Fold the earned and the bought halves into a stamp.
  *
- * boosted is capped at max(0, organic): total purchased score can at most
- * DOUBLE what a stamp earned, and a stamp that has earned nothing cannot be
- * bought upward at all. The cap is applied to the summed curve, not per
- * booster, so pooling many wallets doesn't escape it either.
+ * boosted is capped at max(BOOST_FLOOR, organic): purchased score can at most
+ * DOUBLE what a stamp earned once it is earning, and before that it is bounded
+ * by the floor above. The cap applies to the summed curve, not per booster, so
+ * pooling many wallets does not escape it either.
+ *
+ * A NEGATIVE organic still gets the floor rather than zero headroom. That is a
+ * conscious trade: it means a net-downvoted curator can be supported back to a
+ * modest grade, which is a bounded 25 points of forgiveness rather than a way
+ * to buy a reputation.
  */
 function combine(organic: number, boostRaw: number) {
-  const boosted = Math.min(boostRaw, Math.max(0, organic));
+  const boosted = Math.min(boostRaw, Math.max(BOOST_FLOOR, organic));
   const score = organic + boosted;
   return { organic, boosted, score, grade: gradeFor(score) };
 }

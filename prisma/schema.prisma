@@ -88,6 +88,17 @@ model User {
 
   novelBookmarks       NovelBookmark[]
   manhwaBookmarks      ManhwaBookmark[]
+
+  // THE STAMP — one global curation reputation per account. There is no Stamp
+  // row on purpose: grade and score are DERIVED from these four tables on read.
+  // A stored score would drift the moment a vote is flipped, a rec is retired,
+  // or a boost lands during a failed transaction, and a drifted reputation is
+  // worse than a slightly more expensive read.
+  stampRecs            StampRec[]
+  stampVotes           StampVote[]
+  stampOpens           StampRecOpen[]
+  stampBoostsSent      StampBoost[] @relation("stampBoostsSent")
+  stampBoostsReceived  StampBoost[] @relation("stampBoostsReceived")
 }
 
 model Conversation {
@@ -1010,4 +1021,137 @@ model GuildEmoji {
 
   @@unique([guildId, name])
   @@index([guildId])
+}
+
+// ═══ THE STAMP SYSTEM ══════════════════════════════════════════════════════
+// A curation reputation. You put your name on three things; the people who
+// follow you read them; their explicit verdict moves your stamp's grade.
+//
+// There is deliberately NO `Stamp` model. grade/score/organic/boosted are
+// computed from these four tables on every read (see stamp.controller.ts).
+// A denormalised score column would need updating from six different write
+// paths — vote, vote-flip, boost, retire, un-retire, cascade delete — and the
+// first one that missed would leave a member wearing a grade the evidence no
+// longer supports.
+
+/// One recommendation. A member may have at most THREE ACTIVE at a time; the
+/// cap is enforced by the DATABASE, not by a count-then-insert race:
+/// `slot` is 0|1|2 while active and NULL once retired, and Postgres treats
+/// NULLs as distinct in a unique index — so retired rows pile up freely while
+/// the live ones can never exceed three per owner.
+///
+/// Retiring sets retiredAt (and frees the slot). It NEVER deletes: the votes
+/// on a rec keep counting toward the owner's score forever, so a bad call
+/// cannot be laundered by pulling the rec down. It does, however, CLOSE the
+/// rec — the controller refuses new opens and new votes on a retired row,
+/// because a retired rec is listed by no endpoint and so cannot be found and
+/// counter-voted by anyone the owner didn't hand the id to.
+///
+/// title/cover/blurb are denormalised for the GemVote reason — the series
+/// live in external sources (AniList, AsuraScans, the novel sites) and there
+/// is no local row to join against.
+model StampRec {
+  id        String    @id @default(uuid())
+  ownerId   String
+  mediaType String    // "anime" | "manhwa" | "novel"
+  mediaId   String    // source id: AniList id, Asura slug, "nf:<slug>"
+  title     String
+  cover     String?
+  blurb     String?   // the owner's pitch, shown under the seal
+  slot      Int?      // 0|1|2 while active, NULL once retired — see @@unique below
+  createdAt DateTime  @default(now())
+  retiredAt DateTime?
+
+  owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  votes     StampVote[]
+  opens     StampRecOpen[]
+
+  // THE three-active-slots wall. Two simultaneous creates cannot both win.
+  @@unique([ownerId, slot])
+  // The follow feed reads `ownerId IN (...) ORDER BY createdAt DESC`.
+  @@index([ownerId, createdAt])
+  // createRec asks "has this member EVER stamped this title" — retired rows
+  // included, which is what stops retire-and-re-stamp from minting a fresh
+  // vote slate for the same book. Indexed because that lookup runs on every
+  // create and the retired pile is the part that grows without bound.
+  @@index([ownerId, mediaType, mediaId])
+}
+
+/// An explicit thumbs up/down on one recommendation. One row per person per
+/// rec — changing your mind UPDATES it, so the tallies always equal the number
+/// of distinct people who voted (the CommentVote/PollVote rule).
+///
+/// `ownerId` is denormalised from the rec so every score aggregation is a
+/// single groupBy on THIS table with no join — and, just as importantly, so
+/// the sum never has to look at StampRec at all, which is what makes retired
+/// recommendations keep counting for free.
+///
+/// `week` is the ISO week the vote currently sits in (same "2026-W31" format
+/// as GemVote). It is stamped on write and RE-stamped only when the VALUE
+/// actually changes, so the weekly board credits the week the verdict was
+/// really given. Re-stamping it on an unchanged re-vote would let one physical
+/// row be re-credited into a new week forever — the same old votes farming
+/// every Monday's board with no new content.
+model StampVote {
+  id        String   @id @default(uuid())
+  recId     String
+  ownerId   String   // = rec.ownerId, snapshot; a rec never changes hands
+  userId    String   // the voter
+  value     Int      // 1 | -1
+  week      String   // ISO week key, e.g. "2026-W31"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  rec       StampRec @relation(fields: [recId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // One vote per person per rec. This constraint IS the anti-stuffing story,
+  // so it lives here and not only in the upsert.
+  @@unique([recId, userId])
+  @@index([ownerId])
+  @@index([week])
+}
+
+/// THE VOTE GATE. A row here means "this person actually opened that
+/// recommendation". stamp.controller refuses to write a StampVote unless the
+/// matching row exists, which is the anti-brigade guarantee: a raid organised
+/// somewhere else cannot dump verdicts on a rec nobody in it ever clicked.
+/// Idempotent by construction — one row per person per rec, re-opening is a
+/// no-op rather than a second signal.
+model StampRecOpen {
+  id        String   @id @default(uuid())
+  recId     String
+  userId    String
+  createdAt DateTime @default(now())
+
+  rec       StampRec @relation(fields: [recId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([recId, userId])
+  @@index([userId])
+}
+
+/// Arise Points sent to lift someone's stamp — power stones, basically.
+/// Append-only: every send is its own row, so the ledger is auditable and the
+/// per-booster TOTAL (which is what the sqrt curve is applied to) is a sum
+/// over this table rather than a mutable counter that could be double-applied.
+///
+/// The AP is spent, logged to PointLog and recorded here inside ONE
+/// transaction, so a boost can never exist without its payment.
+model StampBoost {
+  id          String   @id @default(uuid())
+  stampUserId String   // whose stamp was lifted
+  boosterId   String   // who paid
+  amount      Int      // Arise Points, always > 0
+  week        String   // ISO week key of the send — the weekly board reads this
+  createdAt   DateTime @default(now())
+
+  stampUser   User     @relation("stampBoostsReceived", fields: [stampUserId], references: [id], onDelete: Cascade)
+  booster     User     @relation("stampBoostsSent", fields: [boosterId], references: [id], onDelete: Cascade)
+
+  // The all-time read groups by (stampUserId, boosterId) to get each booster's
+  // running total before the diminishing-returns curve is applied.
+  @@index([stampUserId, boosterId])
+  @@index([week])
+  @@index([boosterId])
 }

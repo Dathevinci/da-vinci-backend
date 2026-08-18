@@ -4,6 +4,8 @@ import {
   getRankings,
   getEndorsements,
   getFeed,
+  getRecentRecs,
+  getStampersFor,
   createRec,
   retireRec,
   openRec,
@@ -21,6 +23,15 @@ router.get("/rankings", getRankings);
 // visitors too, so no auth middleware belongs on this line.
 router.get("/endorsements", getEndorsements);
 router.get("/feed", getFeed);
+// The two discovery reads. "recent" is a literal segment and would be read as a
+// userId by the wildcard below — the board's exact incident — so it belongs
+// here, above it. "/for/:mediaType/:mediaId" is three segments and could not be
+// swallowed by a one-segment wildcard, but it is registered alongside its twin
+// rather than left below on that reasoning: the next path added under /for
+// might not be, and the rule "literals before the wildcard" is worth more than
+// the exception.
+router.get("/recent", getRecentRecs);
+router.get("/for/:mediaType/:mediaId", getStampersFor);
 
 // Recommendation writes live under /recs so they never collide with /:userId.
 router.post("/recs", createRec);

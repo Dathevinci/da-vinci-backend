@@ -8,27 +8,27 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
-  username  String   @unique
-  email     String   @unique
-  password  String?
-  discordId String?  @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  avatar    String?
-  bannerUrl String?
-  bannerPosition Int  @default(50)   // vertical focus of the cover banner (object-position %, 0=top, 100=bottom)
-  bannerStyle String @default("full") // "full" = full-screen background, "cover" = header strip
-  bio       String?
-  profileSong String?               // one audio URL that plays on the profile (host/format-gated server-side)
-  arisePoints Int      @default(0)   // community currency
-  xp          Int      @default(0)   // drives the profile level (1..100, curve in src/utils/economy.ts), separate from currency
-  usernameChanges Int  @default(0)   // first username change is free, then costs Arise Points
-  role        String   @default("USER") // LEAD_DEV | ADMIN | USER — tied to the account, survives username changes
-  isPrivate   Boolean  @default(false)
-  isAdmin     Boolean  @default(false)
-  theme       String   @default("dark")
-  
+  id              String   @id @default(uuid())
+  username        String   @unique
+  email           String   @unique
+  password        String?
+  discordId       String?  @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  avatar          String?
+  bannerUrl       String?
+  bannerPosition  Int      @default(50) // vertical focus of the cover banner (object-position %, 0=top, 100=bottom)
+  bannerStyle     String   @default("full") // "full" = full-screen background, "cover" = header strip
+  bio             String?
+  profileSong     String? // one audio URL that plays on the profile (host/format-gated server-side)
+  arisePoints     Int      @default(0) // community currency
+  xp              Int      @default(0) // drives the profile level (1..100, curve in src/utils/economy.ts), separate from currency
+  usernameChanges Int      @default(0) // first username change is free, then costs Arise Points
+  role            String   @default("USER") // LEAD_DEV | ADMIN | USER — tied to the account, survives username changes
+  isPrivate       Boolean  @default(false)
+  isAdmin         Boolean  @default(false)
+  theme           String   @default("dark")
+
   purchasedBanners String[] @default([])
   purchasedTags    String[] @default([])
   purchasedRoles   String[] @default([])
@@ -38,67 +38,67 @@ model User {
   purchasedFonts   String[] @default([])
   purchasedFrames  String[] @default([])
 
-  shards           Int      @default(0)  // dust from duplicate cards; crafts/foils/relic packs
-  duelItems        String[] @default([])  // bag of duel consumables; one entry = one charge
-  claimedSets      String[] @default([])  // set names whose completion reward has been paid
-  showcaseCards    String[] @default([])  // up to 3 card ids pinned to the profile
+  shards                Int           @default(0) // dust from duplicate cards; crafts/foils/relic packs
+  duelItems             String[]      @default([]) // bag of duel consumables; one entry = one charge
+  claimedSets           String[]      @default([]) // set names whose completion reward has been paid
+  showcaseCards         String[]      @default([]) // up to 3 card ids pinned to the profile
   // RETIRED — the arena-effect feature was removed. Columns kept rather than
   // dropped: `prisma db push --accept-data-loss` runs on every deploy and a
   // dropped column is gone for good. They are read by nothing and cost
   // nothing. Safe to delete deliberately, later.
-  purchasedArenaEffects String[] @default([])
+  purchasedArenaEffects String[]      @default([])
   activeArenaEffect     String?
-  arenaChestPity        Int      @default(0)
-  arenaChestPityChest   String   @default("")
-  cardTitle        String?                // title earned from completing a set
-  equippedTitles   String[] @default([])  // the titles WORN on the profile, wearer-ordered, max 3
-  cards            UserCard[]
-  cardListings     CardListing[] @relation("CardListings")
+  arenaChestPity        Int           @default(0)
+  arenaChestPityChest   String        @default("")
+  cardTitle             String? // title earned from completing a set
+  equippedTitles        String[]      @default([]) // the titles WORN on the profile, wearer-ordered, max 3
+  cards                 UserCard[]
+  cardListings          CardListing[] @relation("CardListings")
 
-  activeRole       String?
-  activeTag        String?
-  activeEffect     String?
-  activeTheme      String?
-  activeColor      String?
-  activeFont       String?
-  activeFrame      String?
+  activeRole   String?
+  activeTag    String?
+  activeEffect String?
+  activeTheme  String?
+  activeColor  String?
+  activeFont   String?
+  activeFrame  String?
 
-  watchlist    WatchlistItem[]
-  likes        AnimeLike[]
-  followers    Follow[] @relation("followers")
-  following    Follow[] @relation("following")
-  notifications Notification[] @relation("userNotifications")
-  triggeredNotifications Notification[] @relation("actorNotifications")
-  comments     Comment[]
-  commentVotes CommentVote[]
-  ratings        Rating[]
-  commentReports CommentReport[]
-  pollVotes      PollVote[]
-  gemVotes       GemVote[]
-  pointLogs    PointLog[]
-  conversationsAsUser1 Conversation[] @relation("ConversationUser1")
-  conversationsAsUser2 Conversation[] @relation("ConversationUser2")
-  messages             Message[]
-  announcements        Announcement[]
-  announcementLikes    AnnouncementLike[]
-  announcementComments AnnouncementComment[]
+  watchlist              WatchlistItem[]
+  likes                  AnimeLike[]
+  followers              Follow[]              @relation("followers")
+  following              Follow[]              @relation("following")
+  notifications          Notification[]        @relation("userNotifications")
+  triggeredNotifications Notification[]        @relation("actorNotifications")
+  comments               Comment[]
+  commentVotes           CommentVote[]
+  ratings                Rating[]
+  commentReports         CommentReport[]
+  pollVotes              PollVote[]
+  gemVotes               GemVote[]
+  pointLogs              PointLog[]
+  conversationsAsUser1   Conversation[]        @relation("ConversationUser1")
+  conversationsAsUser2   Conversation[]        @relation("ConversationUser2")
+  messages               Message[]
+  announcements          Announcement[]
+  announcementLikes      AnnouncementLike[]
+  announcementComments   AnnouncementComment[]
 
-  createdInvites       InviteCode[] @relation("createdInvites")
-  usedInvite           InviteCode?  @relation("usedInvites")
+  createdInvites InviteCode[] @relation("createdInvites")
+  usedInvite     InviteCode?  @relation("usedInvites")
 
-  novelBookmarks       NovelBookmark[]
-  manhwaBookmarks      ManhwaBookmark[]
+  novelBookmarks  NovelBookmark[]
+  manhwaBookmarks ManhwaBookmark[]
 
   // THE STAMP — one global curation reputation per account. There is no Stamp
   // row on purpose: grade and score are DERIVED from these four tables on read.
   // A stored score would drift the moment a vote is flipped, a rec is retired,
   // or a boost lands during a failed transaction, and a drifted reputation is
   // worse than a slightly more expensive read.
-  stampRecs            StampRec[]
-  stampVotes           StampVote[]
-  stampOpens           StampRecOpen[]
-  stampBoostsSent      StampBoost[] @relation("stampBoostsSent")
-  stampBoostsReceived  StampBoost[] @relation("stampBoostsReceived")
+  stampRecs           StampRec[]
+  stampVotes          StampVote[]
+  stampOpens          StampRecOpen[]
+  stampBoostsSent     StampBoost[]   @relation("stampBoostsSent")
+  stampBoostsReceived StampBoost[]   @relation("stampBoostsReceived")
 }
 
 model Conversation {
@@ -108,9 +108,9 @@ model Conversation {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user1     User      @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
-  user2     User      @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
-  messages  Message[]
+  user1    User      @relation("ConversationUser1", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2    User      @relation("ConversationUser2", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages Message[]
 
   @@unique([user1Id, user2Id])
 }
@@ -123,14 +123,14 @@ model Message {
   isRead         Boolean  @default(false)
   createdAt      DateTime @default(now())
 
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
 }
 
 model Comment {
-  id        String   @id @default(uuid())
-  userId    String
-  animeId   Int?     // Optional: for tying discussions to specific anime
+  id         String  @id @default(uuid())
+  userId     String
+  animeId    Int? // Optional: for tying discussions to specific anime
   animeTitle String? // Denormalized title for rendering in global feed
   // The episode a comment was left on, so the global feed can link back to
   // that exact episode rather than the series. Null on every comment made
@@ -139,40 +139,40 @@ model Comment {
   episodeNo  Int?
 
   // Manhwa support
-  mangaId      String?  // The AsuraScans slug (e.g. 'standard-of-reincarnation')
-  mangaTitle   String?  // Title for global feed rendering
-  chapterId    String?  // The specific chapter ID
-  chapterTitle String?  // e.g. 'Chapter 190'
+  mangaId      String? // The AsuraScans slug (e.g. 'standard-of-reincarnation')
+  mangaTitle   String? // Title for global feed rendering
+  chapterId    String? // The specific chapter ID
+  chapterTitle String? // e.g. 'Chapter 190'
 
   // Novel support (novel-level discussion, NOT per-chapter)
-  novelId      String?  // novel source id, e.g. 'nf:overlord-ln'
-  novelTitle   String?  // Title for global feed rendering
+  novelId    String? // novel source id, e.g. 'nf:overlord-ln'
+  novelTitle String? // Title for global feed rendering
 
   // Guild board — a comment stamped with a guildId lives on that guild's
   // board and nowhere else (the forum and global feeds exclude it). The board
   // RIDES the existing comment machinery: votes, replies, polls, reports all
   // work unchanged. Nullable so every existing comment stays exactly as it is.
-  guildId   String?
+  guildId String?
 
-  parentId  String?  // Optional: references another comment
-  mediaUrl  String?  // Optional: attached image/GIF URL
+  parentId  String? // Optional: references another comment
+  mediaUrl  String? // Optional: attached image/GIF URL
   // Forum fields. A comment with NO anime/manga/novel id and no parent is a
   // standalone forum post; these give it a headline and a topic. Both nullable
   // so every existing comment stays exactly as it is.
-  title     String?  // forum post headline, max 30 chars
-  tag       String?  // General | Discussion | Art | Theory | News | Question | Spoiler | Meme
+  title     String? // forum post headline, max 30 chars
+  tag       String? // General | Discussion | Art | Theory | News | Question | Spoiler | Meme
   content   String
   isPinned  Boolean  @default(false)
   blessed   Boolean  @default(false) // an admin/lead-dev granted this comment a Divine Blessing
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  parent    Comment?      @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies   Comment[]     @relation("CommentReplies")
-  votes     CommentVote[]
-  reports   CommentReport[]
-  poll      Poll?
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent  Comment?        @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies Comment[]       @relation("CommentReplies")
+  votes   CommentVote[]
+  reports CommentReport[]
+  poll    Poll?
 
   @@index([guildId])
 }
@@ -181,17 +181,17 @@ model Comment {
 /// either asks a question or it doesn't. Deleting the post takes the poll,
 /// its options and every vote with it.
 model Poll {
-  id        String   @id @default(uuid())
-  commentId String   @unique
+  id        String    @id @default(uuid())
+  commentId String    @unique
   question  String
   /// null = never closes. Past this moment the server refuses new votes,
   /// so a closed poll is closed for everyone rather than just hidden.
   closesAt  DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
-  comment   Comment      @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  options   PollOption[]
-  votes     PollVote[]
+  comment Comment      @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  options PollOption[]
+  votes   PollVote[]
 }
 
 model PollOption {
@@ -202,8 +202,8 @@ model PollOption {
   /// come back in whatever order the database feels like.
   order  Int
 
-  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  votes  PollVote[]
+  poll  Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  votes PollVote[]
 
   @@index([pollId])
 }
@@ -217,22 +217,22 @@ model PollVote {
   userId    String
   createdAt DateTime @default(now())
 
-  poll      Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
-  option    PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  poll   Poll       @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  option PollOption @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([pollId, userId])
   @@index([optionId])
 }
 
 model CommentVote {
-  id        String   @id @default(uuid())
+  id        String @id @default(uuid())
   commentId String
   userId    String
-  value     Int      // 1 for upvote, -1 for downvote
+  value     Int // 1 for upvote, -1 for downvote
 
-  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([commentId, userId])
 }
@@ -254,14 +254,14 @@ model CommentVote {
 model GemVote {
   id        String   @id @default(uuid())
   userId    String
-  mediaType String   // "manhwa" | "novel"
-  mediaId   String   // source id, e.g. a bare Asura slug or "mdx:<uuid>"
+  mediaType String // "manhwa" | "novel"
+  mediaId   String // source id, e.g. a bare Asura slug or "mdx:<uuid>"
   title     String
   cover     String?
-  week      String   // ISO week key, e.g. "2026-W31"
+  week      String // ISO week key, e.g. "2026-W31"
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // One pick per person per week per mode — changing your mind replaces the
   // pick rather than adding a second. This uniqueness IS the anti-stuffing
@@ -274,11 +274,11 @@ model Rating {
   id        String   @id @default(uuid())
   userId    String
   targetKey String
-  value     Int      // 1..10
+  value     Int // 1..10
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, targetKey])
   @@index([targetKey])
@@ -293,8 +293,8 @@ model CommentReport {
   reason    String?
   createdAt DateTime @default(now())
 
-  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([commentId, userId])
   @@index([commentId])
@@ -312,32 +312,32 @@ model Follow {
 }
 
 model WatchlistItem {
-  id         String   @id @default(uuid())
-  userId     String
-  anilistId  Int
-  title      String
-  coverImage String?
-  genre      String?  // The primary genre of the anime
-  status     String   // "INTERESTED", "WATCHING", "WAITING", "FINISHED", "DROPPED"
-  score      Int?     // 0-10 or 0-100
-  notes      String?
+  id               String    @id @default(uuid())
+  userId           String
+  anilistId        Int
+  title            String
+  coverImage       String?
+  genre            String? // The primary genre of the anime
+  status           String // "INTERESTED", "WATCHING", "WAITING", "FINISHED", "DROPPED"
+  score            Int? // 0-10 or 0-100
+  notes            String?
   // Runtime metadata from AniList, used to compute watch TIME (hours) — which
   // drives both the finish payout and the "Hours Watched" stat on the profile.
   // Nullable: older rows predate this and are backfilled by backfill-runtimes.ts.
-  episodes   Int?     // total episode count
-  duration   Int?     // minutes per episode (~24 for most TV anime)
+  episodes         Int? // total episode count
+  duration         Int? // minutes per episode (~24 for most TV anime)
   // Resume point. Previously this lived ONLY in localStorage, so "Continue
   // watching" showed a bare "CONTINUE" on any device that hadn't played the
   // episode locally, and everything was lost on clearing browser data.
   // All nullable so `prisma db push` applies this additively with no data loss.
-  progressEpisode  Int?      // which episode you're on (1-based)
-  progressSeconds  Int?      // position within that episode
-  progressDuration Int?      // that episode's length, for the % bar
+  progressEpisode  Int? // which episode you're on (1-based)
+  progressSeconds  Int? // position within that episode
+  progressDuration Int? // that episode's length, for the % bar
   progressAt       DateTime? // last time the resume point moved
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, anilistId])
 }
@@ -352,7 +352,7 @@ model AnimeLike {
   coverImage String?
   createdAt  DateTime @default(now())
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, anilistId])
 }
@@ -360,7 +360,7 @@ model AnimeLike {
 model CacheItem {
   id        String   @id @default(uuid())
   key       String   @unique
-  data      String   // JSON string
+  data      String // JSON string
   expiresAt DateTime
   createdAt DateTime @default(now())
 }
@@ -369,14 +369,14 @@ model Notification {
   id        String   @id @default(uuid())
   userId    String
   actorId   String
-  type      String   // e.g., "NEW_FOLLOWER"
+  type      String // e.g., "NEW_FOLLOWER"
   message   String
   isRead    Boolean  @default(false)
-  link      String?  // Optional link to navigate to
+  link      String? // Optional link to navigate to
   createdAt DateTime @default(now())
 
-  user      User     @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
-  actor     User     @relation("actorNotifications", fields: [actorId], references: [id], onDelete: Cascade)
+  user  User @relation("userNotifications", fields: [userId], references: [id], onDelete: Cascade)
+  actor User @relation("actorNotifications", fields: [actorId], references: [id], onDelete: Cascade)
 }
 
 model PointLog {
@@ -386,7 +386,7 @@ model PointLog {
   reason    String
   createdAt DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // This is the site's highest-volume table — every episode, chapter, duel
   // stake, market fee, tip and donation writes a row — and Postgres does NOT
@@ -410,21 +410,21 @@ model PointLog {
 // foil and level are copied onto the listing because they are properties of
 // the specific copies being sold, and the seller may still hold others.
 model CardListing {
-  id        String    @id @default(uuid())
-  sellerId  String
+  id         String    @id @default(uuid())
+  sellerId   String
   sellerName String
-  cardId    String    // id in the server-side card catalog
-  qty       Int       @default(1)
-  foil      Boolean   @default(false)
-  level     Int       @default(1)
-  price     Int       // Arise Points for the WHOLE lot
-  status    String    @default("ACTIVE") // ACTIVE | SOLD | CANCELLED
-  buyerId   String?
-  buyerName String?
-  createdAt DateTime  @default(now())
-  soldAt    DateTime?
+  cardId     String // id in the server-side card catalog
+  qty        Int       @default(1)
+  foil       Boolean   @default(false)
+  level      Int       @default(1)
+  price      Int // Arise Points for the WHOLE lot
+  status     String    @default("ACTIVE") // ACTIVE | SOLD | CANCELLED
+  buyerId    String?
+  buyerName  String?
+  createdAt  DateTime  @default(now())
+  soldAt     DateTime?
 
-  seller    User      @relation("CardListings", fields: [sellerId], references: [id], onDelete: Cascade)
+  seller User @relation("CardListings", fields: [sellerId], references: [id], onDelete: Cascade)
 
   @@index([status, cardId])
   @@index([sellerId, status])
@@ -440,55 +440,55 @@ model CardListing {
 // before this existed has no roll and must keep falling back to the printed
 // stats — a null here means "printed", never "zero".
 model UserCard {
-  id        String   @id @default(uuid())
-  userId    String
-  cardId    String   // id in the server-side card catalog (cardCatalog.ts)
-  count     Int      @default(1)
-  foil      Boolean  @default(false) // shard-bought prestige variant
+  id            String    @id @default(uuid())
+  userId        String
+  cardId        String // id in the server-side card catalog (cardCatalog.ts)
+  count         Int       @default(1)
+  foil          Boolean   @default(false) // shard-bought prestige variant
   // Fell in a duel you LOST. The card is never deleted — it sleeps, and comes
   // back either by spending shards or by pulling another copy from a pack.
-  hibernating Boolean @default(false)
+  hibernating   Boolean   @default(false)
   // Shard-bought power. Levels raise ATK and HP in duels, so a common you
   // actually invested in can outfight a legendary nobody touched.
-  level     Int      @default(1)
+  level         Int       @default(1)
   // Legendary skills level on their OWN shard track, separate from `level`.
   // A card level raises ATK and HP; a skill level raises the one thing that
   // card uniquely does, so a player chooses which to sink shards into rather
   // than having the choice made for them. Meaningless on non-legendaries,
   // which have no skill in the catalog.
-  skillLevel Int     @default(1)
+  skillLevel    Int       @default(1)
   // The per-copy roll, taken once when the copy is pulled. Null = printed
   // stats, which is every copy that predates this and every support and
   // ground card (their printed effect IS the card, so there is nothing to
   // roll). Levels and forge ranks apply ON TOP of these, so a poor roll is
   // something shards can close rather than a permanent loss.
-  rolledHp   Int?
-  rolledAtk  Int?
+  rolledHp      Int?
+  rolledAtk     Int?
   // How many times this copy has been MERGED — a spare of the same rank fed
   // into it, plus shards, to raise its roll permanently. Capped at MERGE_MAX
   // in the catalog. Stored rather than derived because the roll it raises is
   // written straight into rolledHp/rolledAtk: without this counter there is
   // nothing left to say how much of that number was pulled and how much was
   // paid for, and the cap could be walked past forever.
-  merges     Int      @default(0)
+  merges        Int       @default(0)
   // ── Dungeon Dispatch condition ── deliberately separate from `hibernating`
   // (the duel sleep): a card asleep from a lost duel can still raid, and a
   // card dead in a dungeon can still duel. Two modes, two bodies.
   // ── THE FORGE ── flat stat training, bought with shards, deliberately
   // expensive: cost doubles per rank. Separate tracks so a player can shape
   // a card — glass cannon or anvil — instead of only raising the level dial.
-  atkForge   Int     @default(0)     // +1 flat ATK per rank, capped
-  hpForge    Int     @default(0)     // +2 flat HP per rank, capped
-  mythAffix  String?                 // a Mythic copy's rolled stat affix (MYTHIC_AFFIXES key)
-  mythMod    String?                 // a Mythic copy's rolled eruption mod (MYTHIC_MODS key)
+  atkForge      Int       @default(0) // +1 flat ATK per rank, capped
+  hpForge       Int       @default(0) // +2 flat HP per rank, capped
+  mythAffix     String? // a Mythic copy's rolled stat affix (MYTHIC_AFFIXES key)
+  mythMod       String? // a Mythic copy's rolled eruption mod (MYTHIC_MODS key)
   // ── Guild Raid Boss ── a card hurt in a raid RESTS until this timestamp
   // (no heal system exists, so injuries self-expire — a timer, not a flag).
   // Deliberately separate from `hibernating`: duel sleep and raid rest are
   // two modes, two bodies, same as the old dungeon comment above intended.
   raidRestUntil DateTime?
-  createdAt DateTime @default(now())
+  createdAt     DateTime  @default(now())
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, cardId])
   @@index([userId])
@@ -509,11 +509,11 @@ model UserCard {
 // `prisma db push --accept-data-loss` that runs on every deploy.
 model CardPrint {
   id        String   @id @default(uuid())
-  cardId    String   // id in the server-side card catalog (legendaries only)
-  serial    Int      // 1-based, global per cardId, in mint order
-  condition String   // "fresh" | "factory" | "rusted" — see prints.ts
-  userId    String?  // current holder; null while escrowed in a listing
-  listingId String?  // the CardListing holding it while escrowed
+  cardId    String // id in the server-side card catalog (legendaries only)
+  serial    Int // 1-based, global per cardId, in mint order
+  condition String // "fresh" | "factory" | "rusted" — see prints.ts
+  userId    String? // current holder; null while escrowed in a listing
+  listingId String? // the CardListing holding it while escrowed
   createdAt DateTime @default(now())
 
   @@unique([cardId, serial])
@@ -535,25 +535,25 @@ model PrintCounter {
 // Game state lives in `state` as JSON — the rules engine is server-side only,
 // so a client can never invent a result.
 model Duel {
-  id             String   @id @default(uuid())
-  challengerId   String
-  challengerName String
-  opponentId     String
-  opponentName   String
-  stake          Int                       // AP each side puts up
-  status         String   @default("PENDING") // PENDING | ACTIVE | FINISHED | DECLINED | EXPIRED
-  challengerDeck String[] @default([])     // card ids
-  opponentDeck   String[] @default([])
-  state          String?                   // JSON: fighters, hp, items, log
+  id              String    @id @default(uuid())
+  challengerId    String
+  challengerName  String
+  opponentId      String
+  opponentName    String
+  stake           Int // AP each side puts up
+  status          String    @default("PENDING") // PENDING | ACTIVE | FINISHED | DECLINED | EXPIRED
+  challengerDeck  String[]  @default([]) // card ids
+  opponentDeck    String[]  @default([])
+  state           String? // JSON: fighters, hp, items, log
   // RETIRED with the arena-effect feature. Kept, not dropped — see User.
-  challengerArena Boolean @default(false)   // challenger opted in
-  opponentArena   Boolean @default(false)   // opponent opted in
-  arenaEffect     String?                   // the effect actually in play
-  turnUserId     String?
-  winnerId       String?
-  createdAt      DateTime @default(now())
-  expiresAt      DateTime
-  finishedAt     DateTime?
+  challengerArena Boolean   @default(false) // challenger opted in
+  opponentArena   Boolean   @default(false) // opponent opted in
+  arenaEffect     String? // the effect actually in play
+  turnUserId      String?
+  winnerId        String?
+  createdAt       DateTime  @default(now())
+  expiresAt       DateTime
+  finishedAt      DateTime?
 
   @@index([status])
   @@index([challengerId])
@@ -562,12 +562,12 @@ model Duel {
 
 // Ladder standing. Separate from Duel so the leaderboard is one cheap read.
 model DuelRating {
-  userId   String @id
-  username String
-  rating   Int    @default(1000)
-  wins     Int    @default(0)
-  losses   Int    @default(0)
-  streak   Int    @default(0)   // consecutive wins; resets on a loss
+  userId    String   @id
+  username  String
+  rating    Int      @default(1000)
+  wins      Int      @default(0)
+  losses    Int      @default(0)
+  streak    Int      @default(0) // consecutive wins; resets on a loss
   updatedAt DateTime @updatedAt
 
   @@index([rating])
@@ -578,23 +578,23 @@ model DuelRating {
 // out to anyone, so they leave circulation permanently. userIds are stored as
 // plain strings (no FK) so nothing has to change on the User model.
 model Auction {
-  id            String       @id @default(uuid())
-  itemId        String       // shop catalog id, e.g. "effect_outergod"
-  itemType      String       // "effect" | "frame"
-  title         String       // display-name snapshot at listing time
+  id            String    @id @default(uuid())
+  itemId        String // shop catalog id, e.g. "effect_outergod"
+  itemType      String // "effect" | "frame"
+  title         String // display-name snapshot at listing time
   startPrice    Int
-  minIncrement  Int          @default(100)
-  topBid        Int          @default(0)  // 0 = no bids yet
+  minIncrement  Int       @default(100)
+  topBid        Int       @default(0) // 0 = no bids yet
   topBidderId   String?
   topBidderName String?
-  bidCount      Int          @default(0)
-  status        String       @default("ACTIVE") // ACTIVE | SETTLED | CANCELLED
+  bidCount      Int       @default(0)
+  status        String    @default("ACTIVE") // ACTIVE | SETTLED | CANCELLED
   endsAt        DateTime
   settledAt     DateTime?
   winnerId      String?
-  createdAt     DateTime     @default(now())
+  createdAt     DateTime  @default(now())
 
-  bids          AuctionBid[]
+  bids AuctionBid[]
 
   @@index([status, endsAt])
 }
@@ -610,7 +610,7 @@ model AuctionBid {
   amount    Int
   createdAt DateTime @default(now())
 
-  auction   Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  auction Auction @relation(fields: [auctionId], references: [id], onDelete: Cascade)
 
   @@index([auctionId])
 }
@@ -625,9 +625,9 @@ model Announcement {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  likes     AnnouncementLike[]
-  comments  AnnouncementComment[]
+  author   User                  @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  likes    AnnouncementLike[]
+  comments AnnouncementComment[]
 }
 
 model AnnouncementLike {
@@ -636,8 +636,8 @@ model AnnouncementLike {
   userId         String
   createdAt      DateTime @default(now())
 
-  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([announcementId, userId])
 }
@@ -649,8 +649,8 @@ model AnnouncementComment {
   content        String
   createdAt      DateTime @default(now())
 
-  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model InviteCode {
@@ -661,33 +661,33 @@ model InviteCode {
   usedBy    String?  @unique
   createdAt DateTime @default(now())
 
-  creator     User  @relation("createdInvites", fields: [createdBy], references: [id], onDelete: Cascade)
-  usedByUser  User? @relation("usedInvites", fields: [usedBy], references: [id], onDelete: SetNull)
+  creator    User  @relation("createdInvites", fields: [createdBy], references: [id], onDelete: Cascade)
+  usedByUser User? @relation("usedInvites", fields: [usedBy], references: [id], onDelete: SetNull)
 }
 
 model Novel {
-  id          String   @id @default(uuid())
-  title       String
-  synopsis    String
-  author      String
-  coverImage  String?
-  status      String   @default("ONGOING") // ONGOING, COMPLETED, HIATUS
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  title      String
+  synopsis   String
+  author     String
+  coverImage String?
+  status     String   @default("ONGOING") // ONGOING, COMPLETED, HIATUS
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  chapters    Chapter[]
+  chapters Chapter[]
 }
 
 model Chapter {
-  id          String   @id @default(uuid())
-  novelId     String
-  chapterNum  Int
-  title       String
-  content     String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(uuid())
+  novelId    String
+  chapterNum Int
+  title      String
+  content    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  novel       Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  novel Novel @relation(fields: [novelId], references: [id], onDelete: Cascade)
 
   @@unique([novelId, chapterNum])
 }
@@ -696,12 +696,12 @@ model Chapter {
 // ("fmtl:<slug>" for FanMTL, or a bare ReadNovelFull slug) — NOT a Novel row —
 // so this mirrors ManhwaBookmark (denormalized title/cover, no FK to Novel).
 model NovelBookmark {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   userId          String
-  novelId         String   // source slug, e.g. "fmtl:omniscient-readers-viewpoint"
-  title           String?  // denormalized for profile rendering
-  coverImage      String?  // raw source cover URL (proxied client-side via /api/novel-image)
-  status          String   @default("READING") // READING, FINISHED, WAITING, INTERESTED, DROPPED
+  novelId         String // source slug, e.g. "fmtl:omniscient-readers-viewpoint"
+  title           String? // denormalized for profile rendering
+  coverImage      String? // raw source cover URL (proxied client-side via /api/novel-image)
+  status          String    @default("READING") // READING, FINISHED, WAITING, INTERESTED, DROPPED
   // ── LIBRARY MEMBERSHIP ────────────────────────────────────────────────────
   // WHEN the reader deliberately added this title to their library. This row is
   // NOT membership on its own: POST /progress creates one for any title whose
@@ -715,45 +715,45 @@ model NovelBookmark {
   // read sites MUST go through src/lib/bookmarkTracking.ts — never test this
   // column bare. That helper is the single definition of the rule.
   trackedAt       DateTime?
-  lastReadChapter String?  // legacy pointer, never written — superseded by lastChapterId
+  lastReadChapter String? // legacy pointer, never written — superseded by lastChapterId
   // ── Cross-device reading progress ──────────────────────────────────────────
   // WHICH chapter the reader is on, so progress follows the account instead of
   // living only in one browser's localStorage. lastReadAt is the last-write-wins
   // clock the client reconciles against: server wins when it is NEWER, local
   // wins when the server has nothing or is older.
-  lastChapterId   String?  // source chapter id (opaque; used verbatim in the URL)
+  lastChapterId   String? // source chapter id (opaque; used verbatim in the URL)
   lastReadAt      DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, novelId])
 }
 
 model ManhwaBookmark {
-  id         String   @id @default(uuid())
-  userId     String
-  mangaId    String   // The AsuraScans slug
-  title      String
-  coverImage String?
-  status     String   @default("READING") // READING, COMPLETED, ON_HOLD, DROPPED, PLAN_TO_READ
+  id            String    @id @default(uuid())
+  userId        String
+  mangaId       String // The AsuraScans slug
+  title         String
+  coverImage    String?
+  status        String    @default("READING") // READING, COMPLETED, ON_HOLD, DROPPED, PLAN_TO_READ
   // ── LIBRARY MEMBERSHIP ──────────────────────────────────────────────────
   // See NovelBookmark.trackedAt for the full reasoning. Short version: a row
   // here can be a progress-only pointer created by POST /progress, so the row
   // is NOT membership — `trackedAt` is. NULL is ambiguous by construction
   // (every pre-column row is a genuine add and has NULL), so read sites MUST
   // use src/lib/bookmarkTracking.ts rather than testing this column bare.
-  trackedAt  DateTime?
+  trackedAt     DateTime?
   // ── Cross-device reading progress ────────────────────────────────────────
   // See NovelBookmark: WHICH chapter the reader is on, plus the last-write-wins
   // clock the client reconciles against.
-  lastChapterId String?  // AsuraScans chapter id (opaque; used verbatim in the URL)
+  lastChapterId String? // AsuraScans chapter id (opaque; used verbatim in the URL)
   lastReadAt    DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, mangaId])
 }
@@ -764,20 +764,20 @@ model ManhwaBookmark {
 // public total still counts it. matchedUserId is set when we resolved the
 // Da Vinci username from the payment note.
 model Donation {
-  id            String   @id @default(uuid())
-  kofiTxnId     String   @unique
-  type          String   // "Donation" | "Subscription" | "Shop Order"
-  fromName      String   // Ko-fi display name of the payer
-  amount        Float
-  currency      String   @default("GBP")
-  message       String?  // the payer's note (where they put their username)
-  tierName      String?  // membership tier, if any
-  isSubscription Boolean @default(false)
-  isPublic      Boolean  @default(true) // Ko-fi "show me publicly" choice — gates the supporters wall
-  matchedUserId String?  // resolved Da Vinci user, if the note matched one
+  id              String   @id @default(uuid())
+  kofiTxnId       String   @unique
+  type            String // "Donation" | "Subscription" | "Shop Order"
+  fromName        String // Ko-fi display name of the payer
+  amount          Float
+  currency        String   @default("GBP")
+  message         String? // the payer's note (where they put their username)
+  tierName        String? // membership tier, if any
+  isSubscription  Boolean  @default(false)
+  isPublic        Boolean  @default(true) // Ko-fi "show me publicly" choice — gates the supporters wall
+  matchedUserId   String? // resolved Da Vinci user, if the note matched one
   matchedUsername String? // denormalized for the public "recent supporters" feed
-  apGranted     Int      @default(0)
-  createdAt     DateTime @default(now())
+  apGranted       Int      @default(0)
+  createdAt       DateTime @default(now())
 }
 
 // RETIRED with the arena-effect feature. Kept, not dropped — dropping a table
@@ -785,7 +785,7 @@ model Donation {
 model ArenaChestOpen {
   id        String   @id @default(uuid())
   userId    String
-  rollId    String   // client-minted, one per button press
+  rollId    String // client-minted, one per button press
   chestId   String
   effectId  String
   isNew     Boolean  @default(false)
@@ -808,20 +808,20 @@ model ArenaChestOpen {
 model RaidBoss {
   id         String          @id @default(uuid())
   week       String          @unique // gems-style ISO weekKey, e.g. "2026-W33"
-  slug       String          // -> src/data/raidBosses.ts (name/series/gimmick)
+  slug       String // -> src/data/raidBosses.ts (name/series/gimmick)
   createdAt  DateTime        @default(now())
   encounters RaidEncounter[]
 }
 
 model RaidEncounter {
-  id       String    @id @default(uuid())
+  id       String       @id @default(uuid())
   bossId   String
-  guildId  String    @default("realm") // a guild id, or "realm" for the guildless fight
+  guildId  String       @default("realm") // a guild id, or "realm" for the guildless fight
   hpMax    Int
   hpLeft   Int
   killedAt DateTime?
-  rewarded Boolean   @default(false) // settlement idempotency at rollover
-  boss     RaidBoss  @relation(fields: [bossId], references: [id])
+  rewarded Boolean      @default(false) // settlement idempotency at rollover
+  boss     RaidBoss     @relation(fields: [bossId], references: [id])
   attacks  RaidAttack[]
 
   @@unique([bossId, guildId])
@@ -830,9 +830,9 @@ model RaidEncounter {
 model RaidAttack {
   id          String        @id @default(uuid())
   encounterId String
-  userId      String        // plain string, no relation — the duel pattern
-  day         String        // "2026-08-12" UTC; daily caps + fatigue key off this
-  squad       Json          // per-card battle-report lines, replayable evidence
+  userId      String // plain string, no relation — the duel pattern
+  day         String // "2026-08-12" UTC; daily caps + fatigue key off this
+  squad       Json // per-card battle-report lines, replayable evidence
   damage      Int
   isRally     Boolean       @default(false) // the AP-bought third attack
   nonce       String        @unique // client idempotency — replays return the original
@@ -852,56 +852,56 @@ model RaidAttack {
 // the xp that defines it, and the SERVER is the only place that math lives.
 
 model Guild {
-  id          String        @id @default(uuid())
-  name        String        @unique
-  tag         String        @unique
-  description String        @default("")
-  avatar      String?
-  banner      String?       // page background image — same host wall as avatar, enforced in the controller
-  leaderId    String        // plain string, no FK — the duel pattern
+  id             String        @id @default(uuid())
+  name           String        @unique
+  tag            String        @unique
+  description    String        @default("")
+  avatar         String?
+  banner         String? // page background image — same host wall as avatar, enforced in the controller
+  leaderId       String // plain string, no FK — the duel pattern
   // One optional deputy, leader-appointed. Cleared in the SAME transaction
   // whenever its holder leaves, is kicked, or takes the leadership — a stale
   // co-leader id would be a standing power grant to a non-member.
-  coLeaderId  String?
+  coLeaderId     String?
   // TREASURY in SHARDS — a CLOSED LOOP. Fed by raid killing blows, by the
   // guild's cut of member xp, and by members donating their own shards IN.
   // It is only ever SPENT on the guild purchases in guild.controller.ts
   // (GUILD_ECONOMY). There is NO path — none, ever — that moves treasury
   // shards back into a personal balance: nothing comes out. These are
   // GUILD-row shards, separate from any member's personal balance.
-  shards      Int           @default(0)
-  xp          Int           @default(0)
+  shards         Int           @default(0)
+  xp             Int           @default(0)
   // ── Joining ──
-  isPublic    Boolean       @default(true) // false = a pending GuildInvite is REQUIRED to join
-  minLevel    Int           @default(1)    // 1..100 — matches USER_MAX_LEVEL in src/utils/economy.ts
+  isPublic       Boolean       @default(true) // false = a pending GuildInvite is REQUIRED to join
+  minLevel       Int           @default(1) // 1..100 — matches USER_MAX_LEVEL in src/utils/economy.ts
   // ── Bought with treasury shards (see GUILD_ECONOMY) ──
-  purchasedSlots Int        @default(0)    // +5 member slots each, on top of the level curve, hard-capped at 100
-  rolesUnlocked  Boolean    @default(false) // permanent once bought; backfilled true for guilds that already have roles
-  xpBoostUntil   DateTime?  // while in the future, the guild's CUT of member xp is x1.25 (the member's own xp is untouched)
-  createdAt   DateTime      @default(now())
-  members     GuildMember[]
+  purchasedSlots Int           @default(0) // +5 member slots each, on top of the level curve, hard-capped at 100
+  rolesUnlocked  Boolean       @default(false) // permanent once bought; backfilled true for guilds that already have roles
+  xpBoostUntil   DateTime? // while in the future, the guild's CUT of member xp is x1.25 (the member's own xp is untouched)
+  createdAt      DateTime      @default(now())
+  members        GuildMember[]
 }
 
 model GuildMember {
-  id       String   @id @default(uuid())
-  guildId  String
+  id            String   @id @default(uuid())
+  guildId       String
   // ONE guild per user — the whole design leans on this. The unique
   // constraint IS the rule, so a join race can't put someone in two guilds
   // any more than a crafted request can.
-  userId   String   @unique
-  role     String   @default("member") // "leader" | "member"
+  userId        String   @unique
+  role          String   @default("member") // "leader" | "member"
   // One custom role per member (Discord-style), null = plain member. A plain
   // string, no FK — deleteRole clears every holder in the SAME transaction it
   // deletes the role in, and every enforcement site re-resolves the role by
   // id+guildId, so a stale pointer grants nothing.
-  customRoleId String?
+  customRoleId  String?
   // Lifetime xp this member has fed the guild — the same amount that was added
   // to Guild.xp on their behalf, never their personal xp. Contribution is a
   // running total: leaving and rejoining starts a fresh row at 0, which is the
   // honest reading of "what this membership has contributed".
-  xpContributed Int    @default(0)
-  joinedAt DateTime @default(now())
-  guild    Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  xpContributed Int      @default(0)
+  joinedAt      DateTime @default(now())
+  guild         Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
 
   @@index([guildId])
 }
@@ -913,8 +913,8 @@ model GuildMember {
 model GuildInvite {
   id        String   @id @default(uuid())
   guildId   String
-  userId    String   // the invitee
-  invitedBy String   // the officer who sent it
+  userId    String // the invitee
+  invitedBy String // the officer who sent it
   createdAt DateTime @default(now())
 
   // One live invite per person per guild — a second send is a no-op collision,
@@ -952,7 +952,7 @@ model GuildCardLoan {
   guildId    String
   ownerId    String
   borrowerId String
-  cardId     String   // id in the server-side card catalog
+  cardId     String // id in the server-side card catalog
   createdAt  DateTime @default(now())
   expiresAt  DateTime
 
@@ -970,12 +970,12 @@ model GuildCardLoan {
 // createdAt cursor) and the "latest N" first load.
 
 model GuildMessage {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   guildId   String
-  userId    String   // plain string, no FK — the duel pattern
+  userId    String // plain string, no FK — the duel pattern
   content   String?
   mediaUrl  String?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
   // Set the first time the AUTHOR edits their own message (nobody else can);
   // null means untouched since posting. The client renders "(edited)" off it.
   editedAt  DateTime?
@@ -1013,10 +1013,10 @@ model GuildMessage {
 model GuildEmoji {
   id        String   @id @default(uuid())
   guildId   String
-  name      String   // the shortcode WITHOUT colons — stored lowercase
+  name      String // the shortcode WITHOUT colons — stored lowercase
   url       String
   animated  Boolean  @default(false) // client hint only (still-frame vs. playing); no server behaviour rides on it
-  createdBy String   // plain string, no FK — the duel pattern
+  createdBy String // plain string, no FK — the duel pattern
   createdAt DateTime @default(now())
 
   @@unique([guildId, name])
@@ -1053,18 +1053,18 @@ model GuildEmoji {
 model StampRec {
   id        String    @id @default(uuid())
   ownerId   String
-  mediaType String    // "anime" | "manhwa" | "novel"
-  mediaId   String    // source id: AniList id, Asura slug, "nf:<slug>"
+  mediaType String // "anime" | "manhwa" | "novel"
+  mediaId   String // source id: AniList id, Asura slug, "nf:<slug>"
   title     String
   cover     String?
-  blurb     String?   // the owner's pitch, shown under the seal
-  slot      Int?      // 0|1|2 while active, NULL once retired — see @@unique below
+  blurb     String? // the owner's pitch, shown under the seal
+  slot      Int? // 0|1|2 while active, NULL once retired — see @@unique below
   createdAt DateTime  @default(now())
   retiredAt DateTime?
 
-  owner     User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  votes     StampVote[]
-  opens     StampRecOpen[]
+  owner User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  votes StampVote[]
+  opens StampRecOpen[]
 
   // THE three-active-slots wall. Two simultaneous creates cannot both win.
   @@unique([ownerId, slot])
@@ -1075,6 +1075,16 @@ model StampRec {
   // vote slate for the same book. Indexed because that lookup runs on every
   // create and the retired pile is the part that grows without bound.
   @@index([ownerId, mediaType, mediaId])
+  // "Who stamped THIS title" (the detail-page row). ownerId leads the index
+  // above, and this query does not supply it, so that one cannot serve the
+  // lookup — without this the reverse lookup sequentially scans StampRec on
+  // every detail page view.
+  @@index([mediaType, mediaId])
+  // The browse-everything tab: newest-first across ALL members. The keyset
+  // pages on (createdAt, id), and the mode filter needs its own leading
+  // column or a filtered page scans the whole table before narrowing.
+  @@index([createdAt, id])
+  @@index([mediaType, createdAt])
 }
 
 /// An explicit thumbs up/down on one recommendation. One row per person per
@@ -1095,15 +1105,15 @@ model StampRec {
 model StampVote {
   id        String   @id @default(uuid())
   recId     String
-  ownerId   String   // = rec.ownerId, snapshot; a rec never changes hands
-  userId    String   // the voter
-  value     Int      // 1 | -1
-  week      String   // ISO week key, e.g. "2026-W31"
+  ownerId   String // = rec.ownerId, snapshot; a rec never changes hands
+  userId    String // the voter
+  value     Int // 1 | -1
+  week      String // ISO week key, e.g. "2026-W31"
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  rec       StampRec @relation(fields: [recId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rec  StampRec @relation(fields: [recId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // One vote per person per rec. This constraint IS the anti-stuffing story,
   // so it lives here and not only in the upsert.
@@ -1124,8 +1134,8 @@ model StampRecOpen {
   userId    String
   createdAt DateTime @default(now())
 
-  rec       StampRec @relation(fields: [recId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rec  StampRec @relation(fields: [recId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([recId, userId])
   @@index([userId])
@@ -1140,14 +1150,14 @@ model StampRecOpen {
 /// transaction, so a boost can never exist without its payment.
 model StampBoost {
   id          String   @id @default(uuid())
-  stampUserId String   // whose stamp was lifted
-  boosterId   String   // who paid
-  amount      Int      // Arise Points, always > 0
-  week        String   // ISO week key of the send — the weekly board reads this
+  stampUserId String // whose stamp was lifted
+  boosterId   String // who paid
+  amount      Int // Arise Points, always > 0
+  week        String // ISO week key of the send — the weekly board reads this
   createdAt   DateTime @default(now())
 
-  stampUser   User     @relation("stampBoostsReceived", fields: [stampUserId], references: [id], onDelete: Cascade)
-  booster     User     @relation("stampBoostsSent", fields: [boosterId], references: [id], onDelete: Cascade)
+  stampUser User @relation("stampBoostsReceived", fields: [stampUserId], references: [id], onDelete: Cascade)
+  booster   User @relation("stampBoostsSent", fields: [boosterId], references: [id], onDelete: Cascade)
 
   // The all-time read groups by (stampUserId, boosterId) to get each booster's
   // running total before the diminishing-returns curve is applied.

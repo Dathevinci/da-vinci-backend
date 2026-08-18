@@ -67,6 +67,29 @@ const VOTE_FULL_WEIGHT = 5;
 const FEED_LIMIT = 60;
 
 /**
+ * Rows on one page of the site-wide recent feed.
+ *
+ * Fixed by contract at 30 rather than read from a `limit` query param: this is
+ * a public, unauthenticated read over every member's recommendations, and a
+ * caller-chosen page size on such a read is a free lever for turning one
+ * request into a site-wide scan. The client asks for the NEXT page, never for a
+ * bigger one.
+ */
+const RECENT_PAGE = 30;
+
+/**
+ * Ceiling on how many stampers of ONE title are answered at once.
+ *
+ * A title's stamper list is naturally bounded — a member carries MAX_ACTIVE
+ * recommendations and a title is stamped once per member ever — so this is a
+ * runaway guard, not a paging mechanism; there is deliberately no cursor here
+ * because the client draws the whole row of faces at once. If it is ever
+ * reached, see getStampersFor: the cut is by newest, which could drop a podium
+ * curator, so the podium's own copies are merged back in.
+ */
+const STAMPERS_LIMIT = 200;
+
+/**
  * Rows on one weekly board page.
  *
  * A hundred, not the original twenty-five, because the board is the shop window
@@ -657,6 +680,64 @@ async function viewerState(viewer: string | null, recIds: string[]) {
   };
 }
 
+/** A rec read with its owner alongside it — the one shape every list endpoint
+ *  fetches, so the owner never needs a second lookup per row. */
+type RecWithOwner = RecRow & { owner: OwnerRow };
+
+/**
+ * The four scoped reads plus the fold that EVERY list of recommendations needs,
+ * in one place.
+ *
+ * The feed grew this inline; /recent and /for want byte-identical rows, because
+ * the frontend draws all three lists with one RecCard and the seal on a card
+ * has to mean the same thing wherever it appears. Three copies of "tally the
+ * owners, resolve my votes, read the podium, map through toRec" is three
+ * chances for ownerGrade or ownerRank to drift apart, and drift here is
+ * invisible — a wrong grade still renders.
+ *
+ * EVERY QUERY IS SCOPED TO THE IDS ON THIS PAGE, never "ALL": the cost is a
+ * function of the page size, not of the vote table. tallyVotes answers both
+ * halves at once (perRec = this rec's counts, perOwner = its owner's score), so
+ * there is no per-rec and no per-owner lookup anywhere in here.
+ *
+ * `scoreOf` rides along because ordering "best curator first" needs the number
+ * behind the grade, not the letter: a band table repeated at the call site
+ * would be a second copy of gradeFor's thresholds waiting to disagree with it.
+ */
+async function serialiseRecs(recs: RecWithOwner[], viewer: string | null) {
+  const scoreOf = new Map<string, number>();
+  if (recs.length === 0) return { rows: [] as ReturnType<typeof toRec>[], scoreOf };
+
+  const recIds = recs.map((r) => r.id);
+  const ownerIds = Array.from(new Set(recs.map((r) => r.ownerId)));
+
+  const [votes, boosts, mine, podium] = await Promise.all([
+    tallyVotes(ownerIds),
+    tallyBoosts(ownerIds),
+    viewerState(viewer, recIds),
+    wornPodium(),
+  ]);
+
+  const identities = new Map<string, StampIdentity>();
+  for (const id of ownerIds) {
+    const totals = combine(votes.perOwner.get(id) || 0, boosts.get(id) || 0);
+    identities.set(id, { grade: totals.grade, rank: podium.get(id) ?? null });
+    scoreOf.set(id, totals.score);
+  }
+
+  const rows = recs.map((r) =>
+    toRec(
+      r,
+      r.owner,
+      identities.get(r.ownerId) || { grade: gradeFor(0), rank: null },
+      votes.perRec.get(r.id),
+      mine.votes.get(r.id) || 0,
+      mine.opens.has(r.id)
+    )
+  );
+  return { rows, scoreOf };
+}
+
 // ── Endpoints ──────────────────────────────────────────────────────────────
 
 /**
@@ -816,11 +897,9 @@ export const getEndorsements = async (_req: Request, res: Response, next: NextFu
  * GET /api/stamps/feed?userId=<viewer>
  * Active recommendations from everyone the viewer follows, newest first.
  *
- * Constant queries: follows, recs (owners come back on the same read), the
- * owners' vote/boost tallies — which give BOTH each rec's counts and each
- * owner's grade, so the seal needs no second request — the viewer's own
- * vote/open state, and the cached podium. Nothing is looked up per rec and
- * nothing is looked up per owner.
+ * Constant queries: follows, recs (owners come back on the same read), then
+ * serialiseRecs' four scoped reads. Nothing is looked up per rec and nothing is
+ * looked up per owner.
  */
 export const getFeed = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -843,38 +922,192 @@ export const getFeed = async (req: Request, res: Response, next: NextFunction) =
     });
     if (recs.length === 0) return res.json({ success: true, data: [] });
 
-    const recIds = recs.map((r) => r.id);
-    const ownerIds = Array.from(new Set(recs.map((r) => r.ownerId)));
+    // The response stays a BARE ARRAY — this endpoint's shipped contract — even
+    // though the two newer lists wrap their rows in an object. The rows
+    // themselves come from the shared serialiser, so all three carry the same
+    // Rec.
+    const { rows } = await serialiseRecs(recs, viewer);
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    next(error);
+  }
+};
 
-    // Scoped to the owners on this page — never "ALL". The same tally answers
-    // "how did this rec do" (perRec) and "what grade does its owner wear"
-    // (perOwner), which is why there is no separate per-rec groupBy any more.
-    const [votes, boosts, mine, podium] = await Promise.all([
-      tallyVotes(ownerIds),
-      tallyBoosts(ownerIds),
-      viewerState(viewer, recIds),
-      wornPodium(),
-    ]);
+/**
+ * GET /api/stamps/recent?type=<all|anime|manhwa|novel>&cursor=<recId>&viewer=<id>
+ * EVERY member's active recommendations, newest first — the missing half of the
+ * feed.
+ *
+ * Until this existed a recommendation could only be found by visiting one
+ * profile at a time or through /feed, which shows you only the people you
+ * ALREADY follow — so the system's whole discovery loop was closed to anyone
+ * who hadn't already found the curators. This is the open door; /for is the
+ * other direction.
+ *
+ * WHY A KEYSET AND NOT AN OFFSET. New stamps land at the TOP of this ordering
+ * while somebody is scrolling it. With `skip: n` every insert shifts the whole
+ * tail down one, so page two re-serves the last row of page one — the reader
+ * sees a duplicate, and a retire in the same window silently eats a row
+ * instead. The anchor here is a position IN the sort, so inserts above it and
+ * removals below it cannot move it.
+ *
+ * The anchor is resolved by id WITHOUT the retiredAt filter on purpose: if the
+ * rec someone is paging from is retired mid-scroll, it must still locate the
+ * position it used to hold. Treating a vanished anchor as "start over" would
+ * restart an infinite scroll at the top, which reads as duplicated content.
+ */
+export const getRecentRecs = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const viewer = viewerOf(req);
 
-    const identities = new Map<string, StampIdentity>();
-    for (const id of ownerIds) {
-      const totals = combine(votes.perOwner.get(id) || 0, boosts.get(id) || 0);
-      identities.set(id, { grade: totals.grade, rank: podium.get(id) ?? null });
+    // Omitted and "all" mean the same thing. An unrecognised mode is a 400
+    // rather than a silent fall-through to "all": answering a filtered request
+    // with the unfiltered set looks like it worked and is wrong.
+    const type = String(req.query.type || "all").trim() || "all";
+    if (type !== "all" && !MEDIA_TYPES.has(type)) {
+      return res.status(400).json({ success: false, code: "UNKNOWN_MODE", message: "Unknown mode." });
     }
 
-    res.json({
-      success: true,
-      data: recs.map((r) =>
-        toRec(
-          r,
-          r.owner,
-          identities.get(r.ownerId) || { grade: gradeFor(0), rank: null },
-          votes.perRec.get(r.id),
-          mine.votes.get(r.id) || 0,
-          mine.opens.has(r.id)
-        )
-      ),
+    const cursorId = String(req.query.cursor || "").trim();
+    let after: { id: string; createdAt: Date } | null = null;
+    if (cursorId) {
+      const anchor = await prisma.stampRec.findUnique({
+        where: { id: cursorId },
+        select: { id: true, createdAt: true },
+      });
+      /**
+       * Retiring KEEPS the row, so a cursor normally stays resolvable even
+       * when the rec it points at leaves the active three — which is exactly
+       * why the anchor is looked up without the retiredAt filter. But a
+       * curator deleting their ACCOUNT cascades their recs away, so a cursor
+       * can still be stranded mid-scroll. Hence BAD_CURSOR rather than an
+       * assumption the id was forged: the client drops it and re-reads page
+       * one, which is recoverable, instead of being told the read failed.
+       */
+      if (!anchor) {
+        return res
+          .status(400)
+          .json({ success: false, code: "BAD_CURSOR", message: "Unknown cursor." });
+      }
+      after = anchor;
+    }
+
+    // (createdAt, id) is the sort AND the key. createdAt alone is not unique —
+    // two stamps inside the same millisecond would order arbitrarily between
+    // two reads, which is exactly how a keyset drops or repeats a row — so the
+    // id breaks the tie in both the ORDER BY and the comparison below.
+    const rows = await prisma.stampRec.findMany({
+      where: {
+        retiredAt: null,
+        ...(type === "all" ? {} : { mediaType: type }),
+        ...(after
+          ? {
+              OR: [
+                { createdAt: { lt: after.createdAt } },
+                { createdAt: after.createdAt, id: { lt: after.id } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      // One extra row is the "is there more" probe, so the answer costs no
+      // count() over the table.
+      take: RECENT_PAGE + 1,
+      include: { owner: { select: { id: true, username: true, avatar: true } } },
     });
+
+    const page = rows.slice(0, RECENT_PAGE);
+    // null on the last page — the client stops when the cursor stops coming
+    // back, so a short page is never mistaken for the end and vice versa.
+    const nextCursor = rows.length > RECENT_PAGE ? page[page.length - 1].id : null;
+
+    const { rows: recs } = await serialiseRecs(page, viewer);
+    res.json({ success: true, data: { recs, nextCursor } });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/stamps/for/:mediaType/:mediaId?viewer=<id>
+ * WHO STAMPED THIS. Every active recommendation of one title, best curator
+ * first.
+ *
+ * The seal on a cover already answers this for the three podium curators; this
+ * answers it for everyone else, on the title's own page, without anybody having
+ * to guess whose profile to open.
+ *
+ * ORDER: podium seals (rank 1..3) ahead of everyone, then the stronger stamp,
+ * then the newer recommendation. The middle key is the owner's SCORE, not their
+ * grade letter — gradeFor is monotonic in score, so score-descending can never
+ * put a lower grade first, and it additionally settles two curators inside the
+ * same band instead of leaving them to an arbitrary tie.
+ *
+ * :mediaId is NOT decoded here. Express has already run decodeURIComponent on
+ * every route param by the time a handler sees it, so the "nf:slug" the client
+ * sent as "nf%3Aslug" arrives whole; decoding a second time would corrupt any
+ * id whose own text contains a percent sequence.
+ */
+export const getStampersFor = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const viewer = viewerOf(req);
+
+    // The same MEDIA_TYPES wall createRec uses, so a mode that cannot be
+    // stamped cannot be asked about either.
+    const mediaType = String(req.params.mediaType || "");
+    if (!MEDIA_TYPES.has(mediaType)) {
+      return res.status(400).json({ success: false, code: "UNKNOWN_MODE", message: "Unknown mode." });
+    }
+    const mediaId = String(req.params.mediaId || "").trim();
+    if (!mediaId || mediaId.length > MAX_ID) {
+      return res.status(400).json({ success: false, code: "BAD_MEDIA", message: "Bad media id." });
+    }
+
+    // Retired recs are excluded by the rule every other list follows: a pick
+    // that was pulled down has stopped recommending. Newest first, so if the
+    // cap ever bites it takes the oldest.
+    let found: RecWithOwner[] = await prisma.stampRec.findMany({
+      where: { mediaType, mediaId, retiredAt: null },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: STAMPERS_LIMIT,
+      include: { owner: { select: { id: true, username: true, avatar: true } } },
+    });
+
+    if (found.length >= STAMPERS_LIMIT) {
+      // The cap actually bit. A newest-first cut can drop a podium curator who
+      // stamped this title weeks ago, and "best curator first" is the one
+      // ordering promise this endpoint makes — a seal missing from the list
+      // that the cover itself is wearing would be the visible bug. Paid ONLY on
+      // this path: at most three owner ids, and it rides the existing
+      // (ownerId, mediaType, mediaId) index.
+      const podiumIds = Array.from((await wornPodium()).keys());
+      if (podiumIds.length > 0) {
+        const sealed = await prisma.stampRec.findMany({
+          where: { ownerId: { in: podiumIds }, mediaType, mediaId, retiredAt: null },
+          include: { owner: { select: { id: true, username: true, avatar: true } } },
+        });
+        // Merged by rec id, so a curator already inside the cap isn't doubled.
+        const byId = new Map(found.map((r) => [r.id, r]));
+        for (const rec of sealed) byId.set(rec.id, rec);
+        found = Array.from(byId.values());
+      }
+    }
+
+    const { rows, scoreOf } = await serialiseRecs(found, viewer);
+
+    // Unranked sorts as 4 so the podium's three sit ahead of it without a
+    // separate null branch in every comparison.
+    rows.sort(
+      (a, b) =>
+        (a.ownerRank ?? 4) - (b.ownerRank ?? 4) ||
+        (scoreOf.get(b.ownerId) || 0) - (scoreOf.get(a.ownerId) || 0) ||
+        b.createdAt.getTime() - a.createdAt.getTime() ||
+        a.id.localeCompare(b.id)
+    );
+
+    // Empty array, not 404: "nobody has stamped this yet" is a normal answer
+    // about a real title and the client draws a prompt to be the first.
+    res.json({ success: true, data: { stampers: rows } });
   } catch (error) {
     next(error);
   }

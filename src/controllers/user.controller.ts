@@ -88,7 +88,6 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
   try {
     const username = req.body.username?.trim();
     const email = req.body.email?.trim();
-    const inviteCode = req.body.inviteCode?.trim();
 
     // Try to find existing user first (mock login)
     let user = await prisma.user.findFirst({
@@ -109,36 +108,22 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
       return res.status(200).json({ success: true, data: sanitizeOwnUser(user), token: signToken(user.id) });
     }
 
-    // Register new user (requires invite code)
-    if (!inviteCode) {
-      return res.status(403).json({ success: false, requires_invite: true, message: "An invite code is required to join." });
-    }
-
-    const invite = await prisma.inviteCode.findUnique({
-      where: { code: inviteCode.toUpperCase() },
-    });
-
-    if (!invite) {
-      return res.status(400).json({ success: false, message: "Invalid invite code." });
-    }
-    if (invite.isUsed) {
-      return res.status(400).json({ success: false, message: "This invite code has already been used." });
-    }
-
+    /**
+     * REGISTRATION IS OPEN — this is the DISCORD door.
+     *
+     * It used to answer 403 `requires_invite` here, which is what popped the
+     * "enter your invite code" modal after a Discord sign-in. Both doors were
+     * unlocked together on 2026-08-19 (see the note in auth.controller
+     * signup); unlocking only one would just move the wall.
+     *
+     * A brand-new account still arrives with NO password, exactly as before —
+     * Discord is its only key, and the password login path rejects it. That is
+     * unchanged by opening registration.
+     */
     user = await prisma.user.create({
       data: { username, email, avatar: req.body.avatar },
       include: { followers: { include: { follower: true } }, following: { include: { following: true } } }
     });
-    
-    // Mark Invite Code as used
-    await prisma.inviteCode.update({
-      where: { id: invite.id },
-      data: {
-        isUsed: true,
-        usedBy: user.id,
-      },
-    });
-
 
     res.status(201).json({ success: true, data: sanitizeOwnUser(user), token: signToken(user.id) });
   } catch (error: any) {

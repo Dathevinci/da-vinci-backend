@@ -17,23 +17,29 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
      */
     const username = String(req.body.username ?? "").trim();
     const email = String(req.body.email ?? "").trim();
-    const { password, inviteCode } = req.body;
+    const { password } = req.body;
 
-    if (!username || !email || !password || !inviteCode) {
-      return res.status(400).json({ success: false, message: "Username, email, password, and invite code are required." });
+    if (!username || !email || !password) {
+      return res.status(400).json({ success: false, message: "Username, email and password are required." });
     }
 
-    // Validate Invite Code
-    const invite = await prisma.inviteCode.findUnique({
-      where: { code: inviteCode.toUpperCase() },
-    });
-
-    if (!invite) {
-      return res.status(400).json({ success: false, message: "Invalid invite code." });
-    }
-    if (invite.isUsed) {
-      return res.status(400).json({ success: false, message: "This invite code has already been used." });
-    }
+    /**
+     * REGISTRATION IS OPEN. This used to demand a valid, unused InviteCode and
+     * consume it on success — the site was invite-only. The owner opened it to
+     * everyone on 2026-08-19, so the gate is gone from BOTH doors (here and
+     * createUser, which is the Discord path); leaving it on one would let
+     * people in through whichever door still had it unlocked.
+     *
+     * The InviteCode table and /api/invites are intentionally left in place,
+     * dormant: no code reads them for entry any more, and dropping a model is
+     * a destructive migration that would throw away the record of who invited
+     * whom. Re-closing the door means restoring this block, not restoring data.
+     *
+     * NOTE FOR WHOEVER TOUCHES AUTH NEXT: the invite wall was also the de-facto
+     * shield in front of every endpoint that still trusts a client-supplied
+     * userId. Anyone on the internet can hold an account now, so that trust is
+     * exposed to strangers rather than to vetted members.
+     */
 
     /**
      * The username collision check compares TRIMMED-lowercase on BOTH sides,
@@ -66,16 +72,6 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
       },
       include: { followers: { include: { follower: true } }, following: { include: { following: true } } },
     });
-
-    // Mark Invite Code as used
-    await prisma.inviteCode.update({
-      where: { id: invite.id },
-      data: {
-        isUsed: true,
-        usedBy: user.id,
-      },
-    });
-
 
     res.status(201).json({ success: true, data: sanitizeOwnUser(user), token: signToken(user.id) });
   } catch (error) {

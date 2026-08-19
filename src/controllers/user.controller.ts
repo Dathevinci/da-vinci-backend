@@ -497,13 +497,42 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
 // getAllUsers deliberately does NOT filter showcases: nothing renders a
 // showcase from the community list, and doing it there would mean a query per
 // user for no visible gain.
+/**
+ * GET /api/users — the public directory.
+ *
+ * THIS USED TO SHIP THE ENTIRE SOCIAL GRAPH, TWICE. The old include pulled
+ * `followers: { include: { follower: true } }` and the mirrored `following`,
+ * so every follow edge arrived carrying a COMPLETE 42-field user object. On
+ * live data that measured 663 KB and 1.7–2.5s, of which 89% was the graph:
+ * one member who follows 64 people cost 94 KB by themselves, and the payload
+ * grows with the SQUARE of the community, since each new member adds both a
+ * row and an entry inside other people's arrays. Registration is open now, so
+ * that curve is no longer theoretical.
+ *
+ * Not one caller ever read those nested users. The three consumers are:
+ *   · /duels and shop/GiftModal — both map straight to {id, username, avatar}
+ *   · /community — uses `followers` ONLY for its length (the count under a
+ *     name, the "popular" sort, and the optimistic bump on follow/unfollow)
+ * Every `following` read on that page is against `currentUser` from the auth
+ * hook, never against a row from this endpoint.
+ *
+ * So `followers` keeps its ARRAY SHAPE — the optimistic update in
+ * community/page.tsx pushes `{ followerId }` into it and reads `.length`, and
+ * a `_count` would have broken both — but each entry is now just the id it
+ * needs. `following` is dropped outright. Scalars are left untouched rather
+ * than hand-listed in a `select`, because a missing column would silently
+ * blank part of a profile card, and this fix is not worth that risk.
+ *
+ * Same lesson as mentionSearch below: a list endpoint owes the caller exactly
+ * what it renders. If a future page needs the real graph, give it its own
+ * endpoint for one user — don't widen this one back out.
+ */
 export const getAllUsers = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const users = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        followers: { include: { follower: true } },
-        following: { include: { following: true } }
+        followers: { select: { followerId: true } }
       }
     });
     res.json({ success: true, data: sanitizePublicUsers(users) });

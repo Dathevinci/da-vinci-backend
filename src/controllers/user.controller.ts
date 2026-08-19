@@ -28,14 +28,62 @@ import { creditGuildXp } from "../lib/guildXp";
  * genuine add and carries NULL. See src/lib/bookmarkTracking.ts — read sites
  * go through it, never test the column bare.
  */
+/**
+ * THE FIVE FIELDS A FOLLOW ROW ACTUALLY RENDERS.
+ *
+ * These edges used to arrive as `include: { follower: true }` — a COMPLETE
+ * user row per follow. On live data that made followers + following 50 KB of a
+ * 129 KB profile, downloaded on every profile view for a list modal most
+ * visitors never open. FollowListModal reads exactly id, username, avatar,
+ * activeFrame and activeEffect; nothing else was ever displayed.
+ *
+ * The shape is unchanged — still `{ followerId, follower: {...} }` — so no
+ * client code moves. Only the weight goes.
+ */
+const followCardSelect = {
+  id: true,
+  username: true,
+  avatar: true,
+  activeFrame: true,
+  activeEffect: true,
+};
+
+const publicFollowInclude = {
+  followers: { select: { followerId: true, followingId: true, follower: { select: followCardSelect } } },
+  following: { select: { followerId: true, followingId: true, following: { select: followCardSelect } } },
+};
+
+/**
+ * The full public profile: the library shelves AND the follow graph.
+ * Used by the profile page itself, which renders every one of these.
+ */
 const publicShelfInclude = {
   watchlist: true,
   manhwaBookmarks: { where: trackedBookmarkFilter() },
   novelBookmarks: { where: trackedBookmarkFilter() },
   likes: true,
-  followers: { include: { follower: true } },
-  following: { include: { following: true } },
+  ...publicFollowInclude,
 };
+
+/**
+ * THE LIGHT PROFILE — identity without the library.
+ *
+ * Requested with `?light=1`. The watchlist and the two bookmark shelves are
+ * 75 KB of the 129 KB payload and exist to fill the profile page's library
+ * tabs; every OTHER consumer of this endpoint wants a name, a face and a
+ * decoration. The landing page alone fetches six staff profiles to draw six
+ * avatars, which was close to 800 KB of shelves nobody rendered.
+ *
+ * The follow edges stay, because the counts beside a username come from their
+ * length — and they are cheap now.
+ */
+const lightProfileInclude = {
+  ...publicFollowInclude,
+};
+
+/** `?light=1` — callers that want identity, not the library. */
+const wantsLight = (req: Request) =>
+  String((req.query as any)?.light ?? "") === "1";
 
 // ── Profile audio ──────────────────────────────────────────────────────────
 // One audio URL that plays on a profile. AUDIO ONLY — video is rejected by
@@ -136,8 +184,9 @@ export const getUser = async (req: Request, res: Response, next: NextFunction) =
     const user = await prisma.user.findUnique({
       where: { id: req.params.id as string },
       // sanitizePublicUser — this is a PUBLIC view of an account, so it gets
-      // the library-only shelf, same as the by-username read below.
-      include: publicShelfInclude,
+      // the library-only shelf, same as the by-username read below. `?light=1`
+      // drops the shelves for callers that only draw a name and a face.
+      include: wantsLight(req) ? lightProfileInclude : publicShelfInclude,
     });
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
     // Drop pins for cards that are no longer this user's — see lib/showcase.ts.
@@ -435,8 +484,8 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
       ? await prisma.user.findFirst({
           where: { id: idRow[0].id },
           // Library titles only — a progress-only bookmark is a private pointer,
-          // not a shelf entry. See publicShelfInclude.
-          include: publicShelfInclude,
+          // not a shelf entry. See publicShelfInclude. `?light=1` skips them.
+          include: wantsLight(req) ? lightProfileInclude : publicShelfInclude,
         })
       : null;
     if (!user) return res.status(404).json({ success: false, message: "User not found" });
@@ -475,10 +524,23 @@ export const getUserByUsername = async (req: Request, res: Response, next: NextF
       const isMutual = isFollowingThem && theyAreFollowingMe;
 
       if (!isOwner && !isMutual) {
-        user.watchlist = [];
-        user.manhwaBookmarks = [];
-        user.novelBookmarks = [];
-        user.likes = [];
+        /**
+         * The shelves are blanked through a loose handle ON PURPOSE. The
+         * include is now chosen at runtime (`?light=1`), so TypeScript sees
+         * the union of both result shapes and cannot prove `watchlist` exists
+         * on this branch. It does whenever the full profile was requested,
+         * and when the LIGHT one was there is nothing to hide — that payload
+         * never carried a shelf in the first place. Writing through the cast
+         * keeps both paths correct without widening the type everywhere else.
+         *
+         * The fields below the cast are NOT optional: bio, banner and song
+         * exist on every shape and must still be hidden from a stranger.
+         */
+        const shelves = user as unknown as Record<string, unknown>;
+        shelves.watchlist = [];
+        shelves.manhwaBookmarks = [];
+        shelves.novelBookmarks = [];
+        shelves.likes = [];
         user.bio = "This profile is private. You must mutually follow each other to see their bio, banner, and watchlist.";
         user.bannerUrl = null;
         user.profileSong = null; // a private profile's soundtrack is private too
